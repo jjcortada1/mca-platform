@@ -1,0 +1,186 @@
+I want you to refine the current system settings, deal shopping intake, active deals table, funder tiers, and upload template. Do not rebuild the app from scratch. Keep existing backend logic where possible, but improve flexibility and usability.
+
+1. Simplify Bulk Funder Upload Template
+
+The current upload template is too messy.
+
+Make it straightforward and easy to understand.
+
+Required columns should be minimal:
+Funder Name
+Tier(s)
+Submission Method
+Submission Email or Portal URL
+Contact Name
+Contact Phone
+Contact Email
+Notes
+
+Optional advanced columns:
+Minimum Revenue
+Credit Requirement
+Max Positions
+Restricted States
+Restricted Industries
+Supports Reverse Consolidation
+Additional Rules
+
+Rules:
+Template should be downloadable from the app.
+Include clear sample rows.
+Import should validate errors clearly.
+Do not require every restriction/rule field.
+Empty optional fields should be treated as no restriction.
+
+2. Editable Matching Options / Backend Settings
+
+I want the system to be flexible from inside the app.
+
+Add an admin/settings area where I can edit the dropdown and matching options used by deal shopping.
+
+This should include:
+Credit score ranges
+Revenue ranges
+Industries
+Restricted states
+Funder tiers
+Deal types
+Payment types if relevant
+
+Default credit options:
+Above 700
+650–699
+Below 600
+Unknown
+
+Default revenue options:
+Below 25K
+25K–99K
+100K+
+
+These options should not be hardcoded forever. I need to be able to modify them from inside the system later.
+
+3. Deal Shopping Intake Form Redesign
+
+I do not like the current intake form layout.
+
+Change it from a long line layout into a centered square/card-style form.
+
+The form should:
+Be centered
+Use a clean grid layout
+Keep related fields together
+Feel premium and easy to use
+Not waste three quarters of the page
+Show results in a cleaner section after submission
+
+Fields should include:
+Revenue range
+Credit range
+Number of positions
+Industry
+State
+Deal type
+
+4. Editable Industries
+
+Industries should be editable from settings.
+
+I need to be able to:
+Add industry options
+Rename industry options
+Remove industry options
+Mark certain industries as restricted if needed
+
+If industry is “Other,” then industry filtering should be ignored.
+
+5. Active Deals Table Redesign
+
+I do not want to scroll down or click into a deal to see important info.
+
+Active Deals should show all relevant information directly on the row/table.
+
+Visible fields should include:
+Deal name
+Merchant first name
+Merchant last name
+Phone
+Email
+Offer
+Rep
+Status
+Notes
+
+Make the table:
+Easier to scan
+Inline editable where reasonable
+Wide enough / responsive enough to show information
+No hidden important info behind clicking into the deal
+
+6. Funder Tier Management
+
+If this does not already exist, add full tier management.
+
+I need to be able to:
+Add tiers
+Rename tiers
+Remove tiers
+Assign funders to multiple tiers
+Modify tier options from settings/admin
+
+7. Number Formatting Everywhere
+
+Anywhere the user enters money or large numbers, the UI should automatically format commas.
+
+Examples:
+50000 should display as 50,000
+1000000 should display as 1,000,000
+
+This should apply to:
+Revenue
+Funding amount
+Payback
+Fees
+Net to merchant
+Deposits
+Funded board entries
+Offers
+Balances
+Calculator inputs
+Any other money/large-number field
+
+Important:
+Format visually with commas in the UI
+Store clean numeric values in the database
+Do not break calculations
+
+8. General System Flexibility
+
+Overall, I want more control inside the system without needing to change code every time.
+
+Where reasonable, avoid hardcoded dropdowns and rules.
+
+Admin/settings should control:
+Matching ranges
+Credit options
+Revenue options
+Industries
+States
+Tiers
+Commission rules
+Structured submission fields
+
+9. Reverse Calculator
+
+The reverse calculator is good right now. Do not overhaul it unless needed. Just make sure number formatting and MCA assumptions stay correct.
+
+10. After Completing
+
+Give me:
+Files changed
+Features updated
+Any schema/database changes
+Anything I need to run/migrate
+Testing checklist
+
+Do not remove existing working functionality. Focus on making the system more flexible, cleaner, easier to manage, and more usable.
