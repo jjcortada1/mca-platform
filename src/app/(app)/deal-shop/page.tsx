@@ -1,9 +1,9 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Card, CardContent, Badge, PageHeader } from '@/components/ui/primitives';
-import { US_STATES, COMMON_INDUSTRIES, CREDIT_TIER_OPTIONS } from '@/lib/constants';
-import { Send, ChevronDown, ChevronRight, Mail, Phone, MapPin, Ban, FileText, Zap } from 'lucide-react';
+import { Button, Card, CardContent, Badge, PageHeader, Field, MoneyInput } from '@/components/ui/primitives';
+import { US_STATES } from '@/lib/constants';
+import { Send, ChevronDown, ChevronRight, Mail, Phone, MapPin, Ban, FileText, Zap, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { MatchResult } from '@/lib/matching/engine';
 
@@ -20,56 +20,32 @@ interface FunderDetail {
   submissionMethod?: string;
 }
 
-const REVENUE_OPTIONS = [
-  { value: '', label: '— Revenue —' },
-  { value: '0-15000', label: '$0 – $15K' },
-  { value: '15000-25000', label: '$15K – $25K' },
-  { value: '25000-50000', label: '$25K – $50K' },
-  { value: '50000-100000', label: '$50K – $100K' },
-  { value: '100000-250000', label: '$100K – $250K' },
-  { value: '250000-500000', label: '$250K – $500K' },
-  { value: '500000-1000000', label: '$500K – $1M' },
-  { value: '1000000+', label: '$1M+' },
-];
-
-const POSITION_OPTIONS = [
-  { value: '', label: '— Position —' },
-  { value: '0', label: 'Position 0 (no stack)' },
-  { value: '1', label: 'Position 1' },
-  { value: '2', label: 'Position 2' },
-  { value: '3', label: 'Position 3' },
-  { value: '4', label: 'Position 4' },
-  { value: '5+', label: '5+ positions' },
-];
-
-const NSF_OPTIONS = [
-  { value: '', label: '— NSFs —' },
-  { value: '0', label: '0 NSFs' },
-  { value: '1', label: '1 NSF' },
-  { value: '2', label: '2 NSFs' },
-  { value: '3', label: '3 NSFs' },
-  { value: '4', label: '4 NSFs' },
-  { value: '5+', label: '5+ NSFs' },
-];
-
-function revenueMid(range: string): number {
-  if (!range) return 0;
-  if (range.endsWith('+')) return parseInt(range);
-  const [a, b] = range.split('-').map((n) => parseInt(n));
-  return Math.floor((a + b) / 2);
+interface MatchOption {
+  id: string;
+  value: string;
+  label: string;
+  meta: Record<string, unknown> | null;
 }
 
 export default function DealShopPage() {
   const router = useRouter();
-  const [form, setForm] = useState({
-    revenue: '',
-    credit: 'unknown',
-    nsfs: '',
-    position: '',
-    state: 'other',
-    industry: 'other',
-    reverseConsolidation: false,
-  });
+
+  // Editable options loaded from server
+  const [creditRanges, setCreditRanges] = useState<MatchOption[]>([]);
+  const [revenueRanges, setRevenueRanges] = useState<MatchOption[]>([]);
+  const [industries, setIndustries] = useState<MatchOption[]>([]);
+  const [dealTypes, setDealTypes] = useState<MatchOption[]>([]);
+  const [positionOptions, setPositionOptions] = useState<MatchOption[]>([]);
+
+  // Form state
+  const [revenueOption, setRevenueOption] = useState('');
+  const [exactRevenue, setExactRevenue] = useState<number | ''>('');
+  const [creditOption, setCreditOption] = useState('unknown');
+  const [position, setPosition] = useState('');
+  const [industry, setIndustry] = useState('other');
+  const [state, setState] = useState('other');
+  const [dealType, setDealType] = useState('standard_mca');
+
   const [results, setResults] = useState<MatchResponse | null>(null);
   const [funderMap, setFunderMap] = useState<Map<string, FunderDetail>>(new Map());
   const [loading, setLoading] = useState(false);
@@ -77,7 +53,20 @@ export default function DealShopPage() {
   const [activeTier, setActiveTier] = useState<string>('all');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  // Load match options + funder details once
   useEffect(() => {
+    fetch('/api/settings/match-options')
+      .then((r) => r.json())
+      .then((j) => {
+        const grouped = j.data ?? {};
+        setCreditRanges(grouped.credit_range ?? []);
+        setRevenueRanges(grouped.revenue_range ?? []);
+        setIndustries(grouped.industry ?? []);
+        setDealTypes(grouped.deal_type ?? []);
+        setPositionOptions(grouped.position_option ?? []);
+      })
+      .catch(() => {});
+
     fetch('/api/funders')
       .then((r) => r.json())
       .then((j) => {
@@ -89,29 +78,50 @@ export default function DealShopPage() {
       .catch(() => {});
   }, []);
 
+  function getRevenueValue(): number {
+    // Prefer exact entered amount; else mid of selected range
+    if (exactRevenue !== '' && exactRevenue > 0) return exactRevenue;
+    if (!revenueOption) return 0;
+    const opt = revenueRanges.find((r) => r.value === revenueOption);
+    if (!opt) return 0;
+    const min = Number((opt.meta as any)?.minRevenue ?? 0);
+    const max = Number((opt.meta as any)?.maxRevenue ?? min * 2);
+    return max ? Math.floor((min + max) / 2) : min;
+  }
+
+  function getCreditScoreValue(): number | null {
+    const opt = creditRanges.find((r) => r.value === creditOption);
+    if (!opt) return null;
+    const v = (opt.meta as any)?.minScore;
+    return v === undefined || v === null ? null : Number(v);
+  }
+
   async function runMatch() {
-    const missing: string[] = [];
-    if (!form.revenue) missing.push('Revenue');
-    if (!form.position) missing.push('Position');
-    if (form.nsfs === '') missing.push('NSF Count');
-    if (missing.length) {
-      setError('Required: ' + missing.join(', '));
+    setError(null);
+    if (!revenueOption && !exactRevenue) {
+      setError('Pick a revenue range or enter exact monthly revenue.');
+      return;
+    }
+    if (!position) {
+      setError('Pick number of positions.');
       return;
     }
 
-    setError(null);
+    const monthlyRevenue = getRevenueValue();
+    const creditScoreValue = getCreditScoreValue();
+
     setLoading(true);
     try {
       const res = await fetch('/api/deal-shop/match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          monthlyRevenue: revenueMid(form.revenue),
-          creditScore: form.credit,
-          positions: parseInt(form.position) || 0,
-          industry: form.industry,
-          state: form.state,
-          dealType: form.reverseConsolidation ? 'reverse_consolidation' : 'standard_mca',
+          monthlyRevenue,
+          creditScoreValue,
+          positions: parseInt(position) || 0,
+          industry,
+          state,
+          dealType,
         }),
       });
       const json = await res.json();
@@ -129,11 +139,10 @@ export default function DealShopPage() {
   }
 
   function toSubmit() {
-    const params = new URLSearchParams({ shop: '1' });
-    router.push(`/submit?${params.toString()}`);
+    router.push('/submit?shop=1');
   }
 
-  // Group matched + excluded by tier
+  // Group results by tier
   const tierGroups = useMemo(() => {
     if (!results) return [];
     const map = new Map<string, { matched: MatchResult[]; excluded: MatchResult[] }>();
@@ -151,15 +160,10 @@ export default function DealShopPage() {
       if (!map.has(t)) map.set(t, { matched: [], excluded: [] });
       map.get(t)!.excluded.push(e);
     }
-    return Array.from(map.entries())
-      .map(([tier, v]) => ({ tier, ...v }))
-      .sort((a, b) => a.tier.localeCompare(b.tier));
+    return Array.from(map.entries()).map(([tier, v]) => ({ tier, ...v })).sort((a, b) => a.tier.localeCompare(b.tier));
   }, [results, funderMap]);
 
-  const filteredGroups = activeTier === 'all'
-    ? tierGroups
-    : tierGroups.filter((g) => g.tier === activeTier);
-
+  const filteredGroups = activeTier === 'all' ? tierGroups : tierGroups.filter((g) => g.tier === activeTier);
   const totalMatched = results?.matched.length ?? 0;
   const totalExcluded = results?.excluded.length ?? 0;
 
@@ -170,11 +174,23 @@ export default function DealShopPage() {
     setExpanded(next);
   }
 
+  function clearForm() {
+    setRevenueOption('');
+    setExactRevenue('');
+    setCreditOption('unknown');
+    setPosition('');
+    setIndustry('other');
+    setState('other');
+    setDealType('standard_mca');
+    setResults(null);
+    setError(null);
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader
         title="Shop Deals"
-        description="Match a deal profile to qualifying funders. Then send via Submit Deal."
+        description="Match a deal profile to qualifying funders, then submit."
         actions={
           results && totalMatched > 0 ? (
             <Button onClick={toSubmit} className="gap-2">
@@ -185,64 +201,101 @@ export default function DealShopPage() {
         }
       />
 
-      {/* Top filter bar */}
-      <Card>
-        <CardContent className="p-4 space-y-3">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
-            <Select value={form.revenue} onChange={(v) => setForm({ ...form, revenue: v })} options={REVENUE_OPTIONS} />
-            <Select
-              value={form.credit}
-              onChange={(v) => setForm({ ...form, credit: v })}
-              options={[
-                { value: 'unknown', label: '— Credit —' },
-                ...CREDIT_TIER_OPTIONS.filter((o) => o.value !== 'unknown'),
-              ]}
-            />
-            <Select value={form.nsfs} onChange={(v) => setForm({ ...form, nsfs: v })} options={NSF_OPTIONS} />
-            <Select value={form.position} onChange={(v) => setForm({ ...form, position: v })} options={POSITION_OPTIONS} />
-            <Select
-              value={form.state}
-              onChange={(v) => setForm({ ...form, state: v })}
-              options={[
-                { value: 'other', label: '— State —' },
-                ...US_STATES.map((s) => ({ value: s.code, label: `${s.code} · ${s.name}` })),
-              ]}
-            />
-            <Select
-              value={form.industry}
-              onChange={(v) => setForm({ ...form, industry: v })}
-              options={[
-                { value: 'other', label: '— Industry —' },
-                ...COMMON_INDUSTRIES.map((i) => ({ value: i, label: i })),
-              ]}
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-border">
-            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={form.reverseConsolidation}
-                onChange={(e) => setForm({ ...form, reverseConsolidation: e.target.checked })}
-                className="rounded"
-              />
-              <span>Reverse Consolidation</span>
-            </label>
-            <Button onClick={runMatch} loading={loading} className="gap-1.5 px-6">
-              <Zap className="h-4 w-4" />
-              Find Funders
-            </Button>
-          </div>
-
-          {error && (
-            <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded px-3 py-2">
-              {error}
+      {/* Centered intake card */}
+      <div className="max-w-3xl mx-auto w-full">
+        <Card>
+          <CardContent className="p-6 space-y-5">
+            <div className="text-center pb-3 border-b border-border">
+              <div className="inline-flex items-center justify-center h-10 w-10 rounded-full bg-primary/10 mb-2">
+                <Search className="h-5 w-5 text-primary" />
+              </div>
+              <h2 className="text-base font-semibold">Deal Profile</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">All fields shape which funders qualify.</p>
             </div>
-          )}
-        </CardContent>
-      </Card>
 
-      {/* Results */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Revenue */}
+              <Field label="Monthly Revenue (range)" required>
+                <Select value={revenueOption} onChange={setRevenueOption} options={[
+                  { value: '', label: '— Pick a range —' },
+                  ...revenueRanges.map((r) => ({ value: r.value, label: r.label })),
+                ]} />
+              </Field>
+
+              <Field label="Or exact amount" hint="If exact > 0, used instead of range">
+                <MoneyInput value={exactRevenue} onValueChange={setExactRevenue} placeholder="50,000" />
+              </Field>
+
+              {/* Credit */}
+              <Field label="Credit">
+                <Select value={creditOption} onChange={setCreditOption} options={
+                  creditRanges.map((c) => ({ value: c.value, label: c.label }))
+                } />
+              </Field>
+
+              {/* Position */}
+              <Field label="Number of Positions" required>
+                <Select value={position} onChange={setPosition} options={[
+                  { value: '', label: '— Pick —' },
+                  ...positionOptions.map((p) => ({ value: p.value, label: p.label })),
+                ]} />
+              </Field>
+
+              {/* Industry */}
+              <Field label="Industry" hint='Pick "Other" to skip industry filtering'>
+                <Select value={industry} onChange={setIndustry} options={[
+                  ...industries.map((i) => ({ value: i.value, label: i.label })),
+                ]} />
+              </Field>
+
+              {/* State */}
+              <Field label="State" hint='Pick "Other" to skip state filtering'>
+                <Select value={state} onChange={setState} options={[
+                  { value: 'other', label: 'Other / N/A' },
+                  ...US_STATES.map((s) => ({ value: s.code, label: `${s.code} · ${s.name}` })),
+                ]} />
+              </Field>
+
+              {/* Deal type */}
+              <Field label="Deal Type" className="sm:col-span-2">
+                <div className="grid grid-cols-2 gap-2">
+                  {dealTypes.map((d) => (
+                    <button
+                      key={d.value}
+                      type="button"
+                      onClick={() => setDealType(d.value)}
+                      className={cn(
+                        'px-4 py-2.5 rounded border-2 text-sm font-medium transition',
+                        dealType === d.value
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30',
+                      )}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+            </div>
+
+            {error && (
+              <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded px-3 py-2">
+                {error}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-3 border-t border-border">
+              <Button variant="ghost" onClick={clearForm} type="button">Clear</Button>
+              <Button onClick={runMatch} loading={loading} className="gap-1.5 px-6">
+                <Zap className="h-4 w-4" />
+                Find Funders
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Results section */}
       {results && (
         totalMatched === 0 && totalExcluded === 0 ? (
           <Card>
@@ -251,135 +304,133 @@ export default function DealShopPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid lg:grid-cols-[200px_1fr] gap-4">
-            {/* Tier rail */}
-            <Card className="self-start lg:sticky lg:top-4">
-              <CardContent className="p-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-3 py-2">
-                  Filter by tier
-                </div>
-                <button
-                  onClick={() => setActiveTier('all')}
-                  className={cn(
-                    'w-full flex items-center justify-between px-3 py-2 rounded text-sm transition-colors',
-                    activeTier === 'all' ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'
-                  )}
-                >
-                  <span>All tiers</span>
-                  <Badge variant="outline" className="text-[10px]">{totalMatched + totalExcluded}</Badge>
-                </button>
-                {tierGroups.map((g) => (
+          <div className="space-y-4">
+            <div className="text-xs uppercase tracking-wider font-semibold text-muted-foreground/80 px-1">
+              Results — {totalMatched} qualifying, {totalExcluded} excluded
+            </div>
+
+            <div className="grid lg:grid-cols-[200px_1fr] gap-4">
+              {/* Tier rail */}
+              <Card className="self-start lg:sticky lg:top-4">
+                <CardContent className="p-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-3 py-2">
+                    Filter by tier
+                  </div>
                   <button
-                    key={g.tier}
-                    onClick={() => setActiveTier(g.tier)}
+                    onClick={() => setActiveTier('all')}
                     className={cn(
                       'w-full flex items-center justify-between px-3 py-2 rounded text-sm transition-colors',
-                      activeTier === g.tier ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'
+                      activeTier === 'all' ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'
                     )}
                   >
-                    <span className="truncate">{g.tier}</span>
-                    <span className="flex items-center gap-1 shrink-0">
-                      {g.matched.length > 0 && <Badge variant="success" className="text-[10px]">{g.matched.length}</Badge>}
-                      {g.excluded.length > 0 && <Badge variant="default" className="text-[10px]">{g.excluded.length}</Badge>}
-                    </span>
+                    <span>All tiers</span>
+                    <Badge variant="outline" className="text-[10px]">{totalMatched + totalExcluded}</Badge>
                   </button>
-                ))}
-              </CardContent>
-            </Card>
-
-            {/* Results table */}
-            <div className="space-y-4 min-w-0">
-              {filteredGroups.map((g) => (
-                <div key={g.tier}>
-                  {activeTier === 'all' && (
-                    <div className="flex items-baseline gap-3 mb-2 px-1">
-                      <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground/80">{g.tier}</h3>
-                      <span className="text-xs text-muted-foreground">
-                        {g.matched.length} qualifying · {g.excluded.length} excluded
+                  {tierGroups.map((g) => (
+                    <button
+                      key={g.tier}
+                      onClick={() => setActiveTier(g.tier)}
+                      className={cn(
+                        'w-full flex items-center justify-between px-3 py-2 rounded text-sm transition-colors',
+                        activeTier === g.tier ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'
+                      )}
+                    >
+                      <span className="truncate">{g.tier}</span>
+                      <span className="flex items-center gap-1 shrink-0">
+                        {g.matched.length > 0 && <Badge variant="success" className="text-[10px]">{g.matched.length}</Badge>}
+                        {g.excluded.length > 0 && <Badge variant="default" className="text-[10px]">{g.excluded.length}</Badge>}
                       </span>
-                    </div>
-                  )}
+                    </button>
+                  ))}
+                </CardContent>
+              </Card>
 
-                  {/* Qualifying funders */}
-                  {g.matched.length > 0 && (
-                    <Card className="overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="bg-muted/40 border-b border-border">
-                            <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-4 py-2">Funder</th>
-                            <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Submission</th>
-                            <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Primary email</th>
-                            <th className="w-8"></th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border/60">
-                          {g.matched.map((m) => {
-                            const f = funderMap.get(m.funderId);
-                            const primary = f?.contacts?.find((c) => c.email);
-                            const isExpanded = expanded.has(m.funderId);
-                            return (
-                              <>
-                                <tr
-                                  key={m.funderId}
-                                  className="hover:bg-muted/30 cursor-pointer"
-                                  onClick={() => toggleExpand(m.funderId)}
-                                >
-                                  <td className="px-4 py-2.5">
-                                    <div className="flex items-center gap-2">
-                                      <div className="h-2 w-2 rounded-full bg-emerald-500" />
-                                      <span className="font-medium">{m.funderName}</span>
-                                    </div>
-                                  </td>
-                                  <td className="px-3 py-2.5">
-                                    <Badge variant="outline" className="text-[10px]">
-                                      {f?.submissionMethod ?? 'email'}
-                                    </Badge>
-                                  </td>
-                                  <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground truncate max-w-[200px]">
-                                    {primary?.email ?? '—'}
-                                  </td>
-                                  <td className="px-2 py-2.5 text-muted-foreground">
-                                    {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                                  </td>
-                                </tr>
-                                {isExpanded && f && (
-                                  <tr className="bg-muted/20">
-                                    <td colSpan={4} className="px-4 py-3">
-                                      <FunderDetailRow funder={f} />
+              {/* Results table */}
+              <div className="space-y-4 min-w-0">
+                {filteredGroups.map((g) => (
+                  <div key={g.tier}>
+                    {activeTier === 'all' && (
+                      <div className="flex items-baseline gap-3 mb-2 px-1">
+                        <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground/80">{g.tier}</h3>
+                        <span className="text-xs text-muted-foreground">
+                          {g.matched.length} qualifying · {g.excluded.length} excluded
+                        </span>
+                      </div>
+                    )}
+
+                    {g.matched.length > 0 && (
+                      <Card className="overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-muted/40 border-b border-border">
+                              <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-4 py-2">Funder</th>
+                              <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Submission</th>
+                              <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Primary email</th>
+                              <th className="w-8"></th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/60">
+                            {g.matched.map((m) => {
+                              const f = funderMap.get(m.funderId);
+                              const primary = f?.contacts?.find((c) => c.email);
+                              const isExpanded = expanded.has(m.funderId);
+                              return (
+                                <>
+                                  <tr key={m.funderId} className="hover:bg-muted/30 cursor-pointer" onClick={() => toggleExpand(m.funderId)}>
+                                    <td className="px-4 py-2.5">
+                                      <div className="flex items-center gap-2">
+                                        <div className="h-2 w-2 rounded-full bg-emerald-500" />
+                                        <span className="font-medium">{m.funderName}</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-3 py-2.5">
+                                      <Badge variant="outline" className="text-[10px]">{f?.submissionMethod ?? 'email'}</Badge>
+                                    </td>
+                                    <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground truncate max-w-[200px]">
+                                      {primary?.email ?? '—'}
+                                    </td>
+                                    <td className="px-2 py-2.5 text-muted-foreground">
+                                      {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                                     </td>
                                   </tr>
-                                )}
-                              </>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </Card>
-                  )}
-
-                  {/* Excluded — collapsible compact list */}
-                  {g.excluded.length > 0 && (
-                    <details className="mt-2 group">
-                      <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground py-1.5 px-2 flex items-center gap-1.5">
-                        <ChevronRight className="h-3 w-3 group-open:rotate-90 transition-transform" />
-                        {g.excluded.length} not qualifying
-                      </summary>
-                      <Card className="mt-1">
-                        <CardContent className="p-0 divide-y divide-border/60">
-                          {g.excluded.map((e) => (
-                            <div key={e.funderId} className="px-4 py-2 flex items-center justify-between text-xs">
-                              <span className="font-medium text-muted-foreground">{e.funderName}</span>
-                              <span className="text-muted-foreground/80 text-right ml-3 truncate max-w-[60%]">
-                                {e.reasons[0] ?? 'Excluded'}
-                              </span>
-                            </div>
-                          ))}
-                        </CardContent>
+                                  {isExpanded && f && (
+                                    <tr className="bg-muted/20">
+                                      <td colSpan={4} className="px-4 py-3">
+                                        <FunderDetailRow funder={f} />
+                                      </td>
+                                    </tr>
+                                  )}
+                                </>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </Card>
-                    </details>
-                  )}
-                </div>
-              ))}
+                    )}
+
+                    {g.excluded.length > 0 && (
+                      <details className="mt-2 group">
+                        <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground py-1.5 px-2 flex items-center gap-1.5">
+                          <ChevronRight className="h-3 w-3 group-open:rotate-90 transition-transform" />
+                          {g.excluded.length} not qualifying
+                        </summary>
+                        <Card className="mt-1">
+                          <CardContent className="p-0 divide-y divide-border/60">
+                            {g.excluded.map((e) => (
+                              <div key={e.funderId} className="px-4 py-2 flex items-center justify-between text-xs">
+                                <span className="font-medium text-muted-foreground">{e.funderName}</span>
+                                <span className="text-muted-foreground/80 text-right ml-3 truncate max-w-[60%]">
+                                  {e.reasons.find((r) => !r.includes('OK')) ?? e.reasons[0]}
+                                </span>
+                              </div>
+                            ))}
+                          </CardContent>
+                        </Card>
+                      </details>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )
@@ -393,7 +444,7 @@ function Select({ value, onChange, options }: { value: string; onChange: (v: str
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+      className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>{o.label}</option>
@@ -413,9 +464,7 @@ function FunderDetailRow({ funder }: { funder: FunderDetail }) {
             <Mail className="h-3 w-3" /> Submission emails
           </div>
           <div className="space-y-0.5">
-            {emails.map((c, i) => (
-              <div key={i} className="font-mono text-foreground">{c.email}</div>
-            ))}
+            {emails.map((c, i) => <div key={i} className="font-mono text-foreground">{c.email}</div>)}
           </div>
         </div>
       )}
@@ -433,9 +482,7 @@ function FunderDetailRow({ funder }: { funder: FunderDetail }) {
           </div>
         </div>
       )}
-      {((funder.restrictedStates?.length ?? 0) > 0 ||
-        (funder.restrictedIndustries?.length ?? 0) > 0 ||
-        funder.notes) && (
+      {((funder.restrictedStates?.length ?? 0) > 0 || (funder.restrictedIndustries?.length ?? 0) > 0 || funder.notes) && (
         <div className="bg-amber-50 border border-amber-200 rounded p-2.5 text-amber-900 space-y-1">
           {(funder.restrictedStates ?? []).length > 0 && (
             <div className="flex items-start gap-1">

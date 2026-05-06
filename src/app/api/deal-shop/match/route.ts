@@ -4,7 +4,7 @@ import { funders, funderRestrictedStates, funderRestrictedIndustries } from '@/l
 import { eq, inArray } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
 import { dealShopMatchSchema } from '@/lib/validation/schemas';
-import { matchAllFunders, type FunderForMatching } from '@/lib/matching/engine';
+import { matchAll, type FunderForMatching } from '@/lib/matching/engine';
 
 export async function POST(req: NextRequest) {
   try {
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
       isActive: f.isActive,
     }));
 
-    const result = matchAllFunders(criteria, forMatching);
+    const result = matchAll(criteria, forMatching);
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });

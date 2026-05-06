@@ -83,7 +83,9 @@ export const createTierSchema = z.object({
 
 export const dealShopMatchSchema = z.object({
   monthlyRevenue: z.number().nonnegative(),
-  creditScore: creditTier,
+  // Either legacy enum (back-compat) or new numeric floor from match_options.meta.minScore
+  creditScore: creditTier.optional(),
+  creditScoreValue: z.number().nullable().optional(),
   positions: z.number().int().nonnegative(),
   industry: z.string().max(100).default('other'),
   state: z.string().max(2).default('other'),

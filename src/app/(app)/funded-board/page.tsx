@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Card, CardContent,
-  Button, Input, Field, PageHeader, EmptyState,
+  Button, Input, Field, PageHeader, EmptyState, MoneyInput,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
@@ -242,12 +242,10 @@ export default function FundedBoardPage() {
                 />
               </Field>
               <Field label="Amount funded" required>
-                <Input
-                  type="number"
-                  step="0.01"
-                  placeholder="50000"
-                  value={newEntry.amountFunded}
-                  onChange={(e) => setNewEntry({ ...newEntry, amountFunded: e.target.value })}
+                <MoneyInput
+                  value={newEntry.amountFunded === '' ? '' : Number(newEntry.amountFunded)}
+                  onValueChange={(v) => setNewEntry({ ...newEntry, amountFunded: v === '' ? '' : String(v) })}
+                  placeholder="50,000"
                 />
               </Field>
               <Field label="Funded date">

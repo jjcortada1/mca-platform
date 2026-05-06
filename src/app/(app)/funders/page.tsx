@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import {
   Card, CardContent,
-  Button, Input, Textarea, Field, Badge, PageHeader,
+  Button, Input, Textarea, Field, Badge, PageHeader, MoneyInput,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { US_STATES, COMMON_INDUSTRIES, CREDIT_TIER_OPTIONS } from '@/lib/constants';
@@ -336,10 +336,10 @@ function FunderDrawer({
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Min monthly revenue">
-                <Input
-                  type="number"
-                  value={funder.minRevenue}
-                  onChange={(e) => update('minRevenue', e.target.value)}
+                <MoneyInput
+                  value={funder.minRevenue === '' || funder.minRevenue === null || funder.minRevenue === undefined ? '' : Number(funder.minRevenue)}
+                  onValueChange={(v) => update('minRevenue', v === '' ? '0' : String(v))}
+                  placeholder="25,000"
                 />
               </Field>
               <Field label="Max positions">
@@ -650,16 +650,34 @@ function BulkImportModal({
             <summary className="cursor-pointer text-muted-foreground hover:text-foreground py-1">
               Format requirements
             </summary>
-            <ul className="mt-2 pl-4 space-y-1 text-muted-foreground list-disc">
-              <li><strong>name</strong> is required for every row.</li>
-              <li><strong>tiers</strong>, <strong>restricted_states</strong>, <strong>restricted_industries</strong> use <code className="font-mono bg-muted px-1 rounded">;</code> or <code className="font-mono bg-muted px-1 rounded">|</code> as separators.</li>
-              <li><strong>supports_reverse_consolidation</strong> accepts true / false / yes / no / 1 / 0.</li>
-              <li><strong>min_credit_tier</strong>: unknown · under_550 · 550_599 · 600_649 · 650_plus</li>
-              <li><strong>submission_method</strong>: email or portal</li>
-              <li>States: 2-letter codes (CA, NY, etc.)</li>
-              <li>Tiers that don&apos;t exist will be created automatically.</li>
-              <li>Up to 3 contacts per funder; first is set as primary.</li>
-            </ul>
+            <div className="mt-2 space-y-2 text-muted-foreground">
+              <div>
+                <div className="font-semibold text-foreground/80 mb-1">Required (8 columns):</div>
+                <ul className="pl-4 space-y-0.5 list-disc">
+                  <li><strong>name</strong> — funder name (only column that must be filled)</li>
+                  <li><strong>tiers</strong> — tier name(s), separated by <code className="font-mono bg-muted px-1 rounded">;</code></li>
+                  <li><strong>submission_method</strong> — email or portal</li>
+                  <li><strong>submission_email</strong> — where deals get sent</li>
+                  <li><strong>contact_name / contact_phone / contact_email</strong> — primary contact</li>
+                  <li><strong>notes</strong> — free text</li>
+                </ul>
+              </div>
+              <div>
+                <div className="font-semibold text-foreground/80 mb-1">Optional advanced (leave empty to skip):</div>
+                <ul className="pl-4 space-y-0.5 list-disc">
+                  <li><strong>min_revenue</strong> — number, no $ or commas</li>
+                  <li><strong>min_credit_tier</strong> — unknown / under_550 / 550_599 / 600_649 / 650_plus</li>
+                  <li><strong>max_positions</strong> — leave empty for no max</li>
+                  <li><strong>restricted_states</strong> — 2-letter codes, separated by <code className="font-mono bg-muted px-1 rounded">;</code></li>
+                  <li><strong>restricted_industries</strong> — names separated by <code className="font-mono bg-muted px-1 rounded">;</code></li>
+                  <li><strong>supports_reverse_consolidation</strong> — true / false / yes / no</li>
+                  <li><strong>additional_rules</strong> — free text, appended to notes</li>
+                </ul>
+              </div>
+              <div className="text-[11px] text-muted-foreground/80 italic">
+                Tiers that don&apos;t exist yet will be created automatically.
+              </div>
+            </div>
           </details>
 
           {/* Results */}

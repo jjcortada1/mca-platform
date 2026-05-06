@@ -25,16 +25,30 @@ const CREDIT_TIERS = ['unknown', 'under_550', '550_599', '600_649', '650_plus'] 
 const SUBMISSION_METHODS = ['email', 'portal'] as const;
 
 const rowSchema = z.object({
+  // REQUIRED
   name: z.string().min(1, 'name is required'),
   tiers: z.string().optional(),
   submission_method: z.enum(SUBMISSION_METHODS).optional(),
+  // NEW simplified — accept either submission_email or contact_email_1
+  submission_email: z.string().optional(),
+  // NEW simplified single-contact fields
+  contact_name: z.string().optional(),
+  contact_phone: z.string().optional(),
+  contact_email: z.string().optional(),
+  notes: z.string().optional(),
+
+  // OPTIONAL ADVANCED
   supports_reverse_consolidation: z.string().optional(),
   min_revenue: z.string().optional(),
-  max_positions: z.string().optional(),
+  // Accept either snake_case or generic 'credit' label
   min_credit_tier: z.enum(CREDIT_TIERS).optional(),
+  credit: z.string().optional(),
+  max_positions: z.string().optional(),
   restricted_states: z.string().optional(),
   restricted_industries: z.string().optional(),
-  notes: z.string().optional(),
+  additional_rules: z.string().optional(),
+
+  // LEGACY 1-3 contact columns — still supported
   contact_name_1: z.string().optional(),
   contact_email_1: z.string().optional(),
   contact_phone_1: z.string().optional(),
@@ -169,6 +183,11 @@ export async function POST(req: NextRequest) {
         const maxPositions = parseInt(parsed.max_positions || '99') || 99;
         const supportsRev = parseBool(parsed.supports_reverse_consolidation);
 
+        // Combine `notes` and `additional_rules` if both present
+        const combinedNotes = [parsed.notes?.trim(), parsed.additional_rules?.trim()]
+          .filter(Boolean)
+          .join('\n');
+
         // Insert funder
         const [funder] = await db.insert(funders).values({
           companyId: ctx.companyId,
@@ -178,7 +197,7 @@ export async function POST(req: NextRequest) {
           minRevenue,
           maxPositions,
           minCreditTier,
-          notes: parsed.notes?.trim() || null,
+          notes: combinedNotes || null,
           isActive: true,
         }).returning();
 
@@ -189,8 +208,25 @@ export async function POST(req: NextRequest) {
           ).onConflictDoNothing();
         }
 
-        // Contacts (1-3)
+        // Contacts — accept simplified single-contact OR legacy 1-3 form
+        // Priority: simplified contact_name/phone/email + submission_email become contact 1
         const contactsToInsert: { funderId: string; name: string; email: string | null; phone: string | null; isPrimary: boolean; sortOrder: number }[] = [];
+
+        const simpleName = parsed.contact_name?.trim();
+        const simplePhone = parsed.contact_phone?.trim();
+        const simpleEmail = parsed.contact_email?.trim() || parsed.submission_email?.trim();
+        if (simpleName || simplePhone || simpleEmail) {
+          contactsToInsert.push({
+            funderId: funder.id,
+            name: simpleName || simpleEmail || 'Primary contact',
+            email: simpleEmail || null,
+            phone: simplePhone || null,
+            isPrimary: true,
+            sortOrder: 0,
+          });
+        }
+
+        // Also pick up legacy contact_name_N columns
         for (let cn = 1; cn <= 3; cn++) {
           const name = (parsed as any)[`contact_name_${cn}`]?.trim();
           const email = (parsed as any)[`contact_email_${cn}`]?.trim();
@@ -201,8 +237,8 @@ export async function POST(req: NextRequest) {
               name: name || email || `Contact ${cn}`,
               email: email || null,
               phone: phone || null,
-              isPrimary: cn === 1,
-              sortOrder: cn - 1,
+              isPrimary: contactsToInsert.length === 0,
+              sortOrder: contactsToInsert.length,
             });
           }
         }
@@ -250,52 +286,91 @@ export async function POST(req: NextRequest) {
 
 /**
  * GET — returns the CSV template as a downloadable file.
+ *
+ * Two-row sample: a minimal one (only required) + a full one (with advanced fields).
  */
 export async function GET() {
+  // Required cols first, then optional. Order matches JJ's spec.
   const headers = [
+    // REQUIRED
     'name',
     'tiers',
     'submission_method',
-    'supports_reverse_consolidation',
+    'submission_email',
+    'contact_name',
+    'contact_phone',
+    'contact_email',
+    'notes',
+    // OPTIONAL ADVANCED
     'min_revenue',
-    'max_positions',
     'min_credit_tier',
+    'max_positions',
     'restricted_states',
     'restricted_industries',
-    'notes',
-    'contact_name_1', 'contact_email_1', 'contact_phone_1',
-    'contact_name_2', 'contact_email_2', 'contact_phone_2',
-    'contact_name_3', 'contact_email_3', 'contact_phone_3',
+    'supports_reverse_consolidation',
+    'additional_rules',
   ];
 
-  const exampleRow = [
-    'Velocity Capital',
-    'A-Paper;Subprime',
-    'email',
-    'true',
-    '25000',
-    '3',
-    '600_649',
-    'CA;NY',
-    'Cannabis / CBD;Adult Entertainment',
-    'Fast funder, decisions same-day',
-    'Sarah Lee', 'sarah@velocitycap.com', '555-123-4567',
-    'Mike Chen', 'submissions@velocitycap.com', '',
-    '', '', '',
+  // Sample 1: minimum required only
+  const minimalRow = [
+    'Acme Funding',                    // name
+    'A-Paper',                         // tiers
+    'email',                           // submission_method
+    'submissions@acmefunding.com',     // submission_email
+    '',                                // contact_name (optional)
+    '',                                // contact_phone
+    '',                                // contact_email
+    '',                                // notes
+    // empty optional fields = no restriction
+    '', '', '', '', '', '', '',
   ];
 
-  const csv =
-    headers.join(',') + '\n' +
-    exampleRow.map((c) => (c.includes(',') || c.includes('"') ? `"${c.replace(/"/g, '""')}"` : c)).join(',') + '\n' +
-    '# Notes:\n' +
-    '# - "tiers", "restricted_states", "restricted_industries" use ; or | as separator\n' +
-    '# - "supports_reverse_consolidation" accepts true/false/yes/no/1/0\n' +
-    '# - "min_credit_tier" must be one of: unknown, under_550, 550_599, 600_649, 650_plus\n' +
-    '# - "submission_method" must be: email or portal\n' +
-    '# - "min_revenue" is a number (no $ or commas)\n' +
-    '# - States must be 2-letter codes (CA, NY, etc.)\n' +
-    '# - Tiers that don\'t exist will be created automatically\n' +
-    '# - Up to 3 contacts per funder; first is set as primary\n';
+  // Sample 2: full example with restrictions
+  const fullRow = [
+    'Velocity Capital',                              // name
+    'A-Paper;Subprime',                              // tiers (semicolon-separated)
+    'email',                                         // submission_method
+    'submissions@velocitycap.com',                   // submission_email
+    'Sarah Lee',                                     // contact_name
+    '555-123-4567',                                  // contact_phone
+    'sarah@velocitycap.com',                         // contact_email
+    'Fast funder, decisions same-day',               // notes
+    '25000',                                         // min_revenue
+    '600_649',                                       // min_credit_tier
+    '3',                                             // max_positions
+    'CA;NY',                                         // restricted_states
+    'Cannabis;Adult Entertainment',                  // restricted_industries
+    'true',                                          // supports_reverse_consolidation
+    'No 1099 contractors; min 6 months in business', // additional_rules
+  ];
+
+  function csvRow(row: string[]) {
+    return row.map((c) => (c.includes(',') || c.includes('"') || c.includes('\n') ? `"${c.replace(/"/g, '""')}"` : c)).join(',');
+  }
+
+  const csv = [
+    headers.join(','),
+    csvRow(minimalRow),
+    csvRow(fullRow),
+    '',
+    '# REQUIRED columns (first 8): name, tiers, submission_method, submission_email,',
+    '#                              contact_name, contact_phone, contact_email, notes',
+    '# - Only "name" must be filled per row. The rest are encouraged but allowed empty.',
+    '# - "tiers" is a list separated by ; or |  (e.g. "A-Paper;Subprime")',
+    '# - "submission_method" must be: email or portal',
+    '#',
+    '# OPTIONAL ADVANCED columns:',
+    '# - "min_revenue" is a plain number (no $ or commas). Leave empty = no minimum.',
+    '# - "min_credit_tier" must be one of: unknown, under_550, 550_599, 600_649, 650_plus',
+    '# - "max_positions" — leave empty for no max (defaults to 99)',
+    '# - "restricted_states" — 2-letter codes separated by ; or |  (e.g. "CA;NY")',
+    '# - "restricted_industries" — names separated by ; or | (free text, matches industries set in Settings → Match options)',
+    '# - "supports_reverse_consolidation" accepts true/false/yes/no/1/0',
+    '# - "additional_rules" — free text, appended to notes',
+    '#',
+    '# Tiers that don\'t exist will be created automatically.',
+    '# Empty optional fields are treated as no restriction.',
+  ].join('\n') + '\n';
 
   return new NextResponse(csv, {
     headers: {

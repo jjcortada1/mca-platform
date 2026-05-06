@@ -7,7 +7,7 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 
-type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers';
+type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options';
 
 const TAB_GROUPS: { title: string; tabs: { key: Tab; label: string }[] }[] = [
   {
@@ -27,11 +27,15 @@ const TAB_GROUPS: { title: string; tabs: { key: Tab; label: string }[] }[] = [
     tabs: [{ key: 'commission', label: 'Commission rules' }],
   },
   {
-    title: 'Team',
+    title: 'Matching',
     tabs: [
-      { key: 'users', label: 'Users' },
       { key: 'tiers', label: 'Funder tiers' },
+      { key: 'options', label: 'Match options' },
     ],
+  },
+  {
+    title: 'Team',
+    tabs: [{ key: 'users', label: 'Users' }],
   },
 ];
 
@@ -76,6 +80,7 @@ export default function SettingsPage() {
       {tab === 'fields' && <StructuredFieldsSection />}
       {tab === 'users' && <UsersSection />}
       {tab === 'tiers' && <TiersSection />}
+      {tab === 'options' && <MatchOptionsSection />}
     </div>
   );
 }
@@ -961,6 +966,239 @@ function TiersSection() {
             onKeyDown={(e) => e.key === 'Enter' && add()}
           />
           <Button onClick={add} disabled={!newName.trim()}>Add</Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ============================================================
+   MATCH OPTIONS — editable dropdowns for deal shop intake
+   ============================================================ */
+
+interface MatchOption {
+  id?: string;
+  value: string;
+  label: string;
+  meta?: Record<string, unknown> | null;
+}
+
+const MATCH_KINDS: { key: string; title: string; description: string; metaFields?: { key: string; label: string; type: 'number' }[] }[] = [
+  {
+    key: 'credit_range',
+    title: 'Credit ranges',
+    description: 'Shown in deal shop credit dropdown. minScore is the floor used by the matching engine.',
+    metaFields: [{ key: 'minScore', label: 'Min score floor', type: 'number' }],
+  },
+  {
+    key: 'revenue_range',
+    title: 'Revenue ranges',
+    description: 'Shown in deal shop revenue dropdown. minRevenue/maxRevenue define the range.',
+    metaFields: [
+      { key: 'minRevenue', label: 'Min $', type: 'number' },
+      { key: 'maxRevenue', label: 'Max $', type: 'number' },
+    ],
+  },
+  {
+    key: 'industry',
+    title: 'Industries',
+    description: 'Shown in deal shop industry dropdown and used as funder restriction labels. "Other" must exist to allow skipping.',
+  },
+  {
+    key: 'deal_type',
+    title: 'Deal types',
+    description: 'Shown as buttons in deal shop. Use values "standard_mca" and "reverse_consolidation" to keep matching engine compatible.',
+  },
+  {
+    key: 'position_option',
+    title: 'Positions',
+    description: 'Shown in deal shop positions dropdown.',
+  },
+];
+
+function MatchOptionsSection() {
+  const [activeKind, setActiveKind] = useState(MATCH_KINDS[0].key);
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {MATCH_KINDS.map((k) => (
+          <button
+            key={k.key}
+            onClick={() => setActiveKind(k.key)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-all ${
+              activeKind === k.key
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
+            }`}
+          >
+            {k.title}
+          </button>
+        ))}
+      </div>
+      <MatchOptionsKindEditor key={activeKind} kind={activeKind} />
+    </div>
+  );
+}
+
+function MatchOptionsKindEditor({ kind }: { kind: string }) {
+  const toast = useToast();
+  const def = MATCH_KINDS.find((k) => k.key === kind)!;
+  const [options, setOptions] = useState<MatchOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    const res = await fetch(`/api/settings/match-options?kind=${kind}`);
+    const j = await res.json();
+    setOptions((j.data ?? []).map((o: MatchOption & { sortOrder?: number }) => ({
+      id: o.id,
+      value: o.value,
+      label: o.label,
+      meta: o.meta ?? {},
+    })));
+    setLoading(false);
+    setDirty(false);
+  }
+
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [kind]);
+
+  function update(idx: number, field: 'value' | 'label', val: string) {
+    setOptions((prev) => prev.map((o, i) => i === idx ? { ...o, [field]: val } : o));
+    setDirty(true);
+  }
+  function updateMeta(idx: number, key: string, val: string) {
+    setOptions((prev) => prev.map((o, i) => {
+      if (i !== idx) return o;
+      const meta: Record<string, unknown> = { ...(o.meta ?? {}) };
+      if (val === '') meta[key] = null;
+      else {
+        const n = Number(val);
+        meta[key] = Number.isFinite(n) ? n : null;
+      }
+      return { ...o, meta };
+    }));
+    setDirty(true);
+  }
+  function move(idx: number, dir: -1 | 1) {
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= options.length) return;
+    const reordered = [...options];
+    [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
+    setOptions(reordered);
+    setDirty(true);
+  }
+  function remove(idx: number) {
+    setOptions((prev) => prev.filter((_, i) => i !== idx));
+    setDirty(true);
+  }
+  function add() {
+    setOptions((prev) => [...prev, { value: '', label: '', meta: {} }]);
+    setDirty(true);
+  }
+
+  async function save() {
+    // Filter empties
+    const valid = options.filter((o) => o.value.trim() && o.label.trim());
+    setSaving(true);
+    const res = await fetch('/api/settings/match-options', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind,
+        options: valid.map((o, i) => ({
+          value: o.value.trim(),
+          label: o.label.trim(),
+          sortOrder: i,
+          meta: o.meta ?? null,
+        })),
+      }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || 'Save failed.');
+      return;
+    }
+    toast.success(`${def.title} saved.`);
+    load();
+  }
+
+  if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{def.title}</CardTitle>
+        <CardDescription>{def.description}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="space-y-1.5">
+          {options.length === 0 && (
+            <div className="text-xs text-muted-foreground text-center py-4">
+              No options yet. Add one below.
+            </div>
+          )}
+          {options.map((o, i) => (
+            <div key={i} className="flex items-start gap-2 p-2 rounded border border-border bg-card">
+              <div className="flex flex-col pt-2">
+                <button
+                  onClick={() => move(i, -1)}
+                  disabled={i === 0}
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
+                  title="Move up"
+                >▲</button>
+                <button
+                  onClick={() => move(i, 1)}
+                  disabled={i === options.length - 1}
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
+                  title="Move down"
+                >▼</button>
+              </div>
+              <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <Field label="Value" hint="Internal — lowercase + underscores. Don't change after creation if funders reference it.">
+                  <Input
+                    value={o.value}
+                    onChange={(e) => update(i, 'value', e.target.value)}
+                    placeholder="e.g. above_700"
+                    className="font-mono text-xs"
+                  />
+                </Field>
+                <Field label="Label" hint="Shown to users in the dropdown.">
+                  <Input
+                    value={o.label}
+                    onChange={(e) => update(i, 'label', e.target.value)}
+                    placeholder="e.g. Above 700"
+                  />
+                </Field>
+                {def.metaFields?.map((mf) => (
+                  <Field key={mf.key} label={mf.label}>
+                    <Input
+                      type="number"
+                      value={
+                        o.meta?.[mf.key] === null || o.meta?.[mf.key] === undefined
+                          ? ''
+                          : String(o.meta[mf.key])
+                      }
+                      onChange={(e) => updateMeta(i, mf.key, e.target.value)}
+                      placeholder="(none)"
+                    />
+                  </Field>
+                ))}
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => remove(i)}>Delete</Button>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex justify-between border-t border-border pt-3">
+          <Button variant="outline" onClick={add}>+ Add option</Button>
+          <Button onClick={save} loading={saving} disabled={!dirty}>Save changes</Button>
+        </div>
+
+        <div className="text-[10px] text-muted-foreground/80 leading-relaxed mt-2 p-2 bg-muted/30 rounded">
+          <strong>Tip:</strong> Saving replaces all options for this kind. Existing funders that reference removed values will still match — only the dropdown shrinks.
         </div>
       </CardContent>
     </Card>

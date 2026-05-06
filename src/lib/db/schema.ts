@@ -325,6 +325,38 @@ export const structuredEmailFields = pgTable(
   (t) => ({ companyIdx: index('structured_email_fields_company_idx').on(t.companyId) })
 );
 
+/**
+ * Editable matching options — credit ranges, revenue ranges, industries, deal types, etc.
+ * Per-company. Replaces hardcoded dropdowns.
+ *
+ * `kind` values:
+ *   'credit_range'   — { value: 'above_700', label: 'Above 700', minScore?: 700 }
+ *   'revenue_range'  — { value: '0-25000', label: 'Below $25K', minRevenue: 0, maxRevenue: 25000 }
+ *   'industry'       — { value: 'restaurant', label: 'Restaurant' }
+ *   'deal_type'      — { value: 'standard_mca', label: 'Standard MCA' }
+ *   'position_option'— { value: '0', label: 'Position 0 (no stack)' }
+ *   'nsf_option'     — { value: '0', label: '0 NSFs' }
+ *
+ * `meta` is a flexible JSON object for additional config per option (e.g. minScore on credit ranges).
+ */
+export const matchOptions = pgTable(
+  'match_options',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    kind: varchar('kind', { length: 30 }).notNull(),
+    value: varchar('value', { length: 100 }).notNull(),
+    label: varchar('label', { length: 200 }).notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    meta: jsonb('meta').$type<Record<string, unknown>>(),
+  },
+  (t) => ({
+    companyKindIdx: index('match_options_company_kind_idx').on(t.companyId, t.kind),
+    uniq: uniqueIndex('match_options_company_kind_value_idx').on(t.companyId, t.kind, t.value),
+  })
+);
+
 /* ---------- Relations ---------- */
 
 export const companiesRelations = relations(companies, ({ many }) => ({

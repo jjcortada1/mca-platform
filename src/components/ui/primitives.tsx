@@ -346,3 +346,9 @@ export function SectionHeader({
     </div>
   );
 }
+
+/* ============================================================
+   MONEY INPUT (re-export from money-input.tsx)
+   ============================================================ */
+
+export { MoneyInput, parseMoneyString, type MoneyInputProps } from './money-input';

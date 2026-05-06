@@ -3,6 +3,12 @@
  *
  * Pure function: given deal criteria + a list of funders, returns matched and excluded
  * funders with reasons for each decision. No DB calls, no side effects.
+ *
+ * Credit handling (backward-compatible):
+ *   - Deal criteria can carry EITHER a legacy `creditScore` enum tag OR a numeric
+ *     `creditScoreValue` (representing the floor of the deal's credit range).
+ *   - Funder.minCreditTier is the legacy enum stored in the DB.
+ *   - We map both to a numeric score floor, then compare.
  */
 
 export type CreditTier = 'unknown' | 'under_550' | '550_599' | '600_649' | '650_plus';
@@ -10,7 +16,10 @@ export type DealType = 'standard_mca' | 'reverse_consolidation';
 
 export interface DealCriteria {
   monthlyRevenue: number;
-  creditScore: CreditTier;
+  // EITHER legacy enum:
+  creditScore?: CreditTier;
+  // OR numeric floor (preferred — comes from match_options.meta.minScore):
+  creditScoreValue?: number | null;
   positions: number;
   industry: string; // 'other' = ignore
   state: string; // 'other' = ignore
@@ -33,15 +42,16 @@ export interface MatchResult {
   funderId: string;
   funderName: string;
   matched: boolean;
-  reasons: string[]; // why matched OR why excluded
+  reasons: string[];
 }
 
-const CREDIT_TIER_RANK: Record<CreditTier, number> = {
-  unknown: 0,
-  under_550: 1,
-  '550_599': 2,
-  '600_649': 3,
-  '650_plus': 4,
+// Map enum tier → numeric floor of that range (or null = unknown/no requirement)
+const TIER_TO_FLOOR: Record<CreditTier, number | null> = {
+  unknown: null,
+  under_550: 0,
+  '550_599': 550,
+  '600_649': 600,
+  '650_plus': 650,
 };
 
 const CREDIT_TIER_LABEL: Record<CreditTier, string> = {
@@ -54,6 +64,16 @@ const CREDIT_TIER_LABEL: Record<CreditTier, string> = {
 
 function fmtMoney(n: number): string {
   return `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+}
+
+function dealScoreFloor(criteria: DealCriteria): number | null {
+  // Numeric floor wins if explicitly provided
+  if (criteria.creditScoreValue !== undefined && criteria.creditScoreValue !== null) {
+    return criteria.creditScoreValue;
+  }
+  // Otherwise translate legacy enum
+  if (criteria.creditScore) return TIER_TO_FLOOR[criteria.creditScore];
+  return null;
 }
 
 export function matchFunder(criteria: DealCriteria, funder: FunderForMatching): MatchResult {
@@ -90,56 +110,53 @@ export function matchFunder(criteria: DealCriteria, funder: FunderForMatching): 
     reasons.push(`Positions OK (max ${funder.maxPositions})`);
   }
 
-  // Credit — only enforced if criteria.creditScore !== 'unknown' AND funder has a real min tier
-  if (criteria.creditScore !== 'unknown' && funder.minCreditTier !== 'unknown') {
-    const dealRank = CREDIT_TIER_RANK[criteria.creditScore];
-    const funderRank = CREDIT_TIER_RANK[funder.minCreditTier];
-    if (dealRank < funderRank) {
-      matched = false;
-      reasons.push(
-        `Min credit tier ${CREDIT_TIER_LABEL[funder.minCreditTier]}, deal is ${CREDIT_TIER_LABEL[criteria.creditScore]}`
-      );
-    } else {
-      reasons.push(`Credit OK (min ${CREDIT_TIER_LABEL[funder.minCreditTier]})`);
-    }
-  } else if (criteria.creditScore === 'unknown') {
-    reasons.push('Credit unknown — rule skipped');
+  // Credit — score-floor comparison.
+  // Skip if deal credit unknown OR funder has no requirement.
+  const dealFloor = dealScoreFloor(criteria);
+  const funderFloor = TIER_TO_FLOOR[funder.minCreditTier];
+  if (dealFloor !== null && funderFloor !== null && dealFloor < funderFloor) {
+    matched = false;
+    reasons.push(
+      `Funder requires ${CREDIT_TIER_LABEL[funder.minCreditTier]}, deal scores ~${dealFloor}`
+    );
+  } else if (dealFloor !== null && funderFloor !== null) {
+    reasons.push(`Credit OK (need ≥${funderFloor}, have ≥${dealFloor})`);
   }
 
-  // State — only if not 'other'
-  if (criteria.state !== 'other' && criteria.state !== '') {
-    if (funder.restrictedStates.includes(criteria.state)) {
+  // State restrictions
+  if (criteria.state && criteria.state !== 'other') {
+    if (funder.restrictedStates.map((s) => s.toUpperCase()).includes(criteria.state.toUpperCase())) {
       matched = false;
-      reasons.push(`State ${criteria.state} restricted`);
+      reasons.push(`Funder does not lend in ${criteria.state}`);
     } else {
-      reasons.push(`State ${criteria.state} OK`);
+      reasons.push(`State OK (${criteria.state})`);
     }
   }
 
-  // Industry — only if not 'other'
-  if (criteria.industry !== 'other' && criteria.industry !== '') {
-    if (funder.restrictedIndustries.includes(criteria.industry)) {
+  // Industry restrictions
+  if (criteria.industry && criteria.industry !== 'other') {
+    const restricted = funder.restrictedIndustries.map((i) => i.toLowerCase());
+    if (restricted.includes(criteria.industry.toLowerCase())) {
       matched = false;
-      reasons.push(`Industry "${criteria.industry}" restricted`);
+      reasons.push(`Funder does not lend to ${criteria.industry}`);
     } else {
-      reasons.push(`Industry "${criteria.industry}" OK`);
+      reasons.push(`Industry OK`);
     }
   }
 
   return { funderId: funder.id, funderName: funder.name, matched, reasons };
 }
 
-export function matchAllFunders(
-  criteria: DealCriteria,
-  funders: FunderForMatching[]
-): { matched: MatchResult[]; excluded: MatchResult[] } {
+export function matchAll(criteria: DealCriteria, funders: FunderForMatching[]): {
+  matched: MatchResult[];
+  excluded: MatchResult[];
+} {
   const matched: MatchResult[] = [];
   const excluded: MatchResult[] = [];
   for (const f of funders) {
-    const r = matchFunder(criteria, f);
-    (r.matched ? matched : excluded).push(r);
+    const result = matchFunder(criteria, f);
+    if (result.matched) matched.push(result);
+    else excluded.push(result);
   }
-  matched.sort((a, b) => a.funderName.localeCompare(b.funderName));
-  excluded.sort((a, b) => a.funderName.localeCompare(b.funderName));
   return { matched, excluded };
 }

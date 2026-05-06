@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Card, CardContent, Button, Input, Field, Badge, Select, Textarea } from '@/components/ui/primitives';
+import { Card, CardContent, Button, Input, Field, Badge, Select, Textarea, MoneyInput } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { Plus, Trash2, X, Edit3 } from 'lucide-react';
 import { US_STATES, COMMON_INDUSTRIES, CREDIT_TIER_OPTIONS } from '@/lib/constants';
@@ -175,7 +175,11 @@ export default function MasterFundersPage() {
                 </Select>
               </Field>
               <Field label="Min revenue ($)">
-                <Input type="number" value={form.minRevenue} onChange={(e) => setForm({ ...form, minRevenue: parseFloat(e.target.value || '0') })} />
+                <MoneyInput
+                  value={form.minRevenue || 0}
+                  onValueChange={(v) => setForm({ ...form, minRevenue: v === '' ? 0 : v })}
+                  placeholder="25,000"
+                />
               </Field>
               <Field label="Max positions">
                 <Input type="number" value={form.maxPositions} onChange={(e) => setForm({ ...form, maxPositions: parseInt(e.target.value || '0', 10) })} />

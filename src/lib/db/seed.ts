@@ -43,6 +43,7 @@ import {
   submissionEmails,
   fundedEntries,
   infoEntries,
+  matchOptions,
   PERMISSION_KEYS,
 } from './schema';
 import { eq } from 'drizzle-orm';
@@ -58,6 +59,68 @@ const DEFAULT_STRUCTURED_FIELDS = [
   { fieldLabel: 'Credit Score', fieldKey: 'credit_score' },
   { fieldLabel: 'Positions', fieldKey: 'positions' },
   { fieldLabel: 'Requested Amount', fieldKey: 'requested_amount' },
+];
+
+/**
+ * Default editable matching options for new companies.
+ * `meta.minScore` on credit ranges and `meta.minRevenue/maxRevenue` on revenue ranges
+ * are what the deal-shop match engine uses to qualify funders.
+ */
+const DEFAULT_MATCH_OPTIONS: {
+  kind: string;
+  value: string;
+  label: string;
+  sortOrder?: number;
+  meta?: Record<string, unknown>;
+}[] = [
+  // Credit ranges (per JJ's spec: Above 700 / 650-699 / Below 600 / Unknown)
+  { kind: 'credit_range', value: 'unknown',     label: 'Unknown',      sortOrder: 0, meta: { minScore: null } },
+  { kind: 'credit_range', value: 'above_700',   label: 'Above 700',    sortOrder: 1, meta: { minScore: 700 } },
+  { kind: 'credit_range', value: '650_699',     label: '650 – 699',    sortOrder: 2, meta: { minScore: 650 } },
+  { kind: 'credit_range', value: '600_649',     label: '600 – 649',    sortOrder: 3, meta: { minScore: 600 } },
+  { kind: 'credit_range', value: 'below_600',   label: 'Below 600',    sortOrder: 4, meta: { minScore: 0 } },
+
+  // Revenue ranges (per JJ's spec: <25K / 25K-99K / 100K+)
+  { kind: 'revenue_range', value: '0-25000',     label: 'Below $25K',     sortOrder: 0, meta: { minRevenue: 0,      maxRevenue: 25000 } },
+  { kind: 'revenue_range', value: '25000-99999', label: '$25K – $99K',    sortOrder: 1, meta: { minRevenue: 25000,  maxRevenue: 99999 } },
+  { kind: 'revenue_range', value: '100000+',     label: '$100K+',         sortOrder: 2, meta: { minRevenue: 100000, maxRevenue: null } },
+
+  // Industries — start with common MCA industries; admin can edit later
+  { kind: 'industry', value: 'restaurant',          label: 'Restaurant',           sortOrder: 0 },
+  { kind: 'industry', value: 'trucking',            label: 'Trucking',             sortOrder: 1 },
+  { kind: 'industry', value: 'construction',        label: 'Construction',         sortOrder: 2 },
+  { kind: 'industry', value: 'healthcare',          label: 'Healthcare',           sortOrder: 3 },
+  { kind: 'industry', value: 'auto_sales',          label: 'Auto Sales',           sortOrder: 4 },
+  { kind: 'industry', value: 'used_car_dealer',     label: 'Used Car Dealer',      sortOrder: 5 },
+  { kind: 'industry', value: 'real_estate',         label: 'Real Estate',          sortOrder: 6 },
+  { kind: 'industry', value: 'law_firm',            label: 'Law Firm',             sortOrder: 7 },
+  { kind: 'industry', value: 'financial_services',  label: 'Financial Services',   sortOrder: 8 },
+  { kind: 'industry', value: 'cannabis',            label: 'Cannabis / CBD',       sortOrder: 9 },
+  { kind: 'industry', value: 'tobacco',             label: 'Tobacco',              sortOrder: 10 },
+  { kind: 'industry', value: 'gambling',            label: 'Gambling',             sortOrder: 11 },
+  { kind: 'industry', value: 'pawn_shop',           label: 'Pawn Shop',            sortOrder: 12 },
+  { kind: 'industry', value: 'marijuana_dispensary',label: 'Marijuana Dispensary', sortOrder: 13 },
+  { kind: 'industry', value: 'other',               label: 'Other',                sortOrder: 99 },
+
+  // Deal types
+  { kind: 'deal_type', value: 'standard_mca',          label: 'Standard MCA',          sortOrder: 0 },
+  { kind: 'deal_type', value: 'reverse_consolidation', label: 'Reverse Consolidation', sortOrder: 1 },
+
+  // Position options
+  { kind: 'position_option', value: '0',  label: 'Position 0 (no stack)', sortOrder: 0 },
+  { kind: 'position_option', value: '1',  label: 'Position 1',            sortOrder: 1 },
+  { kind: 'position_option', value: '2',  label: 'Position 2',            sortOrder: 2 },
+  { kind: 'position_option', value: '3',  label: 'Position 3',            sortOrder: 3 },
+  { kind: 'position_option', value: '4',  label: 'Position 4',            sortOrder: 4 },
+  { kind: 'position_option', value: '5+', label: '5+ positions',          sortOrder: 5 },
+
+  // NSF options
+  { kind: 'nsf_option', value: '0',  label: '0 NSFs', sortOrder: 0 },
+  { kind: 'nsf_option', value: '1',  label: '1 NSF',  sortOrder: 1 },
+  { kind: 'nsf_option', value: '2',  label: '2 NSFs', sortOrder: 2 },
+  { kind: 'nsf_option', value: '3',  label: '3 NSFs', sortOrder: 3 },
+  { kind: 'nsf_option', value: '4',  label: '4 NSFs', sortOrder: 4 },
+  { kind: 'nsf_option', value: '5+', label: '5+ NSFs', sortOrder: 5 },
 ];
 
 async function ensureMasterDefaultFunders() {
@@ -115,6 +178,9 @@ async function ensureCompany(name: string, slug: string) {
   );
   console.log(`  ✓ Structured email fields seeded`);
 
+  // Match options are seeded by ensureMatchOptions() called after this — works for
+  // both new and existing companies (idempotent).
+
   return { company, isNew: true };
 }
 
@@ -140,6 +206,36 @@ async function ensureCompanyAdmin(companyId: string, email: string, password: st
   );
   console.log(`✓ Company admin created: ${email}`);
   return admin;
+}
+
+/**
+ * Idempotently ensure all DEFAULT_MATCH_OPTIONS exist for a company.
+ * Used both on first install and when upgrading existing companies.
+ * Skips kind/value pairs that already exist; never modifies existing options.
+ */
+async function ensureMatchOptions(companyId: string) {
+  const existing = await db.select({ kind: matchOptions.kind, value: matchOptions.value })
+    .from(matchOptions)
+    .where(eq(matchOptions.companyId, companyId));
+  const existingSet = new Set(existing.map((r) => `${r.kind}:${r.value}`));
+
+  const toInsert = DEFAULT_MATCH_OPTIONS
+    .filter((o) => !existingSet.has(`${o.kind}:${o.value}`))
+    .map((o, i) => ({
+      companyId,
+      kind: o.kind,
+      value: o.value,
+      label: o.label,
+      sortOrder: o.sortOrder ?? i,
+      meta: o.meta ?? null,
+    }));
+
+  if (toInsert.length) {
+    await db.insert(matchOptions).values(toInsert);
+    console.log(`✓ Added ${toInsert.length} missing match options`);
+  } else {
+    console.log(`• Match options already complete (${existing.length} present)`);
+  }
 }
 
 async function seedFundersFromDefaults(companyId: string) {
@@ -331,6 +427,10 @@ async function seed() {
 
   const { company } = await ensureCompany(compName, compSlug);
   const admin = await ensureCompanyAdmin(company.id, adminEmail, adminPass);
+
+  // Backfill match options for any existing company that doesn't have them yet
+  // (idempotent — only adds missing kind/value combos)
+  await ensureMatchOptions(company.id);
 
   // Sample workflow data (DEFAULT: enabled — disable with SEED_TEST_DATA=false)
   const seedTestData = process.env.SEED_TEST_DATA?.toLowerCase() !== 'false';

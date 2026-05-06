@@ -283,13 +283,17 @@ export default function ActiveDealsPage() {
           </CardContent>
         </Card>
       ) : (
-        <Card className="overflow-hidden">
-          <table className="w-full text-sm">
+        <Card className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[1100px]">
             <thead>
               <tr className="bg-muted/40 border-b border-border">
-                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-4 py-2 w-8"></th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-2 py-2 w-8"></th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Deal</th>
-                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Merchant</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">First</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Last</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Phone</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Email</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Offer / Notes</th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Status</th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Rep</th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Updated</th>
@@ -299,7 +303,6 @@ export default function ActiveDealsPage() {
             <tbody className="divide-y divide-border/60">
               {filtered.map((d) => {
                 const isExpanded = expandedId === d.id;
-                const merchant = `${d.merchantFirstName ?? ''} ${d.merchantLastName ?? ''}`.trim();
                 return (
                   <>
                     <tr
@@ -310,15 +313,18 @@ export default function ActiveDealsPage() {
                       )}
                       onClick={() => isExpanded ? cancelEdit() : startEdit(d)}
                     >
-                      <td className="px-4 py-2.5 text-muted-foreground">
+                      <td className="px-2 py-2.5 text-muted-foreground">
                         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                       </td>
-                      <td className="px-3 py-2.5 font-medium">{d.name}</td>
-                      <td className="px-3 py-2.5 text-muted-foreground">
-                        {merchant || '—'}
-                        {d.merchantEmail && (
-                          <div className="text-[10px] font-mono">{d.merchantEmail}</div>
-                        )}
+                      <td className="px-3 py-2.5 font-medium whitespace-nowrap">{d.name}</td>
+                      <td className="px-3 py-2.5 text-foreground/80">{d.merchantFirstName || '—'}</td>
+                      <td className="px-3 py-2.5 text-foreground/80">{d.merchantLastName || '—'}</td>
+                      <td className="px-3 py-2.5 text-muted-foreground tabular-nums whitespace-nowrap">{d.merchantPhone || '—'}</td>
+                      <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground truncate max-w-[200px]" title={d.merchantEmail ?? ''}>
+                        {d.merchantEmail || '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-muted-foreground text-xs max-w-[280px]">
+                        <div className="line-clamp-2 whitespace-pre-wrap">{d.offerNotes || <span className="italic text-muted-foreground/60">none</span>}</div>
                       </td>
                       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                         <select
@@ -345,7 +351,7 @@ export default function ActiveDealsPage() {
                           ))}
                         </select>
                       </td>
-                      <td className="px-3 py-2.5 text-xs text-muted-foreground tabular-nums">
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
                         {formatDate(d.updatedAt)}
                       </td>
                       <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
@@ -360,7 +366,7 @@ export default function ActiveDealsPage() {
                     </tr>
                     {isExpanded && (
                       <tr className="bg-muted/20">
-                        <td colSpan={7} className="px-4 py-4">
+                        <td colSpan={11} className="px-4 py-4">
                           <div className="space-y-3 max-w-3xl">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               <LabeledInline label="Deal name">

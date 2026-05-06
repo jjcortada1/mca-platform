@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { Card, CardContent, Button, Input, Field, PageHeader, Badge } from '@/components/ui/primitives';
+import { Card, CardContent, Button, Input, Field, PageHeader, Badge, MoneyInput } from '@/components/ui/primitives';
 import { formatCurrency, cn } from '@/lib/utils';
 import { Calculator, RotateCcw, Sparkles } from 'lucide-react';
 
@@ -68,13 +68,13 @@ export default function CalculatorPage() {
    ============================================================ */
 
 function ForwardCalc({ rules }: { rules: { threshold: number; commissionPct: number }[] }) {
-  const [funding, setFunding] = useState('');
+  const [funding, setFunding] = useState<number | ''>('');
   const [factorRate, setFactorRate] = useState('');
   const [origPct, setOrigPct] = useState('');
   const [nPay, setNPay] = useState('');
   const [freq, setFreq] = useState<Freq>('daily');
 
-  const fund = parseFloat(funding) || 0;
+  const fund = funding === '' ? 0 : funding;
   const fr = parseFloat(factorRate) || 0;
   const orig = parseFloat(origPct) || 0;
   const n = parseFloat(nPay) || 0;
@@ -134,11 +134,10 @@ function ForwardCalc({ rules }: { rules: { threshold: number; commissionPct: num
             </div>
 
             <Field label="Funding amount">
-              <Input
-                type="number"
-                placeholder="100000"
+              <MoneyInput
                 value={funding}
-                onChange={(e) => setFunding(e.target.value)}
+                onValueChange={setFunding}
+                placeholder="100,000"
               />
             </Field>
 
@@ -233,8 +232,8 @@ function ForwardCalc({ rules }: { rules: { threshold: number; commissionPct: num
 
 function ReverseCalc() {
   // Observed inputs
-  const [deposit, setDeposit] = useState('');
-  const [payment, setPayment] = useState('');
+  const [deposit, setDeposit] = useState<number | ''>('');
+  const [payment, setPayment] = useState<number | ''>('');
   const [freq, setFreq] = useState<Freq>('daily');
 
   // Adjustable assumptions (sliders)
@@ -243,8 +242,8 @@ function ReverseCalc() {
   const [termWeeks, setTermWeeks] = useState(20);
   const [autoSync, setAutoSync] = useState(true); // when one slider moves, recalc one of the others
 
-  const dep = parseFloat(deposit) || 0;
-  const pmt = parseFloat(payment) || 0;
+  const dep = deposit === '' ? 0 : deposit;
+  const pmt = payment === '' ? 0 : payment;
 
   // Estimated funded amount = deposit ÷ (1 - feePct/100)
   const estFunded = feePct < 100 ? dep / (1 - feePct / 100) : 0;
@@ -335,20 +334,18 @@ function ReverseCalc() {
             </div>
 
             <Field label="Deposit seen" hint="Net wired to merchant">
-              <Input
-                type="number"
-                placeholder="95000"
+              <MoneyInput
                 value={deposit}
-                onChange={(e) => setDeposit(e.target.value)}
+                onValueChange={setDeposit}
+                placeholder="95,000"
               />
             </Field>
 
             <Field label="Payment amount" hint={`Per ${freq === 'daily' ? 'business day' : 'week'}`}>
-              <Input
-                type="number"
-                placeholder={freq === 'daily' ? '710' : '3550'}
+              <MoneyInput
                 value={payment}
-                onChange={(e) => setPayment(e.target.value)}
+                onValueChange={setPayment}
+                placeholder={freq === 'daily' ? '710' : '3,550'}
               />
             </Field>
 
