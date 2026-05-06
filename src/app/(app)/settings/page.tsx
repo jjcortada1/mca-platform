@@ -845,6 +845,7 @@ function UsersSection() {
 interface Tier { id: string; name: string; sortOrder: number }
 
 function TiersSection() {
+  const toast = useToast();
   const [tiers, setTiers] = useState<Tier[]>([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState('');
@@ -860,26 +861,54 @@ function TiersSection() {
 
   async function add() {
     if (!newName.trim()) return;
-    await fetch('/api/funder-tiers', {
+    const res = await fetch('/api/funder-tiers', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newName.trim() }),
     });
+    if (!res.ok) {
+      toast.error('Failed to add tier.');
+      return;
+    }
+    toast.success('Tier added.');
     setNewName('');
     load();
   }
 
-  async function remove(id: string) {
-    if (!confirm('Delete this tier? Funder assignments to it will be removed.')) return;
-    await fetch(`/api/funder-tiers/${id}`, { method: 'DELETE' });
+  async function remove(t: Tier) {
+    if (!confirm(`Delete "${t.name}"? Funder assignments to it will be removed.`)) return;
+    const res = await fetch(`/api/funder-tiers/${t.id}`, { method: 'DELETE' });
+    if (res.ok) toast.success('Tier deleted.');
+    else toast.error('Delete failed.');
     load();
   }
 
   async function rename(id: string, name: string) {
-    await fetch(`/api/funder-tiers/${id}`, {
+    const res = await fetch(`/api/funder-tiers/${id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
     });
-    load();
+    if (!res.ok) {
+      toast.error('Rename failed.');
+      load();
+      return;
+    }
+    toast.success('Tier renamed.');
+  }
+
+  async function move(idx: number, dir: -1 | 1) {
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= tiers.length) return;
+    const reordered = [...tiers];
+    [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
+    setTiers(reordered);
+    const res = await fetch('/api/funder-tiers/reorder', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: reordered.map((t) => t.id) }),
+    });
+    if (!res.ok) {
+      toast.error('Reorder failed.');
+      load();
+    }
   }
 
   if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
@@ -888,24 +917,50 @@ function TiersSection() {
     <Card>
       <CardHeader>
         <CardTitle>Funder tiers</CardTitle>
-        <CardDescription>Categorize funders (e.g., A-paper, Subprime, Reverse, Real Estate).</CardDescription>
+        <CardDescription>Categorize funders (e.g., A-paper, Subprime, Reverse, Real Estate). Drag with arrows to reorder.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="space-y-2">
-          {tiers.map((t) => (
-            <div key={t.id} className="flex items-center gap-2">
+        <div className="space-y-1.5">
+          {tiers.map((t, i) => (
+            <div key={t.id} className="flex items-center gap-1.5 group">
+              <div className="flex flex-col">
+                <button
+                  onClick={() => move(i, -1)}
+                  disabled={i === 0}
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
+                  title="Move up"
+                >
+                  ▲
+                </button>
+                <button
+                  onClick={() => move(i, 1)}
+                  disabled={i === tiers.length - 1}
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
+                  title="Move down"
+                >
+                  ▼
+                </button>
+              </div>
               <Input
                 defaultValue={t.name}
                 onBlur={(e) => { if (e.target.value !== t.name) rename(t.id, e.target.value); }}
                 className="flex-1"
               />
-              <Button variant="ghost" size="sm" onClick={() => remove(t.id)}>Delete</Button>
+              <Button variant="ghost" size="sm" onClick={() => remove(t)}>Delete</Button>
             </div>
           ))}
+          {tiers.length === 0 && (
+            <div className="text-xs text-muted-foreground text-center py-4">No tiers yet. Add one below.</div>
+          )}
         </div>
         <div className="flex gap-2 border-t border-border pt-3">
-          <Input placeholder="New tier name" value={newName} onChange={(e) => setNewName(e.target.value)} />
-          <Button onClick={add}>Add</Button>
+          <Input
+            placeholder="New tier name"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && add()}
+          />
+          <Button onClick={add} disabled={!newName.trim()}>Add</Button>
         </div>
       </CardContent>
     </Card>

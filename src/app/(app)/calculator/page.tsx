@@ -1,13 +1,19 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import {
-  Card, CardContent, Button, Input, Field,
-} from '@/components/ui/primitives';
-import { formatCurrency } from '@/lib/utils';
-import { cn } from '@/lib/utils';
+import { useState, useEffect, useMemo } from 'react';
+import { Card, CardContent, Button, Input, Field, PageHeader, Badge } from '@/components/ui/primitives';
+import { formatCurrency, cn } from '@/lib/utils';
+import { Calculator, RotateCcw, Sparkles } from 'lucide-react';
 
 type Tab = 'fwd' | 'rev';
+type Freq = 'daily' | 'weekly';
+
+// MCA industry constants (per JJ's spec)
+const BUSINESS_DAYS_PER_WEEK = 5;
+const WEEKS_PER_MONTH = 4;
+const WEEKS_PER_YEAR = 52;
+const BUSINESS_DAYS_PER_MONTH = BUSINESS_DAYS_PER_WEEK * WEEKS_PER_MONTH; // 20
+const BUSINESS_DAYS_PER_YEAR = BUSINESS_DAYS_PER_WEEK * WEEKS_PER_YEAR;   // 260
 
 export default function CalculatorPage() {
   const [tab, setTab] = useState<Tab>('fwd');
@@ -16,38 +22,40 @@ export default function CalculatorPage() {
   useEffect(() => {
     fetch('/api/settings/commission-rules')
       .then((r) => r.json())
-      .then((j) => setCommissionRules(j.rules ?? j.data ?? []))
+      .then((j) => {
+        const rules = (j.rules ?? j.data ?? []).map((r: { threshold: number | string; commissionPct: number | string }) => ({
+          threshold: Number(r.threshold),
+          commissionPct: Number(r.commissionPct),
+        }));
+        setCommissionRules(rules);
+      })
       .catch(() => setCommissionRules([]));
   }, []);
 
   return (
-    <div className="space-y-6 max-w-3xl">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">🧮 Calculator</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Compute deal terms or reverse-engineer an offer from observed deposit and payment.
-        </p>
-      </header>
+    <div className="space-y-6">
+      <PageHeader
+        title="Calculator"
+        description="Forward MCA calculations and reverse-engineer offers from observed deposits + payments."
+      />
 
-      <div className="flex gap-1 bg-card border border-border rounded-lg p-1">
-        <button
-          onClick={() => setTab('fwd')}
-          className={cn(
-            'flex-1 px-4 py-2 rounded text-sm font-medium transition',
-            tab === 'fwd' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-          )}
-        >
-          Deal Calculator
-        </button>
-        <button
-          onClick={() => setTab('rev')}
-          className={cn(
-            'flex-1 px-4 py-2 rounded text-sm font-medium transition',
-            tab === 'rev' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-          )}
-        >
-          Reverse Calculator
-        </button>
+      <div className="inline-flex bg-card border border-border rounded-lg p-1">
+        {([
+          { k: 'fwd', label: 'Deal Calculator', icon: Calculator },
+          { k: 'rev', label: 'Reverse Calculator', icon: RotateCcw },
+        ] as const).map(({ k, label, icon: Icon }) => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 rounded text-sm font-medium transition',
+              tab === k ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </button>
+        ))}
       </div>
 
       {tab === 'fwd' ? <ForwardCalc rules={commissionRules} /> : <ReverseCalc />}
@@ -55,231 +63,525 @@ export default function CalculatorPage() {
   );
 }
 
+/* ============================================================
+   FORWARD CALCULATOR
+   ============================================================ */
+
 function ForwardCalc({ rules }: { rules: { threshold: number; commissionPct: number }[] }) {
   const [funding, setFunding] = useState('');
   const [factorRate, setFactorRate] = useState('');
   const [origPct, setOrigPct] = useState('');
   const [nPay, setNPay] = useState('');
-  const [freq, setFreq] = useState<'daily' | 'weekly'>('daily');
+  const [freq, setFreq] = useState<Freq>('daily');
 
   const fund = parseFloat(funding) || 0;
   const fr = parseFloat(factorRate) || 0;
   const orig = parseFloat(origPct) || 0;
   const n = parseFloat(nPay) || 0;
 
+  // Math (true MCA structure: 5 business days/wk)
   const payback = fund * fr;
   const fee = fund * (orig / 100);
   const net = fund - fee;
-  const payment = n ? payback / n : 0;
   const totalCost = payback - fund;
-  const termDays = freq === 'daily' ? n : n * 7;
-  const termStr = !n ? '—' : termDays >= 7 ? `${Math.round(termDays / 7)} weeks (${termDays} days)` : `${termDays} days`;
 
-  // Calc commission from rules — find highest threshold ≤ factor rate
+  // Term in business days (always)
+  const termBusinessDays = freq === 'daily' ? n : n * BUSINESS_DAYS_PER_WEEK;
+  const termWeeks = termBusinessDays / BUSINESS_DAYS_PER_WEEK;
+  const termMonths = termBusinessDays / BUSINESS_DAYS_PER_MONTH;
+
+  // Per-payment amount
+  const paymentAmount = n ? payback / n : 0;
+
+  // Daily / weekly / monthly equivalents (for both directions of view)
+  const dailyEquiv = termBusinessDays > 0 ? payback / termBusinessDays : 0;
+  const weeklyEquiv = termWeeks > 0 ? payback / termWeeks : 0;
+  const monthlyEquiv = termMonths > 0 ? payback / termMonths : 0;
+
+  // Commission from rules table (descending walk)
   let commissionPct = 0;
   if (rules.length && fr > 0) {
     const sorted = [...rules].sort((a, b) => a.threshold - b.threshold);
-    for (const r of sorted) {
-      if (fr >= r.threshold) commissionPct = r.commissionPct;
+    if (fr >= sorted[0].threshold) {
+      for (const r of sorted) {
+        if (fr >= r.threshold) commissionPct = r.commissionPct;
+      }
     }
   }
   const commission = fund * (commissionPct / 100);
 
   function clear() {
-    setFunding(''); setFactorRate(''); setOrigPct(''); setNPay('');
+    setFunding('');
+    setFactorRate('');
+    setOrigPct('');
+    setNPay('');
   }
 
-  const fmt = (n: number) => isNaN(n) || !isFinite(n) || !n ? '—' : formatCurrency(n);
+  const fmt = (x: number) => (!isFinite(x) || !x ? '—' : formatCurrency(x));
+  const termLabel = !n
+    ? '—'
+    : `${termBusinessDays} business days · ${termWeeks.toFixed(1)} weeks · ${termMonths.toFixed(2)} months`;
 
   return (
-    <div className="grid md:grid-cols-2 gap-4">
-      <Card>
-        <CardContent className="p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-base font-semibold">Deal Calculator</div>
-              <div className="text-xs text-muted-foreground mt-0.5">Results update instantly</div>
+    <div className="grid gap-4 lg:grid-cols-5">
+      {/* Inputs (2 cols on lg) */}
+      <div className="lg:col-span-2">
+        <Card>
+          <CardContent className="p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold">Inputs</div>
+              <Button variant="ghost" size="sm" onClick={clear}>Clear</Button>
             </div>
-            <Button variant="ghost" size="sm" onClick={clear}>Clear</Button>
-          </div>
-          <Field label="Funding Amount ($)">
-            <Input type="number" placeholder="e.g. 100000" value={funding} onChange={(e) => setFunding(e.target.value)} />
-          </Field>
-          <Field label="Factor Rate">
-            <Input type="number" step="0.001" placeholder="e.g. 1.45" value={factorRate} onChange={(e) => setFactorRate(e.target.value)} />
-          </Field>
-          <Field label="Origination Fee (%)">
-            <Input type="number" step="0.1" placeholder="e.g. 3" value={origPct} onChange={(e) => setOrigPct(e.target.value)} />
-          </Field>
-          <Field label="Number of Payments">
-            <Input type="number" placeholder="e.g. 100" value={nPay} onChange={(e) => setNPay(e.target.value)} />
-          </Field>
-          <Field label="Payment Frequency">
-            <div className="flex gap-2">
-              {(['daily', 'weekly'] as const).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setFreq(m)}
-                  className={cn(
-                    'flex-1 px-4 py-2 rounded border-2 text-sm font-medium transition',
-                    freq === m ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  {m === 'daily' ? 'Daily' : 'Weekly'}
-                </button>
-              ))}
-            </div>
-          </Field>
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardContent className="p-5 space-y-1">
-          <div className="text-base font-semibold mb-3">Results</div>
-          <Row label="Payback Amount" value={fmt(payback)} />
-          <Row label="Net Funded (after fee)" value={fmt(net)} />
-          <Row label="Origination Fee" value={fmt(fee)} />
-          <Row label={`Payment Per ${freq === 'daily' ? 'Day' : 'Week'}`} value={fmt(payment)} bold />
-          <Row label="Total Cost of Capital" value={fmt(totalCost)} />
-          <Row label="Term Length" value={termStr} />
-          <div className="border-t border-border my-2" />
-          <Row label="Commission %" value={commissionPct ? `${commissionPct.toFixed(1)}%` : '—'} />
-          <Row label="Commission $" value={fmt(commission)} />
-        </CardContent>
-      </Card>
+            <Field label="Funding amount">
+              <Input
+                type="number"
+                placeholder="100000"
+                value={funding}
+                onChange={(e) => setFunding(e.target.value)}
+              />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Factor rate">
+                <Input
+                  type="number"
+                  step="0.001"
+                  placeholder="1.45"
+                  value={factorRate}
+                  onChange={(e) => setFactorRate(e.target.value)}
+                />
+              </Field>
+              <Field label="Origination fee %">
+                <Input
+                  type="number"
+                  step="0.1"
+                  placeholder="3"
+                  value={origPct}
+                  onChange={(e) => setOrigPct(e.target.value)}
+                />
+              </Field>
+            </div>
+
+            <Field label="Number of payments">
+              <Input
+                type="number"
+                placeholder={freq === 'daily' ? '100' : '20'}
+                value={nPay}
+                onChange={(e) => setNPay(e.target.value)}
+              />
+            </Field>
+
+            <Field label="Payment frequency">
+              <div className="grid grid-cols-2 gap-2">
+                {(['daily', 'weekly'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setFreq(m)}
+                    className={cn(
+                      'px-4 py-2.5 rounded border-2 text-sm font-medium transition',
+                      freq === m
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
+                    )}
+                  >
+                    {m === 'daily' ? 'Daily (M–F)' : 'Weekly'}
+                  </button>
+                ))}
+              </div>
+            </Field>
+
+            <div className="text-[10px] text-muted-foreground/80 leading-relaxed pt-2 border-t border-border">
+              MCA standard: 5 business days/week · 4 weeks/month · 52 weeks/year
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Results (3 cols on lg) */}
+      <div className="lg:col-span-3 space-y-4">
+        {/* Top KPIs */}
+        <div className="grid grid-cols-3 gap-3">
+          <Kpi label={`Payment / ${freq === 'daily' ? 'day' : 'week'}`} value={fmt(paymentAmount)} primary />
+          <Kpi label="Total payback" value={fmt(payback)} />
+          <Kpi label="Net to merchant" value={fmt(net)} />
+        </div>
+
+        {/* Detail rows */}
+        <Card>
+          <CardContent className="p-0 divide-y divide-border">
+            <Row label="Funding amount" value={fmt(fund)} />
+            <Row label="Origination fee" value={fmt(fee)} hint={orig ? `${orig}%` : undefined} />
+            <Row label="Total cost of capital" value={fmt(totalCost)} />
+            <Row label="Term length" value={termLabel} />
+            <Row label="Daily payment equivalent"  value={fmt(dailyEquiv)} hint="payback ÷ business days" />
+            <Row label="Weekly payment equivalent" value={fmt(weeklyEquiv)} hint="payback ÷ weeks" />
+            <Row label="Monthly payment equivalent" value={fmt(monthlyEquiv)} hint="payback ÷ months" />
+            <Row label="Commission %" value={commissionPct ? `${commissionPct.toFixed(1)}%` : '—'} />
+            <Row label="Commission $" value={fmt(commission)} bold />
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
 
+/* ============================================================
+   REVERSE CALCULATOR — interactive sliders
+   ============================================================ */
+
 function ReverseCalc() {
+  // Observed inputs
   const [deposit, setDeposit] = useState('');
   const [payment, setPayment] = useState('');
-  const [freq, setFreq] = useState<'daily' | 'weekly'>('daily');
-  const [periods, setPeriods] = useState('');
-  const [funded, setFunded] = useState('');
+  const [freq, setFreq] = useState<Freq>('daily');
+
+  // Adjustable assumptions (sliders)
+  const [factorRate, setFactorRate] = useState(1.40);
+  const [feePct, setFeePct] = useState(5);
+  const [termWeeks, setTermWeeks] = useState(20);
+  const [autoSync, setAutoSync] = useState(true); // when one slider moves, recalc one of the others
 
   const dep = parseFloat(deposit) || 0;
   const pmt = parseFloat(payment) || 0;
-  const userPeriods = parseFloat(periods) || 0;
-  const userFunded = parseFloat(funded) || 0;
 
-  // Estimate funded amount from deposit if not provided
-  // Origination fees are typically 3-7% of funded — so deposit is ~95% of funded
-  const estFunded = userFunded || (dep > 0 ? dep / 0.95 : 0);
-
-  // Estimate factor rate
-  // Try a range of factor rates and find the one that best fits a 100-150 day daily / 16-26 week weekly term
-  // If user provided periods, use those directly
-  let bestFr = 0, bestPeriods = 0, bestPayback = 0;
-  if (estFunded > 0 && pmt > 0) {
-    if (userPeriods > 0) {
-      bestPeriods = userPeriods;
-      bestPayback = pmt * userPeriods;
-      bestFr = bestPayback / estFunded;
-    } else {
-      // Try common factor rates 1.20 - 1.55, find the one with most "natural" term length
-      let bestScore = Infinity;
-      for (let fr = 1.20; fr <= 1.55; fr += 0.005) {
-        const payback = estFunded * fr;
-        const periods = payback / pmt;
-        // Prefer terms 80-150 daily / 16-30 weekly
-        const target = freq === 'daily' ? 110 : 22;
-        const score = Math.abs(periods - target) + Math.abs(periods - Math.round(periods)) * 5;
-        if (score < bestScore) {
-          bestScore = score;
-          bestFr = fr;
-          bestPeriods = periods;
-          bestPayback = payback;
-        }
-      }
-    }
-  }
-
+  // Estimated funded amount = deposit ÷ (1 - feePct/100)
+  const estFunded = feePct < 100 ? dep / (1 - feePct / 100) : 0;
   const fee = estFunded - dep;
-  const feePct = estFunded > 0 ? (fee / estFunded) * 100 : 0;
-  const totalCost = bestPayback - estFunded;
-  const termDays = freq === 'daily' ? bestPeriods : bestPeriods * 7;
-  const termStr = !bestPeriods ? '—' : termDays >= 7 ? `${Math.round(termDays / 7)} weeks (${Math.round(termDays)} days)` : `${Math.round(termDays)} days`;
 
-  function clear() {
-    setDeposit(''); setPayment(''); setPeriods(''); setFunded('');
+  // Term in business days
+  const termBusinessDays = termWeeks * BUSINESS_DAYS_PER_WEEK;
+
+  // Predicted payback from funded × factor
+  const predictedPayback = estFunded * factorRate;
+
+  // Predicted payment amount based on factor + term
+  const predictedPaymentAmount = freq === 'daily'
+    ? (termBusinessDays > 0 ? predictedPayback / termBusinessDays : 0)
+    : (termWeeks > 0 ? predictedPayback / termWeeks : 0);
+
+  // "Cleanness" score — how close are we to a clean MCA structure?
+  const cleanScore = useMemo(() => {
+    if (!dep || !pmt) return null;
+
+    // Score factors:
+    //   - payment match: how close is predicted payment to observed?
+    //   - rounded fee %: 3, 5, 7, 10 are clean
+    //   - rounded factor: 1.30, 1.35, 1.40, 1.45, 1.50, 1.55 are clean
+    //   - rounded term: 10, 12, 16, 20, 24, 30, 40 weeks are clean
+    const paymentDelta = pmt > 0 ? Math.abs(predictedPaymentAmount - pmt) / pmt : 1;
+    const cleanFactors = [1.30, 1.35, 1.40, 1.45, 1.49, 1.50];
+    const factorDelta = Math.min(...cleanFactors.map((f) => Math.abs(factorRate - f)));
+    const cleanFees = [3, 5, 7, 10];
+    const feeDelta = Math.min(...cleanFees.map((f) => Math.abs(feePct - f)));
+    const cleanTerms = [10, 12, 16, 20, 24, 30, 40];
+    const termDelta = Math.min(...cleanTerms.map((t) => Math.abs(termWeeks - t)));
+
+    const score = Math.max(0, 100 - (paymentDelta * 60 + factorDelta * 80 + feeDelta * 5 + termDelta * 2));
+    return Math.round(score);
+  }, [dep, pmt, predictedPaymentAmount, factorRate, feePct, termWeeks]);
+
+  // When user changes deposit/payment, try to find a sensible default
+  useEffect(() => {
+    if (!autoSync || !dep || !pmt) return;
+    // For the current factor + fee, infer term from observed payment
+    const funded = dep / (1 - feePct / 100);
+    const estPayback = funded * factorRate;
+    if (freq === 'daily') {
+      const estDays = estPayback / pmt;
+      const estWks = estDays / BUSINESS_DAYS_PER_WEEK;
+      if (estWks > 4 && estWks < 60) setTermWeeks(Math.round(estWks));
+    } else {
+      const estWks = estPayback / pmt;
+      if (estWks > 4 && estWks < 60) setTermWeeks(Math.round(estWks));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dep, pmt, freq]); // intentionally NOT autoSync/factorRate/feePct — those are user-driven
+
+  function reset() {
+    setDeposit('');
+    setPayment('');
+    setFactorRate(1.40);
+    setFeePct(5);
+    setTermWeeks(20);
   }
 
-  const fmt = (n: number) => isNaN(n) || !isFinite(n) || !n ? '—' : formatCurrency(n);
-  const fmtR = (n: number) => isNaN(n) || !isFinite(n) || !n ? '—' : n.toFixed(3);
+  function snapToClean() {
+    // Snap all sliders to nearest clean values
+    const cleanFactors = [1.30, 1.35, 1.40, 1.45, 1.49];
+    const cleanFees = [3, 5, 7, 10];
+    const cleanTerms = [10, 12, 16, 20, 24, 30];
+    setFactorRate(cleanFactors.reduce((a, b) => Math.abs(b - factorRate) < Math.abs(a - factorRate) ? b : a));
+    setFeePct(cleanFees.reduce((a, b) => Math.abs(b - feePct) < Math.abs(a - feePct) ? b : a));
+    setTermWeeks(cleanTerms.reduce((a, b) => Math.abs(b - termWeeks) < Math.abs(a - termWeeks) ? b : a));
+  }
+
+  const fmt = (x: number) => (!isFinite(x) || !x ? '—' : formatCurrency(x));
 
   return (
-    <div className="grid md:grid-cols-2 gap-4">
-      <Card>
-        <CardContent className="p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-base font-semibold">Reverse MCA Calculator</div>
-              <div className="text-xs text-muted-foreground mt-0.5">Figure out the deal from what you can see</div>
+    <div className="grid gap-4 lg:grid-cols-5">
+      {/* Inputs + sliders */}
+      <div className="lg:col-span-2 space-y-4">
+        <Card>
+          <CardContent className="p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold">Observed</div>
+              <Button variant="ghost" size="sm" onClick={reset}>Reset</Button>
             </div>
-            <Button variant="ghost" size="sm" onClick={clear}>Clear</Button>
-          </div>
 
-          <div className="rounded bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
-            Example: $95K deposit, $5,950/week payments for ~32 weeks. Enter what you know, calculator estimates the rest.
-          </div>
-
-          <Field label="Deposit Seen in Bank ($)" hint="What you see deposited from the funder">
-            <Input type="number" placeholder="e.g. 95000" value={deposit} onChange={(e) => setDeposit(e.target.value)} />
-          </Field>
-          <Field label="Payment Amount ($)" hint="Daily or weekly payment going out">
-            <Input type="number" placeholder="e.g. 5950" value={payment} onChange={(e) => setPayment(e.target.value)} />
-          </Field>
-          <Field label="Payment Frequency">
-            <div className="flex gap-2">
-              {(['daily', 'weekly'] as const).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setFreq(m)}
-                  className={cn(
-                    'flex-1 px-4 py-2 rounded border-2 text-sm font-medium transition',
-                    freq === m ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  {m === 'daily' ? 'Daily' : 'Weekly'}
-                </button>
-              ))}
+            <div className="rounded bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
+              Enter what you can see — the bank deposit and the payment going out. Then adjust the sliders to find the most likely MCA structure.
             </div>
-          </Field>
-          <Field label="Number of Payments (optional)" hint="Leave blank to estimate">
-            <Input type="number" placeholder="e.g. 32" value={periods} onChange={(e) => setPeriods(e.target.value)} />
-          </Field>
-          <Field label="Funded Amount (optional)" hint="Leave blank to estimate from deposit">
-            <Input type="number" placeholder="e.g. 100000" value={funded} onChange={(e) => setFunded(e.target.value)} />
-          </Field>
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardContent className="p-5 space-y-1">
-          <div className="text-base font-semibold mb-3">Estimated Deal</div>
-          <Row label="Estimated Funded Amount" value={fmt(estFunded)} bold />
-          <Row label="Estimated Origination Fee" value={fmt(fee)} />
-          <Row label="Estimated Fee %" value={feePct ? `${feePct.toFixed(1)}%` : '—'} />
-          <div className="border-t border-border my-2" />
-          <Row label="Estimated Factor Rate" value={fmtR(bestFr)} bold />
-          <Row label="Estimated Payback" value={fmt(bestPayback)} />
-          <Row label="Total Cost of Capital" value={fmt(totalCost)} />
-          <Row label="Term Length" value={termStr} />
-        </CardContent>
-      </Card>
+            <Field label="Deposit seen" hint="Net wired to merchant">
+              <Input
+                type="number"
+                placeholder="95000"
+                value={deposit}
+                onChange={(e) => setDeposit(e.target.value)}
+              />
+            </Field>
+
+            <Field label="Payment amount" hint={`Per ${freq === 'daily' ? 'business day' : 'week'}`}>
+              <Input
+                type="number"
+                placeholder={freq === 'daily' ? '710' : '3550'}
+                value={payment}
+                onChange={(e) => setPayment(e.target.value)}
+              />
+            </Field>
+
+            <Field label="Payment frequency">
+              <div className="grid grid-cols-2 gap-2">
+                {(['daily', 'weekly'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setFreq(m)}
+                    className={cn(
+                      'px-3 py-2 rounded border-2 text-sm font-medium transition',
+                      freq === m
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'border-border text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    {m === 'daily' ? 'Daily' : 'Weekly'}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-5 space-y-5">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold">Adjust assumptions</div>
+              <Button variant="outline" size="sm" onClick={snapToClean} className="gap-1.5">
+                <Sparkles className="h-3 w-3" />
+                Snap to clean
+              </Button>
+            </div>
+
+            <Slider
+              label="Factor rate"
+              value={factorRate}
+              min={1.10}
+              max={1.55}
+              step={0.005}
+              onChange={setFactorRate}
+              format={(v) => v.toFixed(3)}
+              cleanValues={[1.30, 1.35, 1.40, 1.45, 1.49]}
+            />
+
+            <Slider
+              label="Origination fee %"
+              value={feePct}
+              min={0}
+              max={15}
+              step={0.5}
+              onChange={setFeePct}
+              format={(v) => `${v.toFixed(1)}%`}
+              cleanValues={[3, 5, 7, 10]}
+            />
+
+            <Slider
+              label="Term (weeks)"
+              value={termWeeks}
+              min={4}
+              max={60}
+              step={1}
+              onChange={setTermWeeks}
+              format={(v) => `${v} wks (${v * BUSINESS_DAYS_PER_WEEK} days)`}
+              cleanValues={[10, 12, 16, 20, 24, 30, 40]}
+            />
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Results panel */}
+      <div className="lg:col-span-3 space-y-4">
+        {/* Match quality + key estimates */}
+        <div className="grid grid-cols-3 gap-3">
+          <Kpi label="Estimated funded" value={fmt(estFunded)} primary />
+          <Kpi label="Predicted payment" value={fmt(predictedPaymentAmount)} />
+          <Kpi
+            label="Match quality"
+            value={cleanScore !== null ? `${cleanScore}/100` : '—'}
+            tone={cleanScore === null ? undefined : cleanScore >= 75 ? 'success' : cleanScore >= 50 ? 'warning' : 'danger'}
+          />
+        </div>
+
+        <Card>
+          <CardContent className="p-0 divide-y divide-border">
+            <Row label="Estimated funded amount" value={fmt(estFunded)} hint="deposit ÷ (1 − fee%)" />
+            <Row label="Origination fee" value={fmt(fee)} hint={`${feePct.toFixed(1)}%`} />
+            <Row label="Predicted payback" value={fmt(predictedPayback)} hint={`× factor ${factorRate.toFixed(3)}`} />
+            <Row label="Term length" value={`${termWeeks} weeks · ${termBusinessDays} business days`} />
+            <Row
+              label="Predicted payment"
+              value={fmt(predictedPaymentAmount)}
+              hint={pmt > 0 ? `vs observed ${formatCurrency(pmt)} (${((Math.abs(predictedPaymentAmount - pmt) / pmt) * 100).toFixed(1)}% off)` : undefined}
+              bold
+            />
+          </CardContent>
+        </Card>
+
+        {/* Match quality detail */}
+        {cleanScore !== null && pmt > 0 && (
+          <Card>
+            <CardContent className="p-4 space-y-2 text-xs">
+              <div className="text-sm font-semibold mb-1">Match assessment</div>
+              {cleanScore >= 75 ? (
+                <div className="text-emerald-700">
+                  ✓ Strong match — predicted payment is close to observed and assumptions are clean MCA values.
+                </div>
+              ) : cleanScore >= 50 ? (
+                <div className="text-amber-700">
+                  ~ Plausible match — try adjusting the sliders or click <strong>Snap to clean</strong> to find a more typical structure.
+                </div>
+              ) : (
+                <div className="text-rose-700">
+                  ✗ Weak match — the predicted payment is far from observed. Try a different factor rate, term, or fee%.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }
 
-function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+/* ============================================================
+   Sub-components
+   ============================================================ */
+
+function Kpi({
+  label,
+  value,
+  primary,
+  tone,
+}: {
+  label: string;
+  value: string;
+  primary?: boolean;
+  tone?: 'success' | 'warning' | 'danger';
+}) {
   return (
-    <div className="flex justify-between items-center py-2 border-b border-border last:border-0">
-      <div className="text-sm text-muted-foreground">{label}</div>
+    <div className={cn(
+      'rounded-lg border p-4',
+      primary ? 'bg-primary/5 border-primary/20' : 'bg-card border-border',
+      tone === 'success' && 'bg-emerald-50 border-emerald-200',
+      tone === 'warning' && 'bg-amber-50 border-amber-200',
+      tone === 'danger' && 'bg-rose-50 border-rose-200',
+    )}>
+      <div className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">{label}</div>
       <div className={cn(
-        'tabular-nums',
-        bold ? 'text-base font-bold text-primary' : 'text-sm font-medium'
+        'text-xl font-semibold tabular-nums mt-1',
+        primary && 'text-primary',
+        tone === 'success' && 'text-emerald-700',
+        tone === 'warning' && 'text-amber-700',
+        tone === 'danger' && 'text-rose-700',
       )}>{value}</div>
+    </div>
+  );
+}
+
+function Row({ label, value, hint, bold }: { label: string; value: string; hint?: string; bold?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between px-4 py-2.5 gap-3">
+      <div className="text-sm text-muted-foreground">{label}</div>
+      <div className="text-right">
+        <div className={cn('tabular-nums', bold ? 'text-base font-semibold text-primary' : 'text-sm font-medium')}>
+          {value}
+        </div>
+        {hint && <div className="text-[10px] text-muted-foreground/70">{hint}</div>}
+      </div>
+    </div>
+  );
+}
+
+function Slider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  format,
+  cleanValues,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+  format: (v: number) => string;
+  cleanValues?: number[];
+}) {
+  const pct = ((value - min) / (max - min)) * 100;
+  const isClean = cleanValues?.some((c) => Math.abs(c - value) < step / 2);
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-1.5">
+        <div className="text-xs font-medium text-muted-foreground">{label}</div>
+        <div className={cn(
+          'text-sm font-semibold tabular-nums',
+          isClean ? 'text-emerald-600' : 'text-foreground'
+        )}>
+          {format(value)} {isClean && <span className="text-[10px] ml-1">★</span>}
+        </div>
+      </div>
+      <div className="relative h-1.5 bg-muted rounded-full">
+        <div
+          className="absolute h-full bg-primary rounded-full transition-all"
+          style={{ width: `${pct}%` }}
+        />
+        {cleanValues?.map((c) => {
+          if (c < min || c > max) return null;
+          const cPct = ((c - min) / (max - min)) * 100;
+          return (
+            <div
+              key={c}
+              className="absolute top-1/2 -translate-y-1/2 w-0.5 h-3 bg-emerald-400/60 rounded-full"
+              style={{ left: `${cPct}%` }}
+              title={`Clean: ${format(c)}`}
+            />
+          );
+        })}
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          className="absolute inset-0 w-full opacity-0 cursor-pointer"
+        />
+      </div>
     </div>
   );
 }

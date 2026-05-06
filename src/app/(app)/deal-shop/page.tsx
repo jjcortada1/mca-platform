@@ -1,9 +1,9 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Card, CardContent, Badge, Field } from '@/components/ui/primitives';
+import { Button, Card, CardContent, Badge, PageHeader } from '@/components/ui/primitives';
 import { US_STATES, COMMON_INDUSTRIES, CREDIT_TIER_OPTIONS } from '@/lib/constants';
-import { ChevronDown, ChevronUp, Send } from 'lucide-react';
+import { Send, ChevronDown, ChevronRight, Mail, Phone, MapPin, Ban, FileText, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { MatchResult } from '@/lib/matching/engine';
 
@@ -21,7 +21,7 @@ interface FunderDetail {
 }
 
 const REVENUE_OPTIONS = [
-  { value: '', label: 'Revenue ▾' },
+  { value: '', label: '— Revenue —' },
   { value: '0-15000', label: '$0 – $15K' },
   { value: '15000-25000', label: '$15K – $25K' },
   { value: '25000-50000', label: '$25K – $50K' },
@@ -33,7 +33,7 @@ const REVENUE_OPTIONS = [
 ];
 
 const POSITION_OPTIONS = [
-  { value: '', label: 'Position ▾' },
+  { value: '', label: '— Position —' },
   { value: '0', label: 'Position 0 (no stack)' },
   { value: '1', label: 'Position 1' },
   { value: '2', label: 'Position 2' },
@@ -43,7 +43,7 @@ const POSITION_OPTIONS = [
 ];
 
 const NSF_OPTIONS = [
-  { value: '', label: 'NSFs ▾' },
+  { value: '', label: '— NSFs —' },
   { value: '0', label: '0 NSFs' },
   { value: '1', label: '1 NSF' },
   { value: '2', label: '2 NSFs' },
@@ -74,17 +74,16 @@ export default function DealShopPage() {
   const [funderMap, setFunderMap] = useState<Map<string, FunderDetail>>(new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [openFunders, setOpenFunders] = useState<Set<string>>(new Set());
-  const [activeTier, setActiveTier] = useState<string | null>(null);
+  const [activeTier, setActiveTier] = useState<string>('all');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  // Load full funder details once for showing emails/contacts on cards
   useEffect(() => {
     fetch('/api/funders')
       .then((r) => r.json())
       .then((j) => {
-        const list = j.data ?? j.funders ?? [];
+        const list: FunderDetail[] = j.data ?? j.funders ?? [];
         const m = new Map<string, FunderDetail>();
-        list.forEach((f: FunderDetail) => m.set(f.id, f));
+        list.forEach((f) => m.set(f.id, f));
         setFunderMap(m);
       })
       .catch(() => {});
@@ -96,7 +95,7 @@ export default function DealShopPage() {
     if (!form.position) missing.push('Position');
     if (form.nsfs === '') missing.push('NSF Count');
     if (missing.length) {
-      setError('Please select: ' + missing.join(', '));
+      setError('Required: ' + missing.join(', '));
       return;
     }
 
@@ -122,257 +121,279 @@ export default function DealShopPage() {
         return;
       }
       setResults(json);
-      setOpenFunders(new Set()); // reset
-
-      // Auto-select first tier
-      const matched = (json.matched ?? []) as MatchResult[];
-      const tiers = collectTiers(matched, funderMap);
-      setActiveTier(tiers[0]?.tier ?? null);
+      setActiveTier('all');
+      setExpanded(new Set());
     } finally {
       setLoading(false);
     }
   }
 
-  function toFundFromShop() {
-    const params = new URLSearchParams({
-      shop: '1',
-      revenue: form.revenue,
-      credit: form.credit,
-      nsfs: form.nsfs,
-      position: form.position,
-      state: form.state,
-      industry: form.industry,
-      reverse: form.reverseConsolidation ? '1' : '0',
-    });
+  function toSubmit() {
+    const params = new URLSearchParams({ shop: '1' });
     router.push(`/submit?${params.toString()}`);
   }
 
-  // Group matched funders by tier
-  const groupedByTier = results
-    ? collectTiers(results.matched, funderMap)
-    : [];
+  // Group matched + excluded by tier
+  const tierGroups = useMemo(() => {
+    if (!results) return [];
+    const map = new Map<string, { matched: MatchResult[]; excluded: MatchResult[] }>();
+    function tierFor(funderId: string): string {
+      const f = funderMap.get(funderId);
+      return f?.tiers && f.tiers.length > 0 ? f.tiers[0].name : 'Untiered';
+    }
+    for (const m of results.matched) {
+      const t = tierFor(m.funderId);
+      if (!map.has(t)) map.set(t, { matched: [], excluded: [] });
+      map.get(t)!.matched.push(m);
+    }
+    for (const e of results.excluded) {
+      const t = tierFor(e.funderId);
+      if (!map.has(t)) map.set(t, { matched: [], excluded: [] });
+      map.get(t)!.excluded.push(e);
+    }
+    return Array.from(map.entries())
+      .map(([tier, v]) => ({ tier, ...v }))
+      .sort((a, b) => a.tier.localeCompare(b.tier));
+  }, [results, funderMap]);
 
-  const activeGroup = groupedByTier.find((g) => g.tier === activeTier);
-  const matchedFunderIds = new Set((results?.matched ?? []).map((m) => m.funderId));
-  const excludedInActiveTier = activeGroup
-    ? results?.excluded.filter((e) => {
-      const f = funderMap.get(e.funderId);
-      const tName = f?.tiers?.[0]?.name ?? 'Untiered';
-      return tName === activeTier;
-    }) ?? []
-    : [];
+  const filteredGroups = activeTier === 'all'
+    ? tierGroups
+    : tierGroups.filter((g) => g.tier === activeTier);
+
+  const totalMatched = results?.matched.length ?? 0;
+  const totalExcluded = results?.excluded.length ?? 0;
+
+  function toggleExpand(id: string) {
+    const next = new Set(expanded);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setExpanded(next);
+  }
 
   return (
-    <div className="space-y-6 max-w-5xl">
-      <header className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">🛒 Deal Shopping</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Find qualifying funders for a deal. Once you have a list, head to <strong>Submit Deal</strong> to send it.
-          </p>
-        </div>
-      </header>
+    <div className="space-y-5">
+      <PageHeader
+        title="Shop Deals"
+        description="Match a deal profile to qualifying funders. Then send via Submit Deal."
+        actions={
+          results && totalMatched > 0 ? (
+            <Button onClick={toSubmit} className="gap-2">
+              <Send className="h-4 w-4" />
+              Submit deal →
+            </Button>
+          ) : undefined
+        }
+      />
 
+      {/* Top filter bar */}
       <Card>
-        <CardContent className="p-5 space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <SelectField
-              value={form.revenue}
-              onChange={(v) => setForm({ ...form, revenue: v })}
-              options={REVENUE_OPTIONS}
-            />
-            <SelectField
+        <CardContent className="p-4 space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+            <Select value={form.revenue} onChange={(v) => setForm({ ...form, revenue: v })} options={REVENUE_OPTIONS} />
+            <Select
               value={form.credit}
               onChange={(v) => setForm({ ...form, credit: v })}
               options={[
-                { value: 'unknown', label: 'Credit ▾' },
+                { value: 'unknown', label: '— Credit —' },
                 ...CREDIT_TIER_OPTIONS.filter((o) => o.value !== 'unknown'),
               ]}
             />
-            <SelectField
-              value={form.nsfs}
-              onChange={(v) => setForm({ ...form, nsfs: v })}
-              options={NSF_OPTIONS}
-            />
-            <SelectField
-              value={form.position}
-              onChange={(v) => setForm({ ...form, position: v })}
-              options={POSITION_OPTIONS}
-            />
-            <SelectField
+            <Select value={form.nsfs} onChange={(v) => setForm({ ...form, nsfs: v })} options={NSF_OPTIONS} />
+            <Select value={form.position} onChange={(v) => setForm({ ...form, position: v })} options={POSITION_OPTIONS} />
+            <Select
               value={form.state}
               onChange={(v) => setForm({ ...form, state: v })}
               options={[
-                { value: 'other', label: 'State ▾' },
-                ...US_STATES.map((s) => ({ value: s.code, label: s.code + ' — ' + s.name })),
+                { value: 'other', label: '— State —' },
+                ...US_STATES.map((s) => ({ value: s.code, label: `${s.code} · ${s.name}` })),
               ]}
             />
-            <SelectField
+            <Select
               value={form.industry}
               onChange={(v) => setForm({ ...form, industry: v })}
               options={[
-                { value: 'other', label: 'Industry ▾' },
+                { value: 'other', label: '— Industry —' },
                 ...COMMON_INDUSTRIES.map((i) => ({ value: i, label: i })),
               ]}
             />
           </div>
-          <div className="flex items-center gap-4 flex-wrap">
-            <Button onClick={runMatch} disabled={loading} className="px-6">
-              {loading ? 'Searching…' : 'Find Funders →'}
-            </Button>
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-border">
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={form.reverseConsolidation}
                 onChange={(e) => setForm({ ...form, reverseConsolidation: e.target.checked })}
+                className="rounded"
               />
-              Reverse Consolidation
+              <span>Reverse Consolidation</span>
             </label>
+            <Button onClick={runMatch} loading={loading} className="gap-1.5 px-6">
+              <Zap className="h-4 w-4" />
+              Find Funders
+            </Button>
           </div>
-          {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</div>}
+
+          {error && (
+            <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded px-3 py-2">
+              {error}
+            </div>
+          )}
         </CardContent>
       </Card>
 
+      {/* Results */}
       {results && (
-        <>
-          {groupedByTier.length === 0 ? (
-            <Card>
-              <CardContent className="p-8 text-center text-sm text-muted-foreground">
-                No qualifying funders found for this deal profile.
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {/* Tier tabs */}
-              <div className="flex flex-wrap gap-1 border-b border-border">
-                {groupedByTier.map((g) => (
+        totalMatched === 0 && totalExcluded === 0 ? (
+          <Card>
+            <CardContent className="p-12 text-center text-sm text-muted-foreground">
+              No funders configured yet. Add some in the <a href="/funders" className="text-primary hover:underline">Funders</a> tab.
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid lg:grid-cols-[200px_1fr] gap-4">
+            {/* Tier rail */}
+            <Card className="self-start lg:sticky lg:top-4">
+              <CardContent className="p-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-3 py-2">
+                  Filter by tier
+                </div>
+                <button
+                  onClick={() => setActiveTier('all')}
+                  className={cn(
+                    'w-full flex items-center justify-between px-3 py-2 rounded text-sm transition-colors',
+                    activeTier === 'all' ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'
+                  )}
+                >
+                  <span>All tiers</span>
+                  <Badge variant="outline" className="text-[10px]">{totalMatched + totalExcluded}</Badge>
+                </button>
+                {tierGroups.map((g) => (
                   <button
                     key={g.tier}
                     onClick={() => setActiveTier(g.tier)}
                     className={cn(
-                      'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition',
-                      activeTier === g.tier
-                        ? 'border-primary text-foreground'
-                        : 'border-transparent text-muted-foreground hover:text-foreground'
+                      'w-full flex items-center justify-between px-3 py-2 rounded text-sm transition-colors',
+                      activeTier === g.tier ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'
                     )}
                   >
-                    {g.tier}
-                    <span className="ml-2 text-xs text-muted-foreground">({g.funders.length})</span>
+                    <span className="truncate">{g.tier}</span>
+                    <span className="flex items-center gap-1 shrink-0">
+                      {g.matched.length > 0 && <Badge variant="success" className="text-[10px]">{g.matched.length}</Badge>}
+                      {g.excluded.length > 0 && <Badge variant="default" className="text-[10px]">{g.excluded.length}</Badge>}
+                    </span>
                   </button>
                 ))}
-              </div>
+              </CardContent>
+            </Card>
 
-              {/* Active tier funders */}
-              {activeGroup && (
-                <div className="space-y-3">
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {activeGroup.funders.map((m) => {
-                      const f = funderMap.get(m.funderId);
-                      const isOpen = openFunders.has(m.funderId);
-                      return (
-                        <Card key={m.funderId} className="hover:shadow-sm transition">
-                          <button
-                            onClick={() => {
-                              const next = new Set(openFunders);
-                              if (next.has(m.funderId)) next.delete(m.funderId);
-                              else next.add(m.funderId);
-                              setOpenFunders(next);
-                            }}
-                            className="w-full text-left p-4 flex items-center justify-between"
-                          >
-                            <div className="font-semibold text-sm">{m.funderName}</div>
-                            {isOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-                          </button>
-                          {isOpen && f && (
-                            <div className="px-4 pb-4 space-y-3 text-xs border-t border-border pt-3">
-                              {(f.contacts ?? []).filter((c) => c.email).length > 0 && (
-                                <div>
-                                  <div className="font-medium text-muted-foreground uppercase tracking-wide text-[10px] mb-1">Submission Emails</div>
-                                  <div className="space-y-1">
-                                    {(f.contacts ?? []).filter((c) => c.email).map((c, i) => (
-                                      <div key={i} className="font-mono text-foreground">✉ {c.email}</div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              {(f.contacts ?? []).filter((c) => c.phone).length > 0 && (
-                                <div>
-                                  <div className="font-medium text-muted-foreground uppercase tracking-wide text-[10px] mb-1">Contacts</div>
-                                  <div className="space-y-1">
-                                    {(f.contacts ?? []).filter((c) => c.phone).map((c, i) => (
-                                      <div key={i}>📞 <span className="font-medium">{c.name}</span> <span className="text-muted-foreground">{c.phone}</span></div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              {((f.restrictedStates ?? []).length > 0 || (f.restrictedIndustries ?? []).length > 0 || f.notes) && (
-                                <div className="bg-amber-50 border border-amber-200 rounded p-2">
-                                  {(f.restrictedStates ?? []).length > 0 && (
-                                    <div>🚫 Not in: {f.restrictedStates!.join(', ')}</div>
-                                  )}
-                                  {(f.restrictedIndustries ?? []).length > 0 && (
-                                    <div>⛔ No: {f.restrictedIndustries!.join(', ')}</div>
-                                  )}
-                                  {f.notes && <div className="mt-1">ℹ️ {f.notes}</div>}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </Card>
-                      );
-                    })}
-                  </div>
+            {/* Results table */}
+            <div className="space-y-4 min-w-0">
+              {filteredGroups.map((g) => (
+                <div key={g.tier}>
+                  {activeTier === 'all' && (
+                    <div className="flex items-baseline gap-3 mb-2 px-1">
+                      <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground/80">{g.tier}</h3>
+                      <span className="text-xs text-muted-foreground">
+                        {g.matched.length} qualifying · {g.excluded.length} excluded
+                      </span>
+                    </div>
+                  )}
 
-                  {/* Excluded in this tier */}
-                  {excludedInActiveTier.length > 0 && (
-                    <Card>
-                      <CardContent className="p-4">
-                        <div className="text-xs font-bold uppercase text-muted-foreground tracking-wide mb-2">
-                          Not Qualifying in This Tier
-                        </div>
-                        <div className="space-y-1">
-                          {excludedInActiveTier.map((e) => (
-                            <div key={e.funderId} className="flex justify-between text-xs py-1 border-b border-border last:border-0">
-                              <span className="font-medium text-muted-foreground">{e.funderName}</span>
-                              <span className="text-muted-foreground">{e.reasons[0] ?? 'Excluded'}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </CardContent>
+                  {/* Qualifying funders */}
+                  {g.matched.length > 0 && (
+                    <Card className="overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-muted/40 border-b border-border">
+                            <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-4 py-2">Funder</th>
+                            <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Submission</th>
+                            <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Primary email</th>
+                            <th className="w-8"></th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/60">
+                          {g.matched.map((m) => {
+                            const f = funderMap.get(m.funderId);
+                            const primary = f?.contacts?.find((c) => c.email);
+                            const isExpanded = expanded.has(m.funderId);
+                            return (
+                              <>
+                                <tr
+                                  key={m.funderId}
+                                  className="hover:bg-muted/30 cursor-pointer"
+                                  onClick={() => toggleExpand(m.funderId)}
+                                >
+                                  <td className="px-4 py-2.5">
+                                    <div className="flex items-center gap-2">
+                                      <div className="h-2 w-2 rounded-full bg-emerald-500" />
+                                      <span className="font-medium">{m.funderName}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-2.5">
+                                    <Badge variant="outline" className="text-[10px]">
+                                      {f?.submissionMethod ?? 'email'}
+                                    </Badge>
+                                  </td>
+                                  <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground truncate max-w-[200px]">
+                                    {primary?.email ?? '—'}
+                                  </td>
+                                  <td className="px-2 py-2.5 text-muted-foreground">
+                                    {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                  </td>
+                                </tr>
+                                {isExpanded && f && (
+                                  <tr className="bg-muted/20">
+                                    <td colSpan={4} className="px-4 py-3">
+                                      <FunderDetailRow funder={f} />
+                                    </td>
+                                  </tr>
+                                )}
+                              </>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </Card>
                   )}
-                </div>
-              )}
 
-              {/* Action: bring to Submit */}
-              <Card className="bg-primary/5 border-primary/20">
-                <CardContent className="p-4 flex items-center justify-between gap-4 flex-wrap">
-                  <div>
-                    <div className="font-medium text-sm">Ready to send?</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">
-                      Carry these criteria over to the Submit Deal page to pick funders and send emails.
-                    </div>
-                  </div>
-                  <Button onClick={toFundFromShop} className="gap-1">
-                    <Send className="h-4 w-4" />
-                    Submit Deal →
-                  </Button>
-                </CardContent>
-              </Card>
+                  {/* Excluded — collapsible compact list */}
+                  {g.excluded.length > 0 && (
+                    <details className="mt-2 group">
+                      <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground py-1.5 px-2 flex items-center gap-1.5">
+                        <ChevronRight className="h-3 w-3 group-open:rotate-90 transition-transform" />
+                        {g.excluded.length} not qualifying
+                      </summary>
+                      <Card className="mt-1">
+                        <CardContent className="p-0 divide-y divide-border/60">
+                          {g.excluded.map((e) => (
+                            <div key={e.funderId} className="px-4 py-2 flex items-center justify-between text-xs">
+                              <span className="font-medium text-muted-foreground">{e.funderName}</span>
+                              <span className="text-muted-foreground/80 text-right ml-3 truncate max-w-[60%]">
+                                {e.reasons[0] ?? 'Excluded'}
+                              </span>
+                            </div>
+                          ))}
+                        </CardContent>
+                      </Card>
+                    </details>
+                  )}
+                </div>
+              ))}
             </div>
-          )}
-        </>
+          </div>
+        )
       )}
     </div>
   );
 }
 
-function SelectField({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
+function Select({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
   return (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+      className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>{o.label}</option>
@@ -381,16 +402,61 @@ function SelectField({ value, onChange, options }: { value: string; onChange: (v
   );
 }
 
-function collectTiers(matched: MatchResult[], funderMap: Map<string, FunderDetail>): { tier: string; funders: MatchResult[] }[] {
-  const groups = new Map<string, MatchResult[]>();
-  for (const m of matched) {
-    const f = funderMap.get(m.funderId);
-    const tName = (f?.tiers && f.tiers.length > 0) ? f.tiers[0].name : 'Untiered';
-    const arr = groups.get(tName) ?? [];
-    arr.push(m);
-    groups.set(tName, arr);
-  }
-  return Array.from(groups.entries())
-    .map(([tier, funders]) => ({ tier, funders }))
-    .sort((a, b) => a.tier.localeCompare(b.tier));
+function FunderDetailRow({ funder }: { funder: FunderDetail }) {
+  const emails = (funder.contacts ?? []).filter((c) => c.email);
+  const phones = (funder.contacts ?? []).filter((c) => c.phone);
+  return (
+    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+      {emails.length > 0 && (
+        <div>
+          <div className="font-semibold uppercase tracking-wider text-[9px] text-muted-foreground mb-1.5 flex items-center gap-1">
+            <Mail className="h-3 w-3" /> Submission emails
+          </div>
+          <div className="space-y-0.5">
+            {emails.map((c, i) => (
+              <div key={i} className="font-mono text-foreground">{c.email}</div>
+            ))}
+          </div>
+        </div>
+      )}
+      {phones.length > 0 && (
+        <div>
+          <div className="font-semibold uppercase tracking-wider text-[9px] text-muted-foreground mb-1.5 flex items-center gap-1">
+            <Phone className="h-3 w-3" /> Contacts
+          </div>
+          <div className="space-y-0.5">
+            {phones.map((c, i) => (
+              <div key={i}>
+                <span className="font-medium">{c.name}</span> <span className="text-muted-foreground">{c.phone}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {((funder.restrictedStates?.length ?? 0) > 0 ||
+        (funder.restrictedIndustries?.length ?? 0) > 0 ||
+        funder.notes) && (
+        <div className="bg-amber-50 border border-amber-200 rounded p-2.5 text-amber-900 space-y-1">
+          {(funder.restrictedStates ?? []).length > 0 && (
+            <div className="flex items-start gap-1">
+              <MapPin className="h-3 w-3 mt-0.5 shrink-0" />
+              <span>Not in: {funder.restrictedStates!.join(', ')}</span>
+            </div>
+          )}
+          {(funder.restrictedIndustries ?? []).length > 0 && (
+            <div className="flex items-start gap-1">
+              <Ban className="h-3 w-3 mt-0.5 shrink-0" />
+              <span>No: {funder.restrictedIndustries!.join(', ')}</span>
+            </div>
+          )}
+          {funder.notes && (
+            <div className="flex items-start gap-1">
+              <FileText className="h-3 w-3 mt-0.5 shrink-0" />
+              <span>{funder.notes}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }

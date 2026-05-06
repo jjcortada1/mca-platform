@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   Card, CardContent,
-  Button, Input, Textarea, Field, Badge,
+  Button, Input, Textarea, Field, Badge, PageHeader,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { US_STATES, COMMON_INDUSTRIES, CREDIT_TIER_OPTIONS } from '@/lib/constants';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, cn } from '@/lib/utils';
+import { Upload, Plus, Search, X, Download, FileText, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 interface Contact {
   id?: string;
@@ -62,6 +63,7 @@ export default function FundersPage() {
   const [editing, setEditing] = useState<Funder | null>(null);
   const [tierFilter, setTierFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -127,40 +129,67 @@ export default function FundersPage() {
   });
 
   return (
-    <div className="space-y-6 p-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Funders</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Your funder directory. Used by the deal-shopping engine to match merchants.
-          </p>
-        </div>
-        <Button onClick={() => setEditing(blankFunder())}>+ Add funder</Button>
-      </header>
+    <div className="space-y-5">
+      <PageHeader
+        title="Funders"
+        description="Your funder directory. Used by the deal-shopping engine to match merchants."
+        actions={
+          <>
+            <Button variant="outline" onClick={() => setBulkOpen(true)} className="gap-1.5">
+              <Upload className="h-4 w-4" /> Bulk import
+            </Button>
+            <Button onClick={() => setEditing(blankFunder())} className="gap-1.5">
+              <Plus className="h-4 w-4" /> Add funder
+            </Button>
+          </>
+        }
+      />
 
-      <div className="flex items-center gap-3">
-        <Input
-          placeholder="Search funders..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-sm"
-        />
-        <div className="flex gap-1 flex-wrap">
-          <button
-            onClick={() => setTierFilter('all')}
-            className={`px-3 py-1 rounded text-xs ${tierFilter === 'all' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
-          >
-            All ({funders.length})
-          </button>
-          {tiers.map((t) => (
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => setTierFilter('all')}
+          className={cn(
+            'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-all',
+            tierFilter === 'all'
+              ? 'bg-primary text-primary-foreground border-primary'
+              : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30',
+          )}
+        >
+          <span>All</span>
+          <span className={cn(
+            'tabular-nums px-1.5 py-0.5 rounded text-[10px]',
+            tierFilter === 'all' ? 'bg-primary-foreground/20' : 'bg-muted'
+          )}>{funders.length}</span>
+        </button>
+        {tiers.map((t) => {
+          const count = funders.filter((f) => f.tiers.some((x) => x.id === t.id)).length;
+          return (
             <button
               key={t.id}
               onClick={() => setTierFilter(t.id)}
-              className={`px-3 py-1 rounded text-xs ${tierFilter === t.id ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-all',
+                tierFilter === t.id
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30',
+              )}
             >
-              {t.name}
+              <span>{t.name}</span>
+              <span className={cn(
+                'tabular-nums px-1.5 py-0.5 rounded text-[10px]',
+                tierFilter === t.id ? 'bg-primary-foreground/20' : 'bg-muted'
+              )}>{count}</span>
             </button>
-          ))}
+          );
+        })}
+        <div className="ml-auto relative w-full sm:w-auto sm:min-w-[240px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search funders…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
         </div>
       </div>
 
@@ -230,6 +259,18 @@ export default function FundersPage() {
           onClose={() => setEditing(null)}
           onSave={save}
           onDelete={editing.id ? () => deleteFunder(editing.id) : undefined}
+        />
+      )}
+
+      {bulkOpen && (
+        <BulkImportModal
+          onClose={() => setBulkOpen(false)}
+          onComplete={(ok, failed) => {
+            setBulkOpen(false);
+            if (ok > 0) toast.success(`Imported ${ok} funder${ok === 1 ? '' : 's'}${failed ? ` (${failed} failed)` : ''}.`);
+            else if (failed > 0) toast.error(`Import failed for all ${failed} rows. See errors.`);
+            load();
+          }}
         />
       )}
     </div>
@@ -461,6 +502,226 @@ function FunderDrawer({
               placeholder="Internal notes about this funder…"
             />
           </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   Bulk Import Modal — CSV upload with template + per-row errors
+   ============================================================ */
+
+function BulkImportModal({
+  onClose,
+  onComplete,
+}: {
+  onClose: () => void;
+  onComplete: (ok: number, failed: number) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState<{
+    ok: number;
+    failed: number;
+    total: number;
+    errors: { row: number; message: string }[];
+    created: string[];
+  } | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  function pickFile() {
+    fileInputRef.current?.click();
+  }
+
+  function onFileChosen(f: File | null) {
+    if (!f) return;
+    if (!f.name.toLowerCase().endsWith('.csv')) {
+      alert('File must be a .csv file.');
+      return;
+    }
+    setFile(f);
+    setResult(null);
+  }
+
+  async function upload() {
+    if (!file) return;
+    setUploading(true);
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/funders/bulk', { method: 'POST', body: fd });
+    const json = await res.json();
+    setUploading(false);
+    if (!res.ok) {
+      setResult({ ok: 0, failed: 0, total: 0, errors: [{ row: 0, message: json.error || 'Upload failed' }], created: [] });
+      return;
+    }
+    setResult(json);
+    if (json.failed === 0) {
+      // Auto-close after brief delay if everything succeeded
+      setTimeout(() => onComplete(json.ok, json.failed), 1500);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-foreground/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-card rounded-xl shadow-2xl border border-border w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Bulk import funders</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Upload a CSV to add many funders at once.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1.5 rounded">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {/* Step 1 — download template */}
+          <div className="rounded-lg border border-border bg-muted/30 p-4">
+            <div className="flex items-start gap-3">
+              <FileText className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <div className="text-sm font-medium">Step 1 — Download the template</div>
+                <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                  Includes all supported columns and an example row with formatting notes.
+                </p>
+                <a
+                  href="/api/funders/bulk"
+                  download="funders_template.csv"
+                  className="inline-flex items-center gap-1.5 mt-2 px-3 py-1.5 rounded text-xs font-medium border border-border bg-card hover:bg-muted transition-colors"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download template (CSV)
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* Step 2 — upload */}
+          <div className="rounded-lg border border-border bg-muted/30 p-4">
+            <div className="text-sm font-medium mb-2">Step 2 — Upload your filled CSV</div>
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".csv,text/csv"
+              onChange={(e) => onFileChosen(e.target.files?.[0] ?? null)}
+              className="hidden"
+            />
+            <div
+              onClick={pickFile}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                onFileChosen(e.dataTransfer.files?.[0] ?? null);
+              }}
+              className={cn(
+                'border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors',
+                dragOver ? 'border-primary bg-primary/5' : 'border-border hover:border-foreground/30 hover:bg-card'
+              )}
+            >
+              {file ? (
+                <div className="flex items-center justify-center gap-2 text-sm">
+                  <FileText className="h-4 w-4 text-primary" />
+                  <span className="font-medium">{file.name}</span>
+                  <span className="text-xs text-muted-foreground">({(file.size / 1024).toFixed(1)} KB)</span>
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">
+                  <Upload className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground/70" />
+                  Click to pick a file, or drag & drop a CSV here
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Format help */}
+          <details className="text-xs">
+            <summary className="cursor-pointer text-muted-foreground hover:text-foreground py-1">
+              Format requirements
+            </summary>
+            <ul className="mt-2 pl-4 space-y-1 text-muted-foreground list-disc">
+              <li><strong>name</strong> is required for every row.</li>
+              <li><strong>tiers</strong>, <strong>restricted_states</strong>, <strong>restricted_industries</strong> use <code className="font-mono bg-muted px-1 rounded">;</code> or <code className="font-mono bg-muted px-1 rounded">|</code> as separators.</li>
+              <li><strong>supports_reverse_consolidation</strong> accepts true / false / yes / no / 1 / 0.</li>
+              <li><strong>min_credit_tier</strong>: unknown · under_550 · 550_599 · 600_649 · 650_plus</li>
+              <li><strong>submission_method</strong>: email or portal</li>
+              <li>States: 2-letter codes (CA, NY, etc.)</li>
+              <li>Tiers that don&apos;t exist will be created automatically.</li>
+              <li>Up to 3 contacts per funder; first is set as primary.</li>
+            </ul>
+          </details>
+
+          {/* Results */}
+          {result && (
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-center">
+                  <div className="text-2xl font-semibold text-emerald-700 tabular-nums">{result.ok}</div>
+                  <div className="text-[10px] uppercase tracking-wider text-emerald-700/80 mt-0.5">Imported</div>
+                </div>
+                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-center">
+                  <div className="text-2xl font-semibold text-rose-700 tabular-nums">{result.failed}</div>
+                  <div className="text-[10px] uppercase tracking-wider text-rose-700/80 mt-0.5">Failed</div>
+                </div>
+                <div className="rounded-lg border border-border bg-muted/40 p-3 text-center">
+                  <div className="text-2xl font-semibold text-foreground tabular-nums">{result.total}</div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5">Total rows</div>
+                </div>
+              </div>
+
+              {result.errors.length > 0 && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 max-h-40 overflow-y-auto">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-700 mb-1.5">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    Errors
+                  </div>
+                  <div className="space-y-0.5 text-xs text-rose-700">
+                    {result.errors.map((e, i) => (
+                      <div key={i} className="flex gap-2">
+                        <span className="font-mono text-rose-700/70 shrink-0">Row {e.row}:</span>
+                        <span>{e.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {result.ok > 0 && result.failed === 0 && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 flex items-center gap-2 text-xs text-emerald-700">
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  All rows imported successfully. Closing…
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-3 border-t border-border flex items-center justify-end gap-2">
+          {result && result.failed > 0 && (
+            <Button variant="outline" onClick={() => onComplete(result.ok, result.failed)}>
+              Close
+            </Button>
+          )}
+          {!result && (
+            <>
+              <Button variant="outline" onClick={onClose}>Cancel</Button>
+              <Button onClick={upload} disabled={!file || uploading} loading={uploading}>
+                Import
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </div>
