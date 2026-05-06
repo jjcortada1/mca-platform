@@ -1,0 +1,91 @@
+import { NextRequest, NextResponse } from 'next/server';
+import bcrypt from 'bcryptjs';
+import { db } from '@/lib/db/client';
+import { users, permissions } from '@/lib/db/schema';
+import { eq, inArray } from 'drizzle-orm';
+import { requireTenantContext, requireCompanyAdmin } from '@/lib/auth/context';
+import { createUserSchema } from '@/lib/validation/schemas';
+import { ALL_REP_PERMISSIONS } from '@/lib/db/schema';
+
+/**
+ * GET — list users in current company.
+ * Any authenticated tenant user can list (used to populate rep dropdowns on
+ * funded-board, active-deals, etc). Sensitive fields (permissions, hasSmtp)
+ * are only included for admin callers.
+ */
+export async function GET() {
+  try {
+    const ctx = await requireTenantContext();
+    const list = await db.select().from(users).where(eq(users.companyId, ctx.companyId));
+    const isAdmin = ctx.user.role === 'company_admin';
+
+    const permsByUser = new Map<string, string[]>();
+    if (isAdmin && list.length) {
+      const ids = list.map((u) => u.id);
+      const rows = await db.select().from(permissions).where(inArray(permissions.userId, ids));
+      for (const p of rows) {
+        const arr = permsByUser.get(p.userId) ?? [];
+        arr.push(p.permissionKey);
+        permsByUser.set(p.userId, arr);
+      }
+    }
+
+    const result = list.map((u) => {
+      const base = {
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        role: u.role,
+        isActive: u.isActive,
+      };
+      if (!isAdmin) return base;
+      return {
+        ...base,
+        lastLoginAt: u.lastLoginAt,
+        hasSmtp: !!u.smtpConfig,
+        permissions: permsByUser.get(u.id) ?? [],
+      };
+    });
+
+    return NextResponse.json({ users: result, data: result });
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+  }
+}
+
+/**
+ * POST — create a new user. Company admin only.
+ */
+export async function POST(req: NextRequest) {
+  try {
+    const ctx = await requireCompanyAdmin();
+    const body = createUserSchema.parse(await req.json());
+
+    // Email uniqueness (global)
+    const [exists] = await db.select().from(users).where(eq(users.email, body.email)).limit(1);
+    if (exists) return NextResponse.json({ error: 'Email already exists' }, { status: 400 });
+
+    const hash = await bcrypt.hash(body.password, 12);
+    const [u] = await db.insert(users).values({
+      companyId: ctx.companyId,
+      email: body.email,
+      name: body.name,
+      passwordHash: hash,
+      role: body.role,
+    }).returning();
+
+    // Default to all rep permissions if 'rep' and no permissions specified
+    const permsToInsert = body.permissions.length
+      ? body.permissions
+      : body.role === 'rep' ? ALL_REP_PERMISSIONS : [];
+    if (permsToInsert.length) {
+      await db.insert(permissions).values(
+        permsToInsert.map((k) => ({ userId: u.id, permissionKey: k }))
+      );
+    }
+
+    return NextResponse.json({ user: { id: u.id, email: u.email, role: u.role } });
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+  }
+}

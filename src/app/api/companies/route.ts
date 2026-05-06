@@ -1,0 +1,160 @@
+import { NextRequest } from 'next/server';
+import bcrypt from 'bcryptjs';
+import { db } from '@/lib/db/client';
+import {
+  companies, users, funderTiers, funders, funderTierAssignments,
+  funderContacts, funderRestrictedStates, funderRestrictedIndustries,
+  commissionRules, structuredEmailFields, masterDefaultFunders,
+} from '@/lib/db/schema';
+import { eq, count } from 'drizzle-orm';
+import { requireMasterAdmin } from '@/lib/auth/context';
+import { createCompanySchema } from '@/lib/validation/schemas';
+import { handle, ok, created, badRequest } from '@/lib/api/response';
+import { DEFAULT_COMMISSION_RULES } from '@/lib/calculator/mca';
+
+/**
+ * GET — list all companies (master admin only).
+ * Returns name, slug, user count, funder count, created. NEVER deal data.
+ */
+export const GET = handle(async () => {
+  await requireMasterAdmin();
+  const list = await db.select().from(companies).orderBy(companies.createdAt);
+
+  const enriched = await Promise.all(
+    list.map(async (c) => {
+      const [u] = await db.select({ c: count() }).from(users).where(eq(users.companyId, c.id));
+      const [f] = await db.select({ c: count() }).from(funders).where(eq(funders.companyId, c.id));
+      return {
+        id: c.id, name: c.name, slug: c.slug,
+        emailMode: c.emailMode, isActive: c.isActive, createdAt: c.createdAt,
+        userCount: u?.c ?? 0, funderCount: f?.c ?? 0,
+      };
+    })
+  );
+  return ok(enriched);
+});
+
+/**
+ * POST — create a new company.
+ * Provisions: company row, company_admin user, default tiers, seeded funders
+ *   from masterDefaultFunders, default commission rules.
+ */
+export const POST = handle(async (req: NextRequest) => {
+  await requireMasterAdmin();
+  const body = await req.json();
+  const parsed = createCompanySchema.parse(body);
+
+  // Slug uniqueness check
+  const [existing] = await db.select().from(companies).where(eq(companies.slug, parsed.slug)).limit(1);
+  if (existing) return badRequest('A company with that slug already exists.');
+
+  // Email uniqueness check (across all users globally)
+  const [existingUser] = await db.select().from(users).where(eq(users.email, parsed.adminEmail)).limit(1);
+  if (existingUser) return badRequest('A user with that email already exists.');
+
+  // Create company
+  const [company] = await db.insert(companies).values({
+    name: parsed.name,
+    slug: parsed.slug,
+    emailMode: 'per_rep',
+  }).returning();
+
+  // Create admin user
+  const passwordHash = await bcrypt.hash(parsed.adminPassword, 12);
+  await db.insert(users).values({
+    companyId: company.id,
+    email: parsed.adminEmail,
+    name: parsed.adminName,
+    passwordHash,
+    role: 'company_admin',
+  });
+
+  // Seed default commission rules
+  await db.insert(commissionRules).values(
+    DEFAULT_COMMISSION_RULES.map((r, i) => ({
+      companyId: company.id,
+      threshold: String(r.threshold),
+      commissionPct: String(r.commissionPct),
+      sortOrder: i,
+    }))
+  );
+
+  // Seed default structured fields (common ones brokers use)
+  await db.insert(structuredEmailFields).values([
+    { companyId: company.id, fieldLabel: 'Balances', fieldKey: 'balances', sortOrder: 0 },
+    { companyId: company.id, fieldLabel: 'Daily/Weekly', fieldKey: 'daily_weekly', sortOrder: 1 },
+    { companyId: company.id, fieldLabel: 'Asking', fieldKey: 'asking', sortOrder: 2 },
+  ]);
+
+  // Seed funders from master defaults (if any exist)
+  const masterFunders = await db.select().from(masterDefaultFunders);
+  if (masterFunders.length) {
+    // Build tier name → tier ID map
+    const tierNames = new Set<string>();
+    for (const mf of masterFunders) {
+      const payload = mf.payload as { tiers?: string[] } | null;
+      payload?.tiers?.forEach((t) => tierNames.add(t));
+    }
+    const tierRows = await db.insert(funderTiers).values(
+      Array.from(tierNames).map((name, i) => ({ companyId: company.id, name, sortOrder: i }))
+    ).returning();
+    const tierByName = new Map(tierRows.map((t) => [t.name, t.id]));
+
+    // Insert each funder + relations
+    for (const mf of masterFunders) {
+      const payload = mf.payload as {
+        tiers?: string[];
+        contacts?: { name: string; phone?: string; email?: string; isPrimary?: boolean }[];
+        restrictedStates?: string[];
+        restrictedIndustries?: string[];
+      };
+      const [funderRow] = await db.insert(funders).values({
+        companyId: company.id,
+        name: mf.name,
+        submissionMethod: mf.submissionMethod,
+        supportsReverseConsolidation: mf.supportsReverseConsolidation,
+        minRevenue: mf.minRevenue,
+        maxPositions: mf.maxPositions,
+        minCreditTier: mf.minCreditTier,
+        notes: mf.notes,
+      }).returning();
+
+      const tierIds = (payload?.tiers ?? []).map((n) => tierByName.get(n)).filter((id): id is string => Boolean(id));
+      if (tierIds.length) {
+        await db.insert(funderTierAssignments).values(
+          tierIds.map((tierId) => ({ funderId: funderRow.id, tierId }))
+        );
+      }
+
+      const contacts = payload?.contacts ?? [];
+      if (contacts.length) {
+        await db.insert(funderContacts).values(
+          contacts.map((c, i) => ({
+            funderId: funderRow.id,
+            name: c.name,
+            phone: c.phone ?? null,
+            email: c.email ?? null,
+            isPrimary: c.isPrimary ?? false,
+            sortOrder: i,
+          }))
+        );
+      }
+
+      const states = payload?.restrictedStates ?? [];
+      if (states.length) {
+        await db.insert(funderRestrictedStates).values(
+          states.map((stateCode) => ({ funderId: funderRow.id, stateCode }))
+        );
+      }
+
+      const industries = payload?.restrictedIndustries ?? [];
+      if (industries.length) {
+        await db.insert(funderRestrictedIndustries).values(
+          industries.map((industry) => ({ funderId: funderRow.id, industry }))
+        );
+      }
+    }
+  }
+
+  return created({ id: company.id, slug: company.slug });
+});

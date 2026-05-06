@@ -1,0 +1,179 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Surfaces — soft warm off-white, comfortable for long sessions */
+    --background: 220 18% 97.5%;
+    --foreground: 224 28% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 28% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 28% 12%;
+
+    /* Primary — overridable per company via tenant branding */
+    --primary: 184 70% 22%;
+    --primary-foreground: 220 20% 98%;
+
+    --secondary: 220 15% 95%;
+    --secondary-foreground: 224 28% 12%;
+
+    --muted: 220 15% 95.5%;
+    --muted-foreground: 220 12% 46%;
+
+    --accent: 184 70% 22%;
+    --accent-foreground: 220 20% 98%;
+
+    --destructive: 0 75% 47%;
+    --destructive-foreground: 220 20% 98%;
+
+    --success: 150 60% 32%;
+    --warning: 35 85% 50%;
+
+    --border: 220 14% 90%;
+    --input: 220 14% 88%;
+    --ring: 184 70% 30%;
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222 28% 8%;
+    --foreground: 220 16% 95%;
+    --card: 222 24% 11%;
+    --card-foreground: 220 16% 95%;
+    --popover: 222 24% 11%;
+    --popover-foreground: 220 16% 95%;
+    --primary: 184 65% 50%;
+    --primary-foreground: 222 28% 8%;
+    --secondary: 222 18% 16%;
+    --secondary-foreground: 220 16% 95%;
+    --muted: 222 18% 16%;
+    --muted-foreground: 220 10% 65%;
+    --accent: 184 65% 50%;
+    --accent-foreground: 222 28% 8%;
+    --destructive: 0 65% 55%;
+    --destructive-foreground: 220 16% 95%;
+    --border: 222 18% 18%;
+    --input: 222 18% 20%;
+    --ring: 184 65% 50%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply antialiased;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter Tight', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    font-feature-settings: 'cv11', 'ss01', 'ss03';
+    font-synthesis: none;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Inter Tight', 'Inter', system-ui, sans-serif;
+    letter-spacing: -0.018em;
+    @apply font-semibold;
+  }
+  h1 { letter-spacing: -0.022em; }
+  h2 { letter-spacing: -0.020em; }
+
+  /* Code-like content */
+  .font-mono {
+    font-family: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  }
+
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+
+  /* Selection color */
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
+    color: hsl(var(--foreground));
+  }
+
+  /* Refined scrollbars */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 5px;
+    border: 2px solid hsl(var(--background));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.4);
+  }
+
+  /* Remove default focus ring on autofill in webkit */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-text-fill-color: hsl(var(--foreground));
+    -webkit-box-shadow: 0 0 0px 1000px hsl(var(--card)) inset;
+    transition: background-color 5000s ease-in-out 0s;
+  }
+}
+
+@layer components {
+  /* Data table baseline */
+  .data-grid {
+    @apply w-full border-collapse text-sm;
+  }
+  .data-grid th {
+    @apply text-left font-medium text-muted-foreground uppercase tracking-wider text-[11px] py-2.5 px-3 border-b border-border bg-muted/30;
+  }
+  .data-grid td {
+    @apply py-3 px-3 border-b border-border/60 align-middle;
+  }
+  .data-grid tr:hover td {
+    @apply bg-muted/50;
+  }
+  .data-grid tr:last-child td {
+    @apply border-b-0;
+  }
+
+  .badge-status {
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium;
+  }
+
+  /* KPI tile — used on dashboard */
+  .kpi-tile {
+    @apply rounded-lg border bg-card p-5 transition-all hover:shadow-sm hover:border-foreground/10;
+  }
+
+  /* Sidebar nav item — consistent feel */
+  .nav-item {
+    @apply flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-all duration-150;
+  }
+  .nav-item-active {
+    @apply bg-primary/10 text-primary;
+  }
+  .nav-item-inactive {
+    @apply text-muted-foreground hover:bg-muted hover:text-foreground;
+  }
+}
+
+/* Loading skeleton shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted)) 0%,
+    hsl(var(--muted-foreground) / 0.08) 50%,
+    hsl(var(--muted)) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
