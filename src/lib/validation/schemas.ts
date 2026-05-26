@@ -54,8 +54,8 @@ export const upsertFunderSchema = z.object({
   name: z.string().min(1).max(200),
   submissionMethod: z.enum(['email', 'portal']).default('email'),
   supportsReverseConsolidation: z.boolean().default(false),
-  minRevenue: z.number().nonnegative().default(0),
-  maxPositions: z.number().int().nonnegative().default(99),
+  minRevenue: z.coerce.number().nonnegative().default(0),
+  maxPositions: z.coerce.number().int().nonnegative().default(99),
   minCreditTier: creditTier.default('unknown'),
   notes: z.string().max(5000).optional().nullable(),
   isActive: z.boolean().default(true),
@@ -132,8 +132,9 @@ export const updateSubmissionFunderSchema = z.object({
 export const fundedEntrySchema = z.object({
   repId: z.string().uuid(),
   dealInitials: z.string().min(1).max(50),
-  amountFunded: z.number().positive(),
-  fundedDate: z.string().datetime().optional(),
+  amountFunded: z.coerce.number().positive(),
+  // Accept either a date (YYYY-MM-DD) or a full ISO datetime
+  fundedDate: z.string().min(1).optional(),
   notes: z.string().max(2000).optional().nullable(),
 });
 

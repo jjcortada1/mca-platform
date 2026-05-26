@@ -1326,6 +1326,25 @@ function SecuritySection() {
     }
   }
 
+  // --- Email transport test ---
+  const [testingEmail, setTestingEmail] = useState(false);
+  async function sendTestEmail() {
+    setTestingEmail(true);
+    try {
+      const res = await fetch('/api/settings/email-test', { method: 'POST' });
+      const j = await res.json();
+      if (j.ok) {
+        toast.success(`Test email sent via ${j.transport} to ${j.to}. Check your inbox.`);
+      } else {
+        toast.error(j.error || 'Email test failed.');
+      }
+    } catch {
+      toast.error('Email test failed.');
+    } finally {
+      setTestingEmail(false);
+    }
+  }
+
   async function resendCode() {
     // Re-run request with the same stashed passwords
     if (!currentPassword || !newPassword) {
@@ -1337,7 +1356,25 @@ function SecuritySection() {
   }
 
   return (
-    <Card>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Email delivery</CardTitle>
+          <CardDescription>
+            Password resets and verification codes are sent from your platform email account. Send a test to confirm it is working.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button variant="outline" onClick={sendTestEmail} loading={testingEmail}>
+            Send test email to myself
+          </Button>
+          <p className="text-xs text-muted-foreground mt-2">
+            Sends a test message to your own login email. If it does not arrive, the email account needs configuring.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
       <CardHeader>
         <CardTitle>Change password</CardTitle>
         <CardDescription>
@@ -1435,5 +1472,6 @@ function SecuritySection() {
         )}
       </CardContent>
     </Card>
+    </div>
   );
 }

@@ -288,23 +288,25 @@ export default function FundedBoardPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-3">
-          {repBoards.map((rep, i) => (
-            <RepRow
-              key={rep.repId}
-              rank={i + 1}
-              rep={rep}
-              maxTotal={Math.max(...repBoards.map((r) => r.total))}
-              onDelete={delEntry}
-            />
-          ))}
+        <div className="overflow-x-auto pb-2">
+          <div className="flex items-start gap-4 min-w-max">
+            {repBoards.map((rep, i) => (
+              <RepColumn
+                key={rep.repId}
+                rank={i + 1}
+                rep={rep}
+                maxTotal={Math.max(...repBoards.map((r) => r.total))}
+                onDelete={delEntry}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function RepRow({
+function RepColumn({
   rank, rep, maxTotal, onDelete,
 }: {
   rank: number;
@@ -316,59 +318,57 @@ function RepRow({
   const widthPct = maxTotal > 0 ? (rep.total / maxTotal) * 100 : 0;
 
   return (
-    <Card className="overflow-hidden">
-      <CardContent className="p-0">
-        <div className="grid grid-cols-[180px_1fr] sm:grid-cols-[220px_1fr]">
-          {/* Left: rep summary */}
-          <div className="border-r border-border bg-muted/30 p-4 flex flex-col justify-between">
-            <div className="flex items-center gap-3">
-              <div className={cn(
-                'h-10 w-10 rounded-full flex items-center justify-center shrink-0 font-semibold',
-                rank === 1 ? 'bg-amber-100 text-amber-800 ring-2 ring-amber-300' :
-                rank === 2 ? 'bg-slate-100 text-slate-700 ring-2 ring-slate-300' :
-                rank === 3 ? 'bg-orange-100 text-orange-700 ring-2 ring-orange-300' :
-                'bg-muted text-foreground/70 ring-1 ring-border'
-              )}>
-                {initial}
-              </div>
-              <div className="min-w-0">
-                <div className="text-sm font-semibold truncate">{rep.repName}</div>
-                <div className="text-xs text-muted-foreground">{rep.entries.length} {rep.entries.length === 1 ? 'deal' : 'deals'}</div>
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Total</div>
-              <div className="text-xl font-semibold tracking-tight tabular-nums text-primary">
-                {formatCurrency(rep.total)}
-              </div>
-              {/* progress bar relative to top performer */}
-              <div className="mt-1.5 h-1.5 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary rounded-full transition-all"
-                  style={{ width: `${widthPct}%` }}
-                />
-              </div>
+    <div className="w-72 shrink-0 rounded-xl border border-border bg-muted/20 flex flex-col max-h-[calc(100vh-280px)]">
+      {/* Column header — rep summary, sticky at top of the column */}
+      <div className="p-4 border-b border-border bg-card rounded-t-xl">
+        <div className="flex items-center gap-3">
+          <div className={cn(
+            'h-10 w-10 rounded-full flex items-center justify-center shrink-0 font-semibold',
+            rank === 1 ? 'bg-amber-100 text-amber-800 ring-2 ring-amber-300' :
+            rank === 2 ? 'bg-slate-100 text-slate-700 ring-2 ring-slate-300' :
+            rank === 3 ? 'bg-orange-100 text-orange-700 ring-2 ring-orange-300' :
+            'bg-muted text-foreground/70 ring-1 ring-border'
+          )}>
+            {initial}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold truncate">{rep.repName}</div>
+            <div className="text-xs text-muted-foreground">
+              {rep.entries.length} {rep.entries.length === 1 ? 'deal' : 'deals'}
             </div>
           </div>
-
-          {/* Right: deal chips, horizontal scrollable */}
-          <div className="overflow-x-auto p-4">
-            <div className="flex items-stretch gap-2 min-w-max">
-              {rep.entries.map((e) => (
-                <DealChip key={e.id} entry={e} onDelete={() => onDelete(e.id)} />
-              ))}
-            </div>
+          {rank <= 3 && (
+            <div className="text-[10px] font-bold text-muted-foreground/60">#{rank}</div>
+          )}
+        </div>
+        <div className="mt-3">
+          <div className="text-xl font-semibold tracking-tight tabular-nums text-primary">
+            {formatCurrency(rep.total)}
+          </div>
+          <div className="mt-1.5 h-1.5 bg-muted rounded-full overflow-hidden">
+            <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${widthPct}%` }} />
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+
+      {/* Column body — funded deals stacked vertically, scrolls within the column */}
+      <div className="p-3 space-y-2 overflow-y-auto flex-1">
+        {rep.entries.length === 0 ? (
+          <div className="text-xs text-muted-foreground/60 text-center py-6">No deals yet</div>
+        ) : (
+          rep.entries.map((e) => (
+            <DealCard key={e.id} entry={e} onDelete={() => onDelete(e.id)} />
+          ))
+        )}
+      </div>
+    </div>
   );
 }
 
-function DealChip({ entry, onDelete }: { entry: FundedEntry; onDelete: () => void }) {
+function DealCard({ entry, onDelete }: { entry: FundedEntry; onDelete: () => void }) {
   const amt = parseFloat(entry.amountFunded);
   return (
-    <div className="group relative rounded-lg border border-border bg-card p-3 min-w-[140px] hover:border-primary/30 hover:shadow-sm transition-all">
+    <div className="group relative rounded-lg border border-border bg-card p-3 hover:border-primary/30 hover:shadow-sm transition-all">
       <div className="flex items-baseline justify-between mb-1">
         <span className="text-sm font-semibold tracking-tight font-mono">{entry.dealInitials}</span>
         <button
@@ -379,8 +379,8 @@ function DealChip({ entry, onDelete }: { entry: FundedEntry; onDelete: () => voi
           <Trash2 className="h-3 w-3" />
         </button>
       </div>
-      <div className="text-base font-semibold tabular-nums text-emerald-700">
-        {formatCurrency(amt, { compact: true })}
+      <div className="text-lg font-semibold tabular-nums text-emerald-700">
+        {formatCurrency(amt)}
       </div>
       <div className="text-[10px] text-muted-foreground tabular-nums mt-1">
         {formatDate(entry.fundedDate)}
