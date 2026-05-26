@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
         subject: 'Your password was changed',
         text:
           `Hi ${user.name},\n\n` +
-          `Your MCA Platform password was just changed.\n\n` +
+          `Your password was just changed.\n\n` +
           `If this was you, no action is needed. If this WASN'T you, reset your password immediately using "Forgot password" on the login page and contact your administrator.\n`,
       });
     }

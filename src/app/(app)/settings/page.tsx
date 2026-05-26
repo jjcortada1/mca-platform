@@ -1363,8 +1363,9 @@ function SecuritySection() {
               your new password. The code expires in 10 minutes.
               {!emailConfigured && (
                 <div className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-                  Email isn&apos;t configured on this server yet, so the code was printed to the
-                  server console. Set up SYSTEM_SMTP_* secrets to receive codes by email.
+                  The system email account isn&apos;t configured yet, so the code was printed to
+                  the server console. An admin needs to set the <code>SYSTEM_SMTP_*</code> secrets
+                  so codes get delivered by email.
                 </div>
               )}
             </div>

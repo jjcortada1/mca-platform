@@ -35,9 +35,11 @@ export async function POST(req: NextRequest) {
     const baseUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
     const resetUrl = `${baseUrl}/reset-password?token=${token}`;
 
+    // Sent from the system account, delivered to the user's email. No per-user
+    // SMTP needed — a locked-out user must be able to receive this regardless.
     await sendSystemEmail({
       to: user.email,
-      subject: 'Reset your MCA Platform password',
+      subject: 'Reset your password',
       text: `Hi ${user.name},\n\nReset your password using the link below (valid for 1 hour):\n\n${resetUrl}\n\nIf you didn't request this, ignore this email and your account stays unchanged.`,
     });
 

@@ -83,7 +83,8 @@ export async function POST(req: NextRequest) {
       expiresAt,
     });
 
-    // Email the code
+    // Email the code — sent from the system account, delivered to the user's email.
+    // The user does NOT need any SMTP/App Password set up to receive this.
     const { subject, text } = verificationCodeEmail(user.name, code, 'change your password');
     const result = await sendSystemEmail({ to: user.email, subject, text });
 
@@ -93,9 +94,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       sentTo: masked,
-      // When system SMTP isn't configured (dev), tell the client so it can show
-      // a helpful note. The code is in the server console in that case.
-      emailConfigured: !result.dev,
+      // false when no system SMTP is configured (code printed to console instead).
+      emailConfigured: result.sent,
     });
   } catch (e) {
     return apiError(e);
