@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev -p 5000",
     "build": "next build",
-    "start": "next start -p 5000",
+    "start": "next start -p 3000",
     "lint": "next lint",
     "setup": "node scripts/setup.js",
     "db:generate": "drizzle-kit generate",

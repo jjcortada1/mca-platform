@@ -5,7 +5,7 @@ run = ["sh", "-c", "npm run setup && npm run dev"]
 [deployment]
 build = ["sh", "-c", "npm install --legacy-peer-deps && npm run build"]
 run = ["sh", "-c", "npm run setup && npm start"]
-deploymentTarget = "cloudrun"
+deploymentTarget = "autoscale"
 
 [[ports]]
 localPort = 3000
