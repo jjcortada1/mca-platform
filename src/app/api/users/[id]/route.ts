@@ -6,6 +6,7 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireCompanyAdmin } from '@/lib/auth/context';
 import { updateUserSchema } from '@/lib/validation/schemas';
+import { apiError } from '@/lib/api/errors';
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -32,7 +33,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       }
     }
     return NextResponse.json({ ok: true });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }
 
 const passwordSchema = z.object({ password: z.string().min(10) });
@@ -51,7 +52,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     await db.update(users).set({ passwordHash: hash, updatedAt: new Date() })
       .where(and(eq(users.id, params.id), eq(users.companyId, ctx.companyId)));
     return NextResponse.json({ ok: true });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
@@ -62,5 +63,5 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     }
     await db.delete(users).where(and(eq(users.id, params.id), eq(users.companyId, ctx.companyId)));
     return NextResponse.json({ ok: true });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }

@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client';
 import { submissions, submissionFunders, deals, funders, users } from '@/lib/db/schema';
 import { eq, desc, inArray } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
+import { apiError } from '@/lib/api/errors';
 
 export async function GET() {
   try {
@@ -81,5 +82,5 @@ export async function GET() {
     }));
 
     return NextResponse.json({ submissions: result });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }

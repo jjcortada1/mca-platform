@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { db } from '@/lib/db/client';
 import { users, permissions } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { rateLimit } from '@/lib/api/rate-limit';
 
 declare module 'next-auth' {
   interface Session {
@@ -48,6 +49,13 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
         const email = credentials.email.toLowerCase().trim();
+
+        // Throttle login attempts per email: 10 tries / 5 min. Slows brute-forcing
+        // without locking a legitimate user out for long.
+        const rl = rateLimit(`login:${email}`, { max: 10, windowMs: 5 * 60_000 });
+        if (!rl.allowed) {
+          throw new Error('Too many attempts. Please wait a few minutes and try again.');
+        }
 
         const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
         if (!user || !user.isActive) return null;

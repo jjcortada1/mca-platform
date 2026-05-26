@@ -8,6 +8,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { requirePermission, requireTenantContext } from '@/lib/auth/context';
 import { upsertFunderSchema } from '@/lib/validation/schemas';
 import { validateTierIds } from '@/lib/funders/repository';
+import { apiError } from '@/lib/api/errors';
 
 export async function GET() {
   try {
@@ -36,7 +37,7 @@ export async function GET() {
     }));
     return NextResponse.json({ data: enriched, funders: enriched });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }
 
@@ -76,6 +77,6 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ funder: f, data: f });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }

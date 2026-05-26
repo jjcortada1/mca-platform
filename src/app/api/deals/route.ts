@@ -4,6 +4,7 @@ import { deals, users } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import { upsertDealSchema } from '@/lib/validation/schemas';
+import { apiError } from '@/lib/api/errors';
 
 export async function GET() {
   try {
@@ -11,7 +12,7 @@ export async function GET() {
     const list = await db.select().from(deals)
       .where(eq(deals.companyId, ctx.companyId)).orderBy(desc(deals.createdAt));
     return NextResponse.json({ deals: list, data: list });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }
 
 export async function POST(req: NextRequest) {
@@ -43,5 +44,5 @@ export async function POST(req: NextRequest) {
       createdBy: ctx.user.id,
     }).returning();
     return NextResponse.json({ deal: d });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }

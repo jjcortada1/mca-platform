@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { requireTenantContext, requireCompanyAdmin } from '@/lib/auth/context';
 import { encrypt } from '@/lib/crypto';
 import { z } from 'zod';
+import { apiError } from '@/lib/api/errors';
 
 interface SmtpConfig {
   host: string;
@@ -48,7 +49,7 @@ export async function GET() {
       },
     });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }
 
@@ -99,7 +100,7 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }
 
@@ -117,6 +118,6 @@ export async function DELETE() {
     }
     return NextResponse.json({ ok: true });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/auth/context';
 import { reverseCalcSchema } from '@/lib/validation/schemas';
 import { reverseCalculate } from '@/lib/calculator/reverse';
+import { apiError } from '@/lib/api/errors';
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,5 +10,5 @@ export async function POST(req: NextRequest) {
     const input = reverseCalcSchema.parse(await req.json());
     const candidates = reverseCalculate(input);
     return NextResponse.json({ candidates });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }

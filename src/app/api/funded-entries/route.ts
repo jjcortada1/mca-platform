@@ -4,6 +4,7 @@ import { fundedEntries, users } from '@/lib/db/schema';
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { requirePermission, requireTenantContext } from '@/lib/auth/context';
 import { fundedEntrySchema } from '@/lib/validation/schemas';
+import { apiError } from '@/lib/api/errors';
 
 export async function GET() {
   try {
@@ -30,7 +31,7 @@ export async function GET() {
       createdAt: e.createdAt,
     }));
     return NextResponse.json({ entries: data, data });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }
 
 export async function POST(req: NextRequest) {
@@ -59,5 +60,5 @@ export async function POST(req: NextRequest) {
       notes: body.notes ?? null,
     }).returning();
     return NextResponse.json({ entry: e });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }

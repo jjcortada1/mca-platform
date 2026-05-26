@@ -7,6 +7,7 @@ import { and, eq } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
 import { upsertFunderSchema } from '@/lib/validation/schemas';
 import { validateTierIds } from '@/lib/funders/repository';
+import { apiError } from '@/lib/api/errors';
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -53,7 +54,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       await db.insert(funderRestrictedIndustries).values(body.restrictedIndustries.map((i) => ({ funderId: params.id, industry: i })));
     }
     return NextResponse.json({ ok: true });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
@@ -61,5 +62,5 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     const ctx = await requirePermission('funders.edit');
     await db.delete(funders).where(and(eq(funders.id, params.id), eq(funders.companyId, ctx.companyId)));
     return NextResponse.json({ ok: true });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }

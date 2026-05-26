@@ -6,6 +6,7 @@ import {
 } from '@/lib/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
+import { apiError } from '@/lib/api/errors';
 import { z } from 'zod';
 
 /**
@@ -280,7 +281,7 @@ export async function POST(req: NextRequest) {
       created,
     });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }
 

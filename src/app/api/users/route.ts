@@ -6,6 +6,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { requireTenantContext, requireCompanyAdmin } from '@/lib/auth/context';
 import { createUserSchema } from '@/lib/validation/schemas';
 import { ALL_REP_PERMISSIONS } from '@/lib/db/schema';
+import { apiError } from '@/lib/api/errors';
 
 /**
  * GET — list users in current company.
@@ -49,7 +50,7 @@ export async function GET() {
 
     return NextResponse.json({ users: result, data: result });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }
 
@@ -86,6 +87,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ user: { id: u.id, email: u.email, role: u.role } });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }

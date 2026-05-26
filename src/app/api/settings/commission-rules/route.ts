@@ -4,6 +4,7 @@ import { commissionRules } from '@/lib/db/schema';
 import { asc, eq } from 'drizzle-orm';
 import { requireCompanyAdmin, requireTenantContext } from '@/lib/auth/context';
 import { z } from 'zod';
+import { apiError } from '@/lib/api/errors';
 
 export async function GET() {
   try {
@@ -21,7 +22,7 @@ export async function GET() {
     }));
     return NextResponse.json({ data });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }
 
@@ -50,6 +51,6 @@ export async function PUT(req: NextRequest) {
     }
     return NextResponse.json({ ok: true });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }

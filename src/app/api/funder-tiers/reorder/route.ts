@@ -4,6 +4,7 @@ import { funderTiers } from '@/lib/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import { z } from 'zod';
+import { apiError } from '@/lib/api/errors';
 
 const schema = z.object({
   ids: z.array(z.string().uuid()).min(1),
@@ -39,6 +40,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }

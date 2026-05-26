@@ -7,9 +7,13 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 
-type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options';
+type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security';
 
 const TAB_GROUPS: { title: string; tabs: { key: Tab; label: string }[] }[] = [
+  {
+    title: 'Account',
+    tabs: [{ key: 'security', label: 'Security' }],
+  },
   {
     title: 'Brand',
     tabs: [{ key: 'branding', label: 'Branding' }],
@@ -40,7 +44,7 @@ const TAB_GROUPS: { title: string; tabs: { key: Tab; label: string }[] }[] = [
 ];
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<Tab>('branding');
+  const [tab, setTab] = useState<Tab>('security');
 
   return (
     <div className="space-y-8 max-w-5xl">
@@ -81,6 +85,7 @@ export default function SettingsPage() {
       {tab === 'users' && <UsersSection />}
       {tab === 'tiers' && <TiersSection />}
       {tab === 'options' && <MatchOptionsSection />}
+      {tab === 'security' && <SecuritySection />}
     </div>
   );
 }
@@ -1200,6 +1205,198 @@ function MatchOptionsKindEditor({ kind }: { kind: string }) {
         <div className="text-[10px] text-muted-foreground/80 leading-relaxed mt-2 p-2 bg-muted/30 rounded">
           <strong>Tip:</strong> Saving replaces all options for this kind. Existing funders that reference removed values will still match — only the dropdown shrinks.
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ============================================================
+   SECURITY — change password with 2-step email verification
+   ============================================================ */
+
+function SecuritySection() {
+  const toast = useToast();
+  const [phase, setPhase] = useState<'form' | 'verify'>('form');
+
+  // Phase 1 fields
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Phase 2 fields
+  const [code, setCode] = useState('');
+  const [sentTo, setSentTo] = useState('');
+  const [emailConfigured, setEmailConfigured] = useState(true);
+
+  const [busy, setBusy] = useState(false);
+
+  function resetAll() {
+    setPhase('form');
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setCode('');
+    setSentTo('');
+    setBusy(false);
+  }
+
+  async function requestCode() {
+    if (newPassword.length < 8) {
+      toast.error('New password must be at least 8 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error('New password and confirmation do not match.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch('/api/account/password/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        toast.error(j.error || 'Could not start verification.');
+        return;
+      }
+      setSentTo(j.sentTo || 'your email');
+      setEmailConfigured(j.emailConfigured !== false);
+      setPhase('verify');
+      if (j.emailConfigured === false) {
+        toast.info('Email is not configured — your code was logged to the server console.');
+      } else {
+        toast.success(`Verification code sent to ${j.sentTo}.`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmCode() {
+    if (!/^\d{6}$/.test(code)) {
+      toast.error('Enter the 6-digit code.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch('/api/account/password/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        toast.error(j.error || 'Verification failed.');
+        return;
+      }
+      toast.success('Password changed successfully.');
+      resetAll();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resendCode() {
+    // Re-run request with the same stashed passwords
+    if (!currentPassword || !newPassword) {
+      toast.error('Start again — your session for this change expired.');
+      resetAll();
+      return;
+    }
+    await requestCode();
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Change password</CardTitle>
+        <CardDescription>
+          For your security, changing your password takes two steps: confirm your current
+          password, then enter a 6-digit code we email to verify it&apos;s really you.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 max-w-md">
+        {phase === 'form' ? (
+          <>
+            <Field label="Current password">
+              <Input
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder="••••••••"
+              />
+            </Field>
+            <Field label="New password" hint="At least 8 characters.">
+              <Input
+                type="password"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="••••••••"
+              />
+            </Field>
+            <Field label="Confirm new password">
+              <Input
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="••••••••"
+                onKeyDown={(e) => e.key === 'Enter' && requestCode()}
+              />
+            </Field>
+            <Button
+              onClick={requestCode}
+              loading={busy}
+              disabled={!currentPassword || !newPassword || !confirmPassword}
+            >
+              Send verification code
+            </Button>
+          </>
+        ) : (
+          <>
+            <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm">
+              We sent a 6-digit code to <strong>{sentTo}</strong>. Enter it below to confirm
+              your new password. The code expires in 10 minutes.
+              {!emailConfigured && (
+                <div className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                  Email isn&apos;t configured on this server yet, so the code was printed to the
+                  server console. Set up SYSTEM_SMTP_* secrets to receive codes by email.
+                </div>
+              )}
+            </div>
+            <Field label="Verification code">
+              <Input
+                inputMode="numeric"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="000000"
+                className="text-center text-2xl tracking-[0.5em] font-mono"
+                onKeyDown={(e) => e.key === 'Enter' && confirmCode()}
+                autoFocus
+              />
+            </Field>
+            <div className="flex items-center gap-2">
+              <Button onClick={confirmCode} loading={busy} disabled={code.length !== 6}>
+                Confirm &amp; change password
+              </Button>
+              <Button variant="ghost" onClick={resetAll} disabled={busy}>
+                Cancel
+              </Button>
+            </div>
+            <button
+              onClick={resendCode}
+              disabled={busy}
+              className="text-xs text-muted-foreground hover:text-foreground underline disabled:opacity-50"
+            >
+              Didn&apos;t get it? Resend code
+            </button>
+          </>
+        )}
       </CardContent>
     </Card>
   );

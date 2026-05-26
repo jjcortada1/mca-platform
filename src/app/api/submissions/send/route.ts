@@ -6,7 +6,9 @@ import {
 } from '@/lib/db/schema';
 import { and, eq, inArray } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
-import { sendDealEmail, type EmailAttachment, type SmtpConfig } from '@/lib/email/smtp';
+import { sendDealEmailBatch, type EmailAttachment, type SmtpConfig } from '@/lib/email/smtp';
+import { apiError } from '@/lib/api/errors';
+import { rateLimit } from '@/lib/api/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -19,6 +21,17 @@ interface FunderSubmission {
 export async function POST(req: NextRequest) {
   try {
     const ctx = await requirePermission('deals.submit');
+
+    // Throttle: max 20 send operations per user per minute (each op may fan out
+    // to many funders). Blunts double-clicks and runaway loops.
+    const rl = rateLimit(`send:${ctx.user.id}`, { max: 20, windowMs: 60_000 });
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: `Too many sends. Try again in ${rl.retryAfterSec}s.` },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } }
+      );
+    }
+
     const formData = await req.formData();
 
     // Accept either an existing deal by ID, or a new dealName to auto-create.
@@ -26,11 +39,21 @@ export async function POST(req: NextRequest) {
     let dealId = (formData.get('dealId') as string) || (formData.get('deal_id') as string) || '';
     const dealName = ((formData.get('dealName') as string) || (formData.get('deal_name') as string) || '').trim();
     const bodyNotes = ((formData.get('notes') as string) || (formData.get('bodyNotes') as string) || '');
-    const ccEmails = JSON.parse((formData.get('ccEmails') as string) || '[]') as string[];
-    const fundersInput = JSON.parse(formData.get('funders') as string) as FunderSubmission[];
-    const structuredFieldsInput = JSON.parse(
-      (formData.get('structuredFields') as string) || '[]'
-    ) as { label: string; value: string }[];
+
+    // Safe JSON parsing — malformed payloads return a clean 400, not a 500.
+    let ccEmails: string[];
+    let fundersInput: FunderSubmission[];
+    let structuredFieldsInput: { label: string; value: string }[];
+    try {
+      ccEmails = JSON.parse((formData.get('ccEmails') as string) || '[]');
+      fundersInput = JSON.parse((formData.get('funders') as string) || '[]');
+      structuredFieldsInput = JSON.parse((formData.get('structuredFields') as string) || '[]');
+    } catch {
+      return NextResponse.json({ error: 'Malformed request payload' }, { status: 400 });
+    }
+    if (!Array.isArray(ccEmails) || !Array.isArray(fundersInput) || !Array.isArray(structuredFieldsInput)) {
+      return NextResponse.json({ error: 'Malformed request payload' }, { status: 400 });
+    }
 
     if (!fundersInput.length) {
       return NextResponse.json({ error: 'No funders selected' }, { status: 400 });
@@ -140,13 +163,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Send each funder a separate email
+    // Build the list of funders to actually send to (after dedupe).
+    // Each entry maps 1:1 to a separate, isolated email.
+    type Target = {
+      fi: FunderSubmission;
+      fName: string;
+      ref: string;
+    };
+    const toSend: Target[] = [];
     const results: Array<{ toEmail: string; funderName: string; success: boolean; error?: string }> = [];
+
+    let refCounter = 0;
     for (const fi of fundersInput) {
       const fName = fi.funderId
         ? (dirFunders.find((f) => f.id === fi.funderId)?.name ?? 'Unknown')
         : (fi.manualFunderName ?? fi.toEmail);
-      // Dedupe
+
+      // Dedupe — already submitted to this funder on this deal
       if (fi.funderId && existingDirIds.has(fi.funderId)) {
         results.push({ toEmail: fi.toEmail, funderName: fName, success: true, error: 'already submitted' });
         continue;
@@ -155,23 +188,41 @@ export async function POST(req: NextRequest) {
         results.push({ toEmail: fi.toEmail, funderName: fName, success: true, error: 'already submitted' });
         continue;
       }
+      // Guard: must have a deliverable address
+      if (!fi.toEmail || !fi.toEmail.includes('@')) {
+        results.push({ toEmail: fi.toEmail ?? '', funderName: fName, success: false, error: 'No valid email for this funder' });
+        continue;
+      }
 
-      const sendResult = await sendDealEmail({
-        smtp,
-        toEmail: fi.toEmail,
-        ccEmails: allCc,
-        dealName: deal.name,
-        bodyNotes,
-        structuredFields: structuredFieldsInput,
-        attachments,
-      });
+      toSend.push({ fi, fName, ref: `r${refCounter++}` });
+    }
 
+    // Send all as isolated messages over a single pooled connection.
+    // Each funder gets its OWN email — no funder is ever in another's To/CC.
+    const sendResults = toSend.length
+      ? await sendDealEmailBatch(
+          {
+            smtp,
+            ccEmails: allCc,
+            dealName: deal.name,
+            bodyNotes,
+            structuredFields: structuredFieldsInput,
+            attachments,
+          },
+          toSend.map((t) => ({ toEmail: t.fi.toEmail, ref: t.ref }))
+        )
+      : [];
+    const byRef = new Map(sendResults.map((r) => [r.ref, r]));
+
+    // Persist one submissionFunder + submissionEmail per target.
+    for (const t of toSend) {
+      const sr = byRef.get(t.ref);
       const [sf] = await db
         .insert(submissionFunders)
         .values({
           submissionId: submission.id,
-          funderId: fi.funderId ?? null,
-          manualFunderName: fi.funderId ? null : fi.manualFunderName ?? null,
+          funderId: t.fi.funderId ?? null,
+          manualFunderName: t.fi.funderId ? null : t.fi.manualFunderName ?? null,
           submittedBy: ctx.user.id,
           status: 'no_response',
         })
@@ -179,24 +230,22 @@ export async function POST(req: NextRequest) {
 
       await db.insert(submissionEmails).values({
         submissionFunderId: sf.id,
-        toEmail: fi.toEmail,
+        toEmail: t.fi.toEmail,
         ccEmails: allCc,
         subject: `NEW DEAL | ${deal.name}`,
         body: bodyNotes,
         attachmentMeta: attachments.map((a) => ({ name: a.filename, size: a.content.length })),
-        smtpMessageId: sendResult.messageId,
-        smtpResponse: sendResult.response,
-        success: sendResult.success,
-        errorMessage: sendResult.error,
+        smtpMessageId: sr?.messageId,
+        smtpResponse: sr?.response,
+        success: sr?.success ?? false,
+        errorMessage: sr?.error,
       });
 
       results.push({
-        toEmail: fi.toEmail,
-        funderName: fi.funderId
-          ? (dirFunders.find((f) => f.id === fi.funderId)?.name ?? 'Unknown')
-          : (fi.manualFunderName ?? fi.toEmail),
-        success: sendResult.success,
-        error: sendResult.error,
+        toEmail: t.fi.toEmail,
+        funderName: t.fName,
+        success: sr?.success ?? false,
+        error: sr?.error,
       });
     }
 
@@ -208,6 +257,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ submissionId: submission.id, results });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }

@@ -4,6 +4,7 @@ import { infoEntries, users } from '@/lib/db/schema';
 import { eq, desc, inArray } from 'drizzle-orm';
 import { requirePermission, requireTenantContext, hasPermission } from '@/lib/auth/context';
 import { infoEntrySchema } from '@/lib/validation/schemas';
+import { apiError } from '@/lib/api/errors';
 
 export async function GET() {
   try {
@@ -30,7 +31,7 @@ export async function GET() {
         createdAt: e.createdAt, updatedAt: e.updatedAt,
       })),
     });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }
 
 export async function POST(req: NextRequest) {
@@ -48,5 +49,5 @@ export async function POST(req: NextRequest) {
       createdBy: ctx.user.id,
     }).returning();
     return NextResponse.json({ entry: e });
-  } catch (err) { return NextResponse.json({ error: (err as Error).message }, { status: 400 }); }
+  } catch (err) { return apiError(err); }
 }

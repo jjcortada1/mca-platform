@@ -4,6 +4,7 @@ import { matchOptions } from '@/lib/db/schema';
 import { eq, and, asc } from 'drizzle-orm';
 import { requireTenantContext, requireCompanyAdmin } from '@/lib/auth/context';
 import { z } from 'zod';
+import { apiError } from '@/lib/api/errors';
 
 /**
  * GET /api/settings/match-options
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest) {
     }
     return NextResponse.json({ data: grouped });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }
 
@@ -90,6 +91,6 @@ export async function PUT(req: NextRequest) {
     if (e instanceof z.ZodError) {
       return NextResponse.json({ error: e.errors[0]?.message || 'Validation failed' }, { status: 400 });
     }
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }

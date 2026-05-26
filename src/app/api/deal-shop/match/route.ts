@@ -5,6 +5,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
 import { dealShopMatchSchema } from '@/lib/validation/schemas';
 import { matchAll, type FunderForMatching } from '@/lib/matching/engine';
+import { apiError } from '@/lib/api/errors';
 
 export async function POST(req: NextRequest) {
   try {
@@ -53,6 +54,6 @@ export async function POST(req: NextRequest) {
     const result = matchAll(criteria, forMatching);
     return NextResponse.json(result);
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    return apiError(e);
   }
 }

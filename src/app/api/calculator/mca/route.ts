@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
 import { mcaCalcSchema } from '@/lib/validation/schemas';
 import { calculateMCA, DEFAULT_COMMISSION_RULES, type CommissionRule } from '@/lib/calculator/mca';
+import { apiError } from '@/lib/api/errors';
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,5 +17,5 @@ export async function POST(req: NextRequest) {
       : DEFAULT_COMMISSION_RULES;
     const result = calculateMCA({ ...input, commissionRules: rules });
     return NextResponse.json(result);
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }

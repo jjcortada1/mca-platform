@@ -4,6 +4,7 @@ import { funderTiers } from '@/lib/db/schema';
 import { eq, asc } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import { createTierSchema } from '@/lib/validation/schemas';
+import { apiError } from '@/lib/api/errors';
 
 export async function GET() {
   try {
@@ -12,7 +13,7 @@ export async function GET() {
       .where(eq(funderTiers.companyId, ctx.companyId))
       .orderBy(asc(funderTiers.sortOrder), asc(funderTiers.name));
     return NextResponse.json({ tiers: list, data: list });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }
 
 export async function POST(req: NextRequest) {
@@ -26,5 +27,5 @@ export async function POST(req: NextRequest) {
       companyId: ctx.companyId, name: body.name, sortOrder: body.sortOrder,
     }).returning();
     return NextResponse.json({ tier: t });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }

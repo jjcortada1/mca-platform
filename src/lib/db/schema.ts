@@ -93,6 +93,33 @@ export const passwordResets = pgTable('password_resets', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Short-lived email verification codes for sensitive actions (2-step verification).
+ *
+ * `purpose` distinguishes flows: 'password_change', 'email_change', etc.
+ * `payloadHash` holds the hash of the pending change (e.g. the bcrypt of the NEW
+ * password) so the actual secret is never stored in plaintext while waiting for
+ * the code. `codeHash` is the SHA-256 of the 6-digit code we emailed.
+ */
+export const verificationCodes = pgTable(
+  'verification_codes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    purpose: varchar('purpose', { length: 40 }).notNull(),
+    codeHash: varchar('code_hash', { length: 255 }).notNull(),
+    // Pending change payload (already hashed/encrypted as appropriate). Optional.
+    payload: text('payload'),
+    attempts: integer('attempts').notNull().default(0),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userPurposeIdx: index('verification_codes_user_purpose_idx').on(t.userId, t.purpose),
+  })
+);
+
 /* ---------- Funders ---------- */
 
 export const funderTiers = pgTable(

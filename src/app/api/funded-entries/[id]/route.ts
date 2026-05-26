@@ -4,6 +4,7 @@ import { fundedEntries } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { requireTenantContext } from '@/lib/auth/context';
 import { fundedEntrySchema } from '@/lib/validation/schemas';
+import { apiError } from '@/lib/api/errors';
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -31,7 +32,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         .where(and(eq(fundedEntries.id, params.id), eq(fundedEntries.companyId, ctx.companyId)));
     }
     return NextResponse.json({ ok: true });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
@@ -46,5 +47,5 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     await db.delete(fundedEntries)
       .where(and(eq(fundedEntries.id, params.id), eq(fundedEntries.companyId, ctx.companyId)));
     return NextResponse.json({ ok: true });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }

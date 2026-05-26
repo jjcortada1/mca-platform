@@ -4,6 +4,7 @@ import { structuredEmailFields } from '@/lib/db/schema';
 import { eq, asc } from 'drizzle-orm';
 import { requireTenantContext, requireCompanyAdmin } from '@/lib/auth/context';
 import { z } from 'zod';
+import { apiError } from '@/lib/api/errors';
 
 export async function GET() {
   try {
@@ -12,7 +13,7 @@ export async function GET() {
       .where(eq(structuredEmailFields.companyId, ctx.companyId))
       .orderBy(asc(structuredEmailFields.sortOrder));
     return NextResponse.json({ data: fields });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }
 
 const putSchema = z.object({
@@ -38,5 +39,5 @@ export async function PUT(req: NextRequest) {
       })));
     }
     return NextResponse.json({ ok: true });
-  } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  } catch (e) { return apiError(e); }
 }
