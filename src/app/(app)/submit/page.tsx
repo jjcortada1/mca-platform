@@ -72,8 +72,31 @@ function SubmitDealInner() {
 
       setSmtpConfigured(!!smtpJson.configured);
       setFromEmail(smtpJson.from ?? smtpJson.user ?? null);
+
+      // If we came from Shop with funders selected, pre-select them here.
+      if (fromShop) {
+        try {
+          const raw = sessionStorage.getItem('shopSelectedFunderIds');
+          if (raw) {
+            const ids: string[] = JSON.parse(raw);
+            if (Array.isArray(ids) && ids.length) {
+              // Only keep IDs that exist in the loaded funder list
+              const validIds = new Set(list.map((f: FunderRow) => f.id));
+              const preselect = ids.filter((id) => validIds.has(id));
+              setSelectedFunderIds(new Set(preselect));
+              // Jump to the tier of the first preselected funder so it's visible
+              const first = list.find((f: FunderRow) => f.id === preselect[0]);
+              const firstTier = first?.tiers?.[0]?.name;
+              if (firstTier) setActiveTier(firstTier);
+            }
+          }
+          sessionStorage.removeItem('shopSelectedFunderIds');
+        } catch {
+          // ignore malformed handoff
+        }
+      }
     });
-  }, []);
+  }, [fromShop]);
 
   const tiers = useMemo(() => collectAllTiers(allFunders), [allFunders]);
 

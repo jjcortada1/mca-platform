@@ -36,6 +36,7 @@ export default function DealShopPage() {
   const [industries, setIndustries] = useState<MatchOption[]>([]);
   const [dealTypes, setDealTypes] = useState<MatchOption[]>([]);
   const [positionOptions, setPositionOptions] = useState<MatchOption[]>([]);
+  const [stateOptions, setStateOptions] = useState<MatchOption[]>([]);
 
   // Form state
   const [revenueOption, setRevenueOption] = useState('');
@@ -52,6 +53,7 @@ export default function DealShopPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTier, setActiveTier] = useState<string>('all');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [selectedFunders, setSelectedFunders] = useState<Set<string>>(new Set());
 
   // Load match options + funder details once
   useEffect(() => {
@@ -64,6 +66,7 @@ export default function DealShopPage() {
         setIndustries(grouped.industry ?? []);
         setDealTypes(grouped.deal_type ?? []);
         setPositionOptions(grouped.position_option ?? []);
+        setStateOptions(grouped.state ?? []);
       })
       .catch(() => {});
 
@@ -133,13 +136,42 @@ export default function DealShopPage() {
       setResults(json);
       setActiveTier('all');
       setExpanded(new Set());
+      setSelectedFunders(new Set());
     } finally {
       setLoading(false);
     }
   }
 
   function toSubmit() {
+    // Carry the selected funders to the submit page so they're pre-selected.
+    // If none are explicitly ticked, default to ALL matched funders.
+    const ids = selectedFunders.size > 0
+      ? Array.from(selectedFunders)
+      : (results?.matched.map((m) => m.funderId) ?? []);
+    try {
+      sessionStorage.setItem('shopSelectedFunderIds', JSON.stringify(ids));
+    } catch {
+      // ignore
+    }
     router.push('/submit?shop=1');
+  }
+
+  function toggleFunderSel(id: string) {
+    setSelectedFunders((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAllMatched() {
+    const all = results?.matched.map((m) => m.funderId) ?? [];
+    setSelectedFunders(new Set(all));
+  }
+
+  function clearSelection() {
+    setSelectedFunders(new Set());
   }
 
   // Group results by tier
@@ -195,7 +227,9 @@ export default function DealShopPage() {
           results && totalMatched > 0 ? (
             <Button onClick={toSubmit} className="gap-2">
               <Send className="h-4 w-4" />
-              Submit deal →
+              {selectedFunders.size > 0
+                ? `Shop ${selectedFunders.size} selected →`
+                : 'Submit deal →'}
             </Button>
           ) : undefined
         }
@@ -252,7 +286,10 @@ export default function DealShopPage() {
               <Field label="State" hint='Pick "Other" to skip state filtering'>
                 <Select value={state} onChange={setState} options={[
                   { value: 'other', label: 'Other / N/A' },
-                  ...US_STATES.map((s) => ({ value: s.code, label: `${s.code} · ${s.name}` })),
+                  ...(stateOptions.length > 0
+                    ? stateOptions.map((s) => ({ value: s.value, label: s.label }))
+                    : US_STATES.map((s) => ({ value: s.code, label: `${s.code} · ${s.name}` }))
+                  ),
                 ]} />
               </Field>
 
@@ -305,8 +342,25 @@ export default function DealShopPage() {
           </Card>
         ) : (
           <div className="space-y-4">
-            <div className="text-xs uppercase tracking-wider font-semibold text-muted-foreground/80 px-1">
-              Results — {totalMatched} qualifying, {totalExcluded} excluded
+            <div className="flex items-center justify-between px-1 gap-3 flex-wrap">
+              <div className="text-xs uppercase tracking-wider font-semibold text-muted-foreground/80">
+                Results — {totalMatched} qualifying, {totalExcluded} excluded
+              </div>
+              {totalMatched > 0 && (
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="text-muted-foreground">
+                    {selectedFunders.size > 0 ? `${selectedFunders.size} selected` : 'None selected'}
+                  </span>
+                  <button onClick={selectAllMatched} className="text-primary hover:underline font-medium">
+                    Select all
+                  </button>
+                  {selectedFunders.size > 0 && (
+                    <button onClick={clearSelection} className="text-muted-foreground hover:text-foreground">
+                      Clear
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="grid lg:grid-cols-[200px_1fr] gap-4">
@@ -363,7 +417,8 @@ export default function DealShopPage() {
                         <table className="w-full text-sm">
                           <thead>
                             <tr className="bg-muted/40 border-b border-border">
-                              <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-4 py-2">Funder</th>
+                              <th className="w-10 px-3 py-2"></th>
+                              <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-2 py-2">Funder</th>
                               <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Submission</th>
                               <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Primary email</th>
                               <th className="w-8"></th>
@@ -374,28 +429,38 @@ export default function DealShopPage() {
                               const f = funderMap.get(m.funderId);
                               const primary = f?.contacts?.find((c) => c.email);
                               const isExpanded = expanded.has(m.funderId);
+                              const isSelected = selectedFunders.has(m.funderId);
                               return (
                                 <>
-                                  <tr key={m.funderId} className="hover:bg-muted/30 cursor-pointer" onClick={() => toggleExpand(m.funderId)}>
-                                    <td className="px-4 py-2.5">
+                                  <tr key={m.funderId} className={cn('hover:bg-muted/30', isSelected && 'bg-primary/5')}>
+                                    <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => toggleFunderSel(m.funderId)}
+                                        className="h-4 w-4 rounded border-border cursor-pointer accent-[var(--primary,#2563eb)]"
+                                        title="Select to shop this funder"
+                                      />
+                                    </td>
+                                    <td className="px-2 py-2.5 cursor-pointer" onClick={() => toggleExpand(m.funderId)}>
                                       <div className="flex items-center gap-2">
                                         <div className="h-2 w-2 rounded-full bg-emerald-500" />
                                         <span className="font-medium">{m.funderName}</span>
                                       </div>
                                     </td>
-                                    <td className="px-3 py-2.5">
+                                    <td className="px-3 py-2.5 cursor-pointer" onClick={() => toggleExpand(m.funderId)}>
                                       <Badge variant="outline" className="text-[10px]">{f?.submissionMethod ?? 'email'}</Badge>
                                     </td>
-                                    <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground truncate max-w-[200px]">
+                                    <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground truncate max-w-[200px] cursor-pointer" onClick={() => toggleExpand(m.funderId)}>
                                       {primary?.email ?? '—'}
                                     </td>
-                                    <td className="px-2 py-2.5 text-muted-foreground">
+                                    <td className="px-2 py-2.5 text-muted-foreground cursor-pointer" onClick={() => toggleExpand(m.funderId)}>
                                       {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                                     </td>
                                   </tr>
                                   {isExpanded && f && (
                                     <tr className="bg-muted/20">
-                                      <td colSpan={4} className="px-4 py-3">
+                                      <td colSpan={5} className="px-4 py-3">
                                         <FunderDetailRow funder={f} />
                                       </td>
                                     </tr>

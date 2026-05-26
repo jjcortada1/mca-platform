@@ -75,22 +75,29 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: var(--font-inter-tight), var(--font-inter), system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-    font-feature-settings: 'cv11', 'ss01', 'ss03';
+    /* Apple system font stack — renders as San Francisco on Apple devices,
+       identical to native macOS/iOS apps. Clean fallbacks elsewhere. */
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display',
+      'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
+    font-feature-settings: normal;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     font-synthesis: none;
+    text-rendering: optimizeLegibility;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: var(--font-inter-tight), var(--font-inter), system-ui, sans-serif;
-    letter-spacing: -0.018em;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text',
+      'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
+    letter-spacing: -0.021em;
     @apply font-semibold;
   }
-  h1 { letter-spacing: -0.022em; }
-  h2 { letter-spacing: -0.020em; }
+  h1 { letter-spacing: -0.026em; }
+  h2 { letter-spacing: -0.023em; }
 
-  /* Code-like content */
+  /* Code-like content — Apple's SF Mono first */
   .font-mono {
-    font-family: var(--font-jetbrains-mono), 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    font-family: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
 
   .tabular-nums { font-variant-numeric: tabular-nums; }

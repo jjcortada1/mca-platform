@@ -1035,6 +1035,11 @@ const MATCH_KINDS: { key: string; title: string; description: string; metaFields
     description: 'Shown in deal shop industry dropdown and used as funder restriction labels. "Other" must exist to allow skipping.',
   },
   {
+    key: 'state',
+    title: 'States',
+    description: 'Which states appear in the deal shop dropdown. Use a 2-letter code as the value (e.g. FL). Leave this empty to show all 50 states. "Other" is always available to skip state filtering.',
+  },
+  {
     key: 'deal_type',
     title: 'Deal types',
     description: 'Shown as buttons in deal shop. Use values "standard_mca" and "reverse_consolidation" to keep matching engine compatible.',

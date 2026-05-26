@@ -88,7 +88,8 @@ export const dealShopMatchSchema = z.object({
   creditScoreValue: z.number().nullable().optional(),
   positions: z.number().int().nonnegative(),
   industry: z.string().max(100).default('other'),
-  state: z.string().max(2).default('other'),
+  // 'other' (or any 2-letter code) — 'other' means skip state filtering
+  state: z.string().max(10).default('other'),
   dealType: z.enum(['standard_mca', 'reverse_consolidation']),
 });
 
