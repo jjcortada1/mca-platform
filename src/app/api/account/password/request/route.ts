@@ -96,6 +96,11 @@ export async function POST(req: NextRequest) {
       sentTo: masked,
       // false when no system SMTP is configured (code printed to console instead).
       emailConfigured: result.sent,
+      // Fallback so the flow is never a dead end before SMTP is set up: when email
+      // could NOT be sent, return the code to the already-authenticated user who is
+      // changing THEIR OWN password. This is safe (they're logged in, it's their
+      // account) and prevents a lockout when email isn't configured yet.
+      devCode: result.sent ? undefined : code,
     });
   } catch (e) {
     return apiError(e);

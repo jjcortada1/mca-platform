@@ -8,7 +8,7 @@ import {
 import { useToast } from '@/components/toast';
 import { US_STATES, COMMON_INDUSTRIES, CREDIT_TIER_OPTIONS } from '@/lib/constants';
 import { formatCurrency, cn } from '@/lib/utils';
-import { Upload, Plus, Search, X, Download, FileText, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Upload, Plus, Search, X, Download, FileText, AlertCircle, CheckCircle2, Trash2 } from 'lucide-react';
 
 interface Contact {
   id?: string;
@@ -519,21 +519,75 @@ function BulkImportModal({
   onClose: () => void;
   onComplete: (ok: number, failed: number) => void;
 }) {
+  type Mode = 'manual' | 'csv';
+  const [mode, setMode] = useState<Mode>('manual');
+
+  // ---- Manual entry rows ----
+  interface Row {
+    name: string;
+    tiers: string;
+    submissionEmail: string;
+    contactName: string;
+    contactPhone: string;
+    minRevenue: string;
+    notes: string;
+  }
+  const blankRow = (): Row => ({
+    name: '', tiers: '', submissionEmail: '', contactName: '',
+    contactPhone: '', minRevenue: '', notes: '',
+  });
+  const [rows, setRows] = useState<Row[]>([blankRow(), blankRow(), blankRow()]);
+  const [savingManual, setSavingManual] = useState(false);
+
+  function updateRow(i: number, field: keyof Row, value: string) {
+    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)));
+  }
+  function addRow() {
+    setRows((prev) => [...prev, blankRow()]);
+  }
+  function removeRow(i: number) {
+    setRows((prev) => prev.filter((_, idx) => idx !== i));
+  }
+
+  async function saveManual() {
+    const filled = rows.filter((r) => r.name.trim());
+    if (!filled.length) {
+      alert('Add at least one funder name.');
+      return;
+    }
+    // Build a CSV in-memory from the simple rows and reuse the import endpoint
+    const headers = ['name', 'tiers', 'submission_email', 'contact_name', 'contact_phone', 'min_revenue', 'notes'];
+    const esc = (s: string) => (s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s);
+    const csv = [
+      headers.join(','),
+      ...filled.map((r) => [
+        r.name, r.tiers, r.submissionEmail, r.contactName,
+        r.contactPhone, r.minRevenue.replace(/[^\d.]/g, ''), r.notes,
+      ].map(esc).join(',')),
+    ].join('\n');
+
+    setSavingManual(true);
+    const fd = new FormData();
+    fd.append('file', new Blob([csv], { type: 'text/csv' }), 'manual.csv');
+    const res = await fetch('/api/funders/bulk', { method: 'POST', body: fd });
+    const json = await res.json();
+    setSavingManual(false);
+    if (!res.ok) {
+      alert(json.error || 'Save failed.');
+      return;
+    }
+    onComplete(json.ok ?? filled.length, json.failed ?? 0);
+  }
+
+  // ---- CSV upload ----
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState<{
-    ok: number;
-    failed: number;
-    total: number;
-    errors: { row: number; message: string }[];
-    created: string[];
-  } | null>(null);
   const [dragOver, setDragOver] = useState(false);
-
-  function pickFile() {
-    fileInputRef.current?.click();
-  }
+  const [result, setResult] = useState<{
+    ok: number; failed: number; total: number;
+    errors: { row: number; message: string }[]; created: string[];
+  } | null>(null);
 
   function onFileChosen(f: File | null) {
     if (!f) return;
@@ -545,7 +599,7 @@ function BulkImportModal({
     setResult(null);
   }
 
-  async function upload() {
+  async function uploadCsv() {
     if (!file) return;
     setUploading(true);
     const fd = new FormData();
@@ -558,167 +612,152 @@ function BulkImportModal({
       return;
     }
     setResult(json);
-    if (json.failed === 0) {
-      // Auto-close after brief delay if everything succeeded
-      setTimeout(() => onComplete(json.ok, json.failed), 1500);
+    if ((json.failed ?? 0) === 0) {
+      setTimeout(() => onComplete(json.ok, json.failed), 1200);
     }
   }
 
   return (
     <div className="fixed inset-0 z-50 bg-foreground/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="bg-card rounded-xl shadow-2xl border border-border w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
+        className="bg-card rounded-xl shadow-2xl border border-border w-full max-w-4xl max-h-[88vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="px-6 py-4 border-b border-border flex items-center justify-between">
           <div>
-            <h2 className="text-base font-semibold">Bulk import funders</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Upload a CSV to add many funders at once.
-            </p>
+            <h2 className="text-base font-semibold">Add funders</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Type them in directly, or upload a CSV.</p>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1.5 rounded">
             <X className="h-4 w-4" />
           </button>
         </div>
 
+        {/* Mode tabs */}
+        <div className="px-6 pt-4">
+          <div className="inline-flex bg-muted rounded-lg p-1">
+            {([['manual', 'Type them in'], ['csv', 'Upload CSV']] as const).map(([m, label]) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={cn(
+                  'px-4 py-1.5 rounded text-sm font-medium transition',
+                  mode === m ? 'bg-card shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {/* Step 1 — download template */}
-          <div className="rounded-lg border border-border bg-muted/30 p-4">
-            <div className="flex items-start gap-3">
-              <FileText className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <div className="text-sm font-medium">Step 1 — Download the template</div>
-                <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
-                  Includes all supported columns and an example row with formatting notes.
-                </p>
-                <a
-                  href="/api/funders/bulk"
-                  download="funders_template.csv"
-                  className="inline-flex items-center gap-1.5 mt-2 px-3 py-1.5 rounded text-xs font-medium border border-border bg-card hover:bg-muted transition-colors"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  Download template (CSV)
+        <div className="flex-1 overflow-y-auto p-6">
+          {mode === 'manual' ? (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Only <strong>Name</strong> is required. Separate multiple tiers with a semicolon (e.g. <span className="font-mono">A-Paper;Subprime</span>). Leave anything you don&apos;t know blank.
+              </p>
+
+              {/* Clean table: header line on top, simple inputs below */}
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full text-sm min-w-[820px]">
+                  <thead>
+                    <tr className="bg-muted/50 border-b border-border text-left">
+                      <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Name *</th>
+                      <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Tier(s)</th>
+                      <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Submission email</th>
+                      <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Contact name</th>
+                      <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Contact phone</th>
+                      <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Min revenue</th>
+                      <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Notes</th>
+                      <th className="w-8"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {rows.map((r, i) => (
+                      <tr key={i} className="hover:bg-muted/20">
+                        <td className="p-1.5"><input className="w-full h-9 rounded-md border border-input bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" value={r.name} onChange={(e) => updateRow(i, 'name', e.target.value)} placeholder="Velocity Capital" /></td>
+                        <td className="p-1.5"><input className="w-full h-9 rounded-md border border-input bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" value={r.tiers} onChange={(e) => updateRow(i, 'tiers', e.target.value)} placeholder="A-Paper" /></td>
+                        <td className="p-1.5"><input className="w-full h-9 rounded-md border border-input bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" value={r.submissionEmail} onChange={(e) => updateRow(i, 'submissionEmail', e.target.value)} placeholder="subs@funder.com" /></td>
+                        <td className="p-1.5"><input className="w-full h-9 rounded-md border border-input bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" value={r.contactName} onChange={(e) => updateRow(i, 'contactName', e.target.value)} placeholder="Sarah Lee" /></td>
+                        <td className="p-1.5"><input className="w-full h-9 rounded-md border border-input bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" value={r.contactPhone} onChange={(e) => updateRow(i, 'contactPhone', e.target.value)} placeholder="555-123-4567" /></td>
+                        <td className="p-1.5"><input className="w-full h-9 rounded-md border border-input bg-card px-2 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-ring" value={r.minRevenue} onChange={(e) => updateRow(i, 'minRevenue', e.target.value)} placeholder="25000" /></td>
+                        <td className="p-1.5"><input className="w-full h-9 rounded-md border border-input bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" value={r.notes} onChange={(e) => updateRow(i, 'notes', e.target.value)} placeholder="optional" /></td>
+                        <td className="p-1.5 text-center">
+                          <button onClick={() => removeRow(i)} className="text-muted-foreground hover:text-destructive p-1 rounded" title="Remove row" disabled={rows.length === 1}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <button onClick={addRow} className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline">
+                <Plus className="h-3.5 w-3.5" /> Add another row
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Step 1 download */}
+              <div className="rounded-lg border border-border bg-muted/30 p-4">
+                <div className="text-sm font-medium mb-1">1. Download the template</div>
+                <p className="text-xs text-muted-foreground mb-2">Includes all columns and example rows.</p>
+                <a href="/api/funders/bulk" download="funders_template.csv" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border border-border bg-card hover:bg-muted transition-colors">
+                  <Download className="h-3.5 w-3.5" /> Download template (CSV)
                 </a>
               </div>
-            </div>
-          </div>
-
-          {/* Step 2 — upload */}
-          <div className="rounded-lg border border-border bg-muted/30 p-4">
-            <div className="text-sm font-medium mb-2">Step 2 — Upload your filled CSV</div>
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept=".csv,text/csv"
-              onChange={(e) => onFileChosen(e.target.files?.[0] ?? null)}
-              className="hidden"
-            />
-            <div
-              onClick={pickFile}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(false);
-                onFileChosen(e.dataTransfer.files?.[0] ?? null);
-              }}
-              className={cn(
-                'border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors',
-                dragOver ? 'border-primary bg-primary/5' : 'border-border hover:border-foreground/30 hover:bg-card'
-              )}
-            >
-              {file ? (
-                <div className="flex items-center justify-center gap-2 text-sm">
-                  <FileText className="h-4 w-4 text-primary" />
-                  <span className="font-medium">{file.name}</span>
-                  <span className="text-xs text-muted-foreground">({(file.size / 1024).toFixed(1)} KB)</span>
-                </div>
-              ) : (
-                <div className="text-sm text-muted-foreground">
-                  <Upload className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground/70" />
-                  Click to pick a file, or drag & drop a CSV here
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Format help */}
-          <details className="text-xs">
-            <summary className="cursor-pointer text-muted-foreground hover:text-foreground py-1">
-              Format requirements
-            </summary>
-            <div className="mt-2 space-y-2 text-muted-foreground">
-              <div>
-                <div className="font-semibold text-foreground/80 mb-1">Required (8 columns):</div>
-                <ul className="pl-4 space-y-0.5 list-disc">
-                  <li><strong>name</strong> — funder name (only column that must be filled)</li>
-                  <li><strong>tiers</strong> — tier name(s), separated by <code className="font-mono bg-muted px-1 rounded">;</code></li>
-                  <li><strong>submission_method</strong> — email or portal</li>
-                  <li><strong>submission_email</strong> — where deals get sent</li>
-                  <li><strong>contact_name / contact_phone / contact_email</strong> — primary contact</li>
-                  <li><strong>notes</strong> — free text</li>
-                </ul>
-              </div>
-              <div>
-                <div className="font-semibold text-foreground/80 mb-1">Optional advanced (leave empty to skip):</div>
-                <ul className="pl-4 space-y-0.5 list-disc">
-                  <li><strong>min_revenue</strong> — number, no $ or commas</li>
-                  <li><strong>min_credit_tier</strong> — unknown / under_550 / 550_599 / 600_649 / 650_plus</li>
-                  <li><strong>max_positions</strong> — leave empty for no max</li>
-                  <li><strong>restricted_states</strong> — 2-letter codes, separated by <code className="font-mono bg-muted px-1 rounded">;</code></li>
-                  <li><strong>restricted_industries</strong> — names separated by <code className="font-mono bg-muted px-1 rounded">;</code></li>
-                  <li><strong>supports_reverse_consolidation</strong> — true / false / yes / no</li>
-                  <li><strong>additional_rules</strong> — free text, appended to notes</li>
-                </ul>
-              </div>
-              <div className="text-[11px] text-muted-foreground/80 italic">
-                Tiers that don&apos;t exist yet will be created automatically.
-              </div>
-            </div>
-          </details>
-
-          {/* Results */}
-          {result && (
-            <div className="space-y-2">
-              <div className="grid grid-cols-3 gap-2">
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-center">
-                  <div className="text-2xl font-semibold text-emerald-700 tabular-nums">{result.ok}</div>
-                  <div className="text-[10px] uppercase tracking-wider text-emerald-700/80 mt-0.5">Imported</div>
-                </div>
-                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-center">
-                  <div className="text-2xl font-semibold text-rose-700 tabular-nums">{result.failed}</div>
-                  <div className="text-[10px] uppercase tracking-wider text-rose-700/80 mt-0.5">Failed</div>
-                </div>
-                <div className="rounded-lg border border-border bg-muted/40 p-3 text-center">
-                  <div className="text-2xl font-semibold text-foreground tabular-nums">{result.total}</div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5">Total rows</div>
+              {/* Step 2 upload */}
+              <div className="rounded-lg border border-border bg-muted/30 p-4">
+                <div className="text-sm font-medium mb-2">2. Upload your filled CSV</div>
+                <input type="file" ref={fileInputRef} accept=".csv,text/csv" onChange={(e) => onFileChosen(e.target.files?.[0] ?? null)} className="hidden" />
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={(e) => { e.preventDefault(); setDragOver(false); onFileChosen(e.dataTransfer.files?.[0] ?? null); }}
+                  className={cn('border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors', dragOver ? 'border-primary bg-primary/5' : 'border-border hover:border-foreground/30 hover:bg-card')}
+                >
+                  {file ? (
+                    <div className="flex items-center justify-center gap-2 text-sm">
+                      <FileText className="h-4 w-4 text-primary" />
+                      <span className="font-medium">{file.name}</span>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      <Upload className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground/70" />
+                      Click to pick a file, or drag &amp; drop a CSV here
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {result.errors.length > 0 && (
-                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 max-h-40 overflow-y-auto">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-700 mb-1.5">
-                    <AlertCircle className="h-3.5 w-3.5" />
-                    Errors
+              {result && (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-center">
+                      <div className="text-2xl font-semibold text-emerald-700 tabular-nums">{result.ok}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-emerald-700/80 mt-0.5">Imported</div>
+                    </div>
+                    <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-center">
+                      <div className="text-2xl font-semibold text-rose-700 tabular-nums">{result.failed}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-rose-700/80 mt-0.5">Failed</div>
+                    </div>
+                    <div className="rounded-lg border border-border bg-muted/40 p-3 text-center">
+                      <div className="text-2xl font-semibold text-foreground tabular-nums">{result.total}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5">Total</div>
+                    </div>
                   </div>
-                  <div className="space-y-0.5 text-xs text-rose-700">
-                    {result.errors.map((e, i) => (
-                      <div key={i} className="flex gap-2">
-                        <span className="font-mono text-rose-700/70 shrink-0">Row {e.row}:</span>
-                        <span>{e.message}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {result.ok > 0 && result.failed === 0 && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 flex items-center gap-2 text-xs text-emerald-700">
-                  <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  All rows imported successfully. Closing…
+                  {result.errors.length > 0 && (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 max-h-40 overflow-y-auto text-xs text-rose-700 space-y-0.5">
+                      {result.errors.map((e, i) => (
+                        <div key={i} className="flex gap-2"><span className="font-mono shrink-0">Row {e.row}:</span><span>{e.message}</span></div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -727,18 +766,16 @@ function BulkImportModal({
 
         {/* Footer */}
         <div className="px-6 py-3 border-t border-border flex items-center justify-end gap-2">
-          {result && result.failed > 0 && (
-            <Button variant="outline" onClick={() => onComplete(result.ok, result.failed)}>
-              Close
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          {mode === 'manual' ? (
+            <Button onClick={saveManual} loading={savingManual}>
+              Save funders
             </Button>
+          ) : (
+            !result && <Button onClick={uploadCsv} disabled={!file} loading={uploading}>Import CSV</Button>
           )}
-          {!result && (
-            <>
-              <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={upload} disabled={!file || uploading} loading={uploading}>
-                Import
-              </Button>
-            </>
+          {mode === 'csv' && result && result.failed > 0 && (
+            <Button onClick={() => onComplete(result.ok, result.failed)}>Done</Button>
           )}
         </div>
       </div>

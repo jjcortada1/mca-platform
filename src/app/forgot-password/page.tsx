@@ -35,6 +35,11 @@ export default function ForgotPasswordPage() {
                 If an account exists for <strong className="text-foreground">{email}</strong>, we&apos;ve sent a
                 password reset link. The link expires in 1 hour.
               </p>
+              <p className="text-xs text-muted-foreground/80 mt-3 leading-relaxed">
+                Didn&apos;t get it? Email delivery must be configured by an admin
+                (system SMTP). Until then, an admin can change passwords from
+                Settings &rarr; Security while signed in.
+              </p>
               <Link
                 href="/login"
                 className="mt-5 inline-flex items-center gap-1.5 text-sm text-primary hover:underline"

@@ -21,8 +21,16 @@ export function apiError(err: unknown): NextResponse {
     return NextResponse.json({ error: err.message }, { status: 403 });
   }
   if (err instanceof ZodError) {
+    const flat = err.flatten();
+    // Build a human-readable message from the first field error so the UI can
+    // show something useful (e.g. "Password must be at least 8 characters")
+    // instead of a generic "Validation failed".
+    const firstField = Object.entries(flat.fieldErrors)[0];
+    const firstFieldMsg = firstField && firstField[1] && firstField[1][0]
+      ? `${firstField[0]}: ${firstField[1][0]}`
+      : flat.formErrors[0];
     return NextResponse.json(
-      { error: 'Validation failed', details: err.flatten() },
+      { error: firstFieldMsg || 'Validation failed', details: flat },
       { status: 400 }
     );
   }

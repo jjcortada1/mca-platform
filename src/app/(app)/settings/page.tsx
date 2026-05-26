@@ -734,19 +734,44 @@ function UsersSection() {
 
   async function save() {
     if (!editing) return;
-    const body = {
-      name: editing.name,
-      email: editing.email,
+
+    // Client-side validation with clear messages
+    if (!editing.name || editing.name.trim().length < 2) {
+      toast.error('Name must be at least 2 characters.');
+      return;
+    }
+    if (!editing.email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(editing.email)) {
+      toast.error('Enter a valid email address.');
+      return;
+    }
+    // Password required on create; on edit it's optional (blank = keep current)
+    if (!editing.id) {
+      if (!editing.password || editing.password.length < 8) {
+        toast.error('Password must be at least 8 characters.');
+        return;
+      }
+    } else if (editing.password && editing.password.length > 0 && editing.password.length < 8) {
+      toast.error('New password must be at least 8 characters (or leave blank to keep current).');
+      return;
+    }
+
+    const body: Record<string, unknown> = {
+      name: editing.name.trim(),
+      email: editing.email.trim().toLowerCase(),
       role: editing.role,
       isActive: editing.isActive,
       permissions: editing.permissions,
-      password: editing.password,
     };
+    // Only include password if one was typed
+    if (editing.password && editing.password.length > 0) {
+      body.password = editing.password;
+    }
+
     const res = editing.id
       ? await fetch(`/api/users/${editing.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       : await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!res.ok) {
-      const j = await res.json();
+      const j = await res.json().catch(() => ({}));
       toast.error(j.error || 'Save failed.');
       return;
     }
@@ -812,8 +837,8 @@ function UsersSection() {
             <div className="p-6 space-y-4">
               <Field label="Name" required><Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Field>
               <Field label="Email" required><Input value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} /></Field>
-              <Field label={editing.id ? 'Password (leave blank to keep)' : 'Password'} required={!editing.id}>
-                <Input type="password" value={editing.password ?? ''} onChange={(e) => setEditing({ ...editing, password: e.target.value })} />
+              <Field label={editing.id ? 'Password (leave blank to keep)' : 'Password'} required={!editing.id} hint="At least 8 characters.">
+                <Input type="password" value={editing.password ?? ''} onChange={(e) => setEditing({ ...editing, password: e.target.value })} autoComplete="new-password" />
               </Field>
               <Field label="Role">
                 <select
@@ -1227,6 +1252,7 @@ function SecuritySection() {
   const [code, setCode] = useState('');
   const [sentTo, setSentTo] = useState('');
   const [emailConfigured, setEmailConfigured] = useState(true);
+  const [devCode, setDevCode] = useState<string | null>(null);
 
   const [busy, setBusy] = useState(false);
 
@@ -1237,6 +1263,7 @@ function SecuritySection() {
     setConfirmPassword('');
     setCode('');
     setSentTo('');
+    setDevCode(null);
     setBusy(false);
   }
 
@@ -1263,9 +1290,10 @@ function SecuritySection() {
       }
       setSentTo(j.sentTo || 'your email');
       setEmailConfigured(j.emailConfigured !== false);
+      setDevCode(j.devCode ?? null);
       setPhase('verify');
       if (j.emailConfigured === false) {
-        toast.info('Email is not configured — your code was logged to the server console.');
+        toast.info('Email isn\u2019t set up yet — your code is shown below so you can continue.');
       } else {
         toast.success(`Verification code sent to ${j.sentTo}.`);
       }
@@ -1362,10 +1390,17 @@ function SecuritySection() {
               We sent a 6-digit code to <strong>{sentTo}</strong>. Enter it below to confirm
               your new password. The code expires in 10 minutes.
               {!emailConfigured && (
-                <div className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-                  The system email account isn&apos;t configured yet, so the code was printed to
-                  the server console. An admin needs to set the <code>SYSTEM_SMTP_*</code> secrets
-                  so codes get delivered by email.
+                <div className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 space-y-1.5">
+                  <div>Email isn&apos;t set up yet, so here&apos;s your code directly:</div>
+                  {devCode && (
+                    <div className="text-center font-mono text-lg font-bold tracking-[0.4em] bg-white border border-amber-300 rounded py-1.5">
+                      {devCode}
+                    </div>
+                  )}
+                  <div className="text-amber-700">
+                    To get codes by email instead, an admin can set the
+                    <code> SYSTEM_SMTP_*</code> secrets.
+                  </div>
                 </div>
               )}
             </div>
