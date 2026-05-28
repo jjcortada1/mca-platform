@@ -654,16 +654,45 @@ function NewLeadSourceModal({ onClose, onSaved }: { onClose: () => void; onSaved
 /* ---------- Assign Lead Source to deal modal ---------- */
 function AssignLeadSourceModal({ deals, leadSources, onClose, onSaved }: { deals: Deal[]; leadSources: LeadSource[]; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
+  const [dealMode, setDealMode] = useState<'existing' | 'new'>(deals.length ? 'existing' : 'new');
+  const [newDeal, setNewDeal] = useState({ name: '', merchantFirstName: '', merchantLastName: '', merchantPhone: '', merchantEmail: '' });
   const [f, setF] = useState({ dealId: '', leadSourceId: '', mode: 'split' as 'split' | 'flat', splitPct: '', flatAmount: '', notes: '' });
   const [saving, setSaving] = useState(false);
+
   async function save() {
-    if (!f.dealId || !f.leadSourceId) { toast.error('Pick a deal and a lead source.'); return; }
+    if (!f.leadSourceId) { toast.error('Pick a lead source.'); return; }
+    let dealId = f.dealId;
+    if (dealMode === 'new') {
+      if (!newDeal.name.trim()) { toast.error('Enter a deal name.'); return; }
+    } else if (!dealId) {
+      toast.error('Pick a deal.'); return;
+    }
+
     setSaving(true);
     try {
+      // Create the deal first if logging a brand-new one.
+      if (dealMode === 'new') {
+        const dRes = await fetch('/api/deals', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: newDeal.name.trim(),
+            merchantFirstName: newDeal.merchantFirstName || null,
+            merchantLastName: newDeal.merchantLastName || null,
+            merchantPhone: newDeal.merchantPhone || null,
+            merchantEmail: newDeal.merchantEmail || null,
+            status: 'funded',
+          }),
+        });
+        const dJson = await dRes.json();
+        if (!dRes.ok) { toast.error(dJson.error || 'Could not create deal'); return; }
+        dealId = dJson.deal?.id;
+        if (!dealId) { toast.error('Deal created but no ID returned'); return; }
+      }
+
       const res = await fetch('/api/lead-source-commissions', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          dealId: f.dealId, leadSourceId: f.leadSourceId,
+          dealId, leadSourceId: f.leadSourceId,
           splitPct: f.mode === 'split' ? (f.splitPct || 0) : null,
           flatAmount: f.mode === 'flat' ? (f.flatAmount || 0) : null,
           notes: f.notes || null,
@@ -671,18 +700,42 @@ function AssignLeadSourceModal({ deals, leadSources, onClose, onSaved }: { deals
       });
       const j = await res.json();
       if (!res.ok) { toast.error(j.error || 'Failed'); return; }
-      toast.success('Lead source assigned.'); onSaved();
+      toast.success(dealMode === 'new' ? 'Deal logged and lead source assigned.' : 'Lead source assigned.');
+      onSaved();
     } finally { setSaving(false); }
   }
+
   return (
-    <Modal title="Assign lead source to a deal" onClose={onClose} onSave={save} saving={saving}>
+    <Modal title="Assign lead source commission" onClose={onClose} onSave={save} saving={saving}>
       <div className="space-y-3">
-        <Field label="Deal *">
-          <select value={f.dealId} onChange={(e) => setF({ ...f, dealId: e.target.value })} className="sel">
-            <option value="">— Pick a deal —</option>
-            {deals.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
+        <Field label="Deal">
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            {(['existing', 'new'] as const).map((m) => (
+              <button key={m} type="button" onClick={() => setDealMode(m)}
+                className={`px-3 py-2 rounded border-2 text-sm font-medium ${dealMode === m ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground'}`}>
+                {m === 'existing' ? 'Pick existing deal' : 'Log new deal'}
+              </button>
+            ))}
+          </div>
+          {dealMode === 'existing' ? (
+            <select value={f.dealId} onChange={(e) => setF({ ...f, dealId: e.target.value })} className="sel">
+              <option value="">— Pick a deal —</option>
+              {deals.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          ) : (
+            <Input value={newDeal.name} onChange={(e) => setNewDeal({ ...newDeal, name: e.target.value })} placeholder="New deal name (e.g. ABC Plumbing)" />
+          )}
         </Field>
+
+        {dealMode === 'new' && (
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Merchant first name"><Input value={newDeal.merchantFirstName} onChange={(e) => setNewDeal({ ...newDeal, merchantFirstName: e.target.value })} /></Field>
+            <Field label="Merchant last name"><Input value={newDeal.merchantLastName} onChange={(e) => setNewDeal({ ...newDeal, merchantLastName: e.target.value })} /></Field>
+            <Field label="Merchant phone"><Input value={newDeal.merchantPhone} onChange={(e) => setNewDeal({ ...newDeal, merchantPhone: e.target.value })} /></Field>
+            <Field label="Merchant email"><Input value={newDeal.merchantEmail} onChange={(e) => setNewDeal({ ...newDeal, merchantEmail: e.target.value })} /></Field>
+          </div>
+        )}
+
         <Field label="Lead source *">
           <select value={f.leadSourceId} onChange={(e) => setF({ ...f, leadSourceId: e.target.value })} className="sel">
             <option value="">— Pick a lead source —</option>
@@ -701,7 +754,7 @@ function AssignLeadSourceModal({ deals, leadSources, onClose, onSaved }: { deals
         </Field>
         {f.mode === 'split'
           ? <Field label="Split %"><Input inputMode="decimal" value={f.splitPct} onChange={(e) => setF({ ...f, splitPct: e.target.value })} placeholder="10" /></Field>
-          : <Field label="Flat amount ($)"><Input inputMode="decimal" value={f.flatAmount} onChange={(e) => setF({ ...f, flatAmount: e.target.value })} placeholder="500" /></Field>}
+          : <MoneyField label="Flat amount ($)" value={f.flatAmount} onChange={(v) => setF({ ...f, flatAmount: v })} placeholder="500" />}
         <Field label="Notes"><Input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
       </div>
     </Modal>
