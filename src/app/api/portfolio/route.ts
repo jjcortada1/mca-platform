@@ -4,6 +4,7 @@ import { deals, dealCommissions, commissionDraws, users } from '@/lib/db/schema'
 import { and, eq } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import { resolveAutoStatus } from '@/lib/commissions/calc';
+import { computePaydown } from '@/lib/deals/paydown';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -76,19 +77,25 @@ export async function GET() {
         .from(users).where(and(eq(users.companyId, ctx.companyId)));
       const repMap = new Map(repUsers.map((u) => [u.id, u.name]));
 
-      const byRep = new Map<string, { repId: string; name: string; deals: number; funded: number; commission: number; paid: number; pending: number; draws: number; active: number; defaults: number; renewals: number; paidOff: number }>();
+      const byRep = new Map<string, { repId: string; name: string; deals: number; funded: number; commission: number; paid: number; pending: number; draws: number; fundedCount: number; renewals: number; payingDown: number }>();
       const ensure = (id: string) => {
-        if (!byRep.has(id)) byRep.set(id, { repId: id, name: repMap.get(id) ?? 'Unassigned', deals: 0, funded: 0, commission: 0, paid: 0, pending: 0, draws: 0, active: 0, defaults: 0, renewals: 0, paidOff: 0 });
+        if (!byRep.has(id)) byRep.set(id, { repId: id, name: repMap.get(id) ?? 'Unassigned', deals: 0, funded: 0, commission: 0, paid: 0, pending: 0, draws: 0, fundedCount: 0, renewals: 0, payingDown: 0 });
         return byRep.get(id)!;
       };
       for (const d of dealRows) {
         if (!d.assignedRepId) continue;
         const e = ensure(d.assignedRepId);
         e.deals++; e.funded += Number(d.fundedAmount) || 0;
-        if (d.status === 'active') e.active++;
-        if (d.status === 'default' || d.status === 'in_collections') e.defaults++;
-        if (d.status === 'eligible_for_renewal' || d.status === 'renewal_sent') e.renewals++;
-        if (d.status === 'paid_off') e.paidOff++;
+        if (d.status === 'funded') e.fundedCount++;
+        // Renewal eligibility comes from paydown (50%+ paid in), not a status.
+        const pd = computePaydown({
+          fundedAmount: d.fundedAmount, factorRate: d.factorRate, termMode: d.termMode,
+          termCount: d.termCount, fundingDate: d.fundingDate, amountCollected: d.amountCollected,
+        }, now);
+        if (pd.hasStructure) {
+          e.payingDown++;
+          if (pd.renewalEligible) e.renewals++;
+        }
       }
       for (const c of commRows) {
         if (!c.repId) continue;

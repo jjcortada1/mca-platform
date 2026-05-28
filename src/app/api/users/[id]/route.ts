@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { db } from '@/lib/db/client';
-import { users, permissions } from '@/lib/db/schema';
+import { users, permissions, leadSources } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireCompanyAdmin } from '@/lib/auth/context';
@@ -39,11 +39,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 const fullUpdateSchema = z.object({
   name: z.string().min(2).max(200).optional(),
   email: z.string().email().toLowerCase().trim().optional(),
-  role: z.enum(['company_admin', 'rep']).optional(),
+  role: z.enum(['company_admin', 'rep', 'lead_source']).optional(),
   isActive: z.boolean().optional(),
   permissions: z.array(z.string()).optional(),
   // Optional — only changes the password when a non-empty value is sent
   password: z.string().min(8, 'Password must be at least 8 characters').optional(),
+  leadSourceId: z.string().uuid().optional().nullable(),
 });
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
@@ -82,6 +83,18 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
         await db.insert(permissions).values(
           body.permissions.map((k) => ({ userId: params.id, permissionKey: k }))
         );
+      }
+    }
+
+    // Lead source linking: when a user is (or becomes) a lead_source, point the
+    // chosen lead source at this user and clear any other links to it.
+    if (body.leadSourceId !== undefined) {
+      // Unlink this user from any lead source first
+      await db.update(leadSources).set({ userId: null })
+        .where(and(eq(leadSources.companyId, ctx.companyId), eq(leadSources.userId, params.id)));
+      if (body.leadSourceId) {
+        await db.update(leadSources).set({ userId: params.id })
+          .where(and(eq(leadSources.id, body.leadSourceId), eq(leadSources.companyId, ctx.companyId)));
       }
     }
 

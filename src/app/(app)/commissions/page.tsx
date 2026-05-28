@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, Button, Input, Field, PageHeader, Badge } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { computePaydown } from '@/lib/deals/paydown';
 
 /* ---------- comma formatting helpers ---------- */
 // Display a numeric string with thousands separators while typing (keeps a
@@ -97,10 +99,12 @@ export default function CommissionsPage() {
   const [leadSources, setLeadSources] = useState<LeadSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [filter, setFilter] = useState<'all' | 'active' | 'refi' | 'funded' | 'declined' | 'pending' | 'paid'>('all');
 
   const [showAdd, setShowAdd] = useState(false);
   const [showLSAdd, setShowLSAdd] = useState(false);
   const [showNewLS, setShowNewLS] = useState(false);
+  const [showDraw, setShowDraw] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -178,6 +182,28 @@ export default function CommissionsPage() {
     return { total, paid, pending, owed, clawed, fundedVolume, grossTotal, countPending, countCleared, countClawed, mtdFunded, mtdCommission, topReps, paidPct, dealCount: rows.length };
   }, [rows]);
 
+  // Filtered view for the rep/admin commission list. "Refi" = funded deal that
+  // is 50%+ paid in (renewal-eligible). "Active" = funded + paying down but not
+  // yet refi-eligible.
+  const filteredRows = useMemo(() => {
+    if (filter === 'all') return rows;
+    return rows.filter((r) => {
+      const pd = computePaydown({
+        fundedAmount: r.fundedAmount, factorRate: r.rate, termMode: r.termMode,
+        termCount: r.termCount, fundingDate: r.fundingDate, amountCollected: null,
+      });
+      switch (filter) {
+        case 'refi': return pd.hasStructure && pd.renewalEligible;
+        case 'active': return pd.hasStructure && !pd.renewalEligible;
+        case 'funded': return !!r.fundingDate || pd.hasStructure;
+        case 'declined': return false; // commissions aren't created for declines
+        case 'pending': return r.status === 'pending';
+        case 'paid': return Number(r.paidAmount) > 0;
+        default: return true;
+      }
+    });
+  }, [rows, filter]);
+
   async function patch(id: string, body: Record<string, unknown>) {
     const res = await fetch(`/api/commissions/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!res.ok) { const j = await res.json().catch(() => ({})); toast.error(j.error || 'Update failed'); return; }
@@ -197,7 +223,10 @@ export default function CommissionsPage() {
         description={isAdmin ? 'Manage rep + lead source commissions, splits, statuses, and payouts.' : 'Your commission earnings and payout status.'}
         actions={isAdmin ? (
           tab === 'rep'
-            ? <Button onClick={() => setShowAdd(true)}>+ Add commission</Button>
+            ? <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setShowDraw(true)}>+ Log draw</Button>
+                <Button onClick={() => setShowAdd(true)}>+ Add commission</Button>
+              </div>
             : <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setShowNewLS(true)}>+ New lead source</Button>
                 <Button onClick={() => setShowLSAdd(true)}>+ Assign to deal</Button>
@@ -306,6 +335,20 @@ export default function CommissionsPage() {
               No commissions yet.{isAdmin ? ' Click “+ Add commission” to create one from a funded deal.' : ''}
             </CardContent></Card>
           ) : (
+            <>
+            {/* Filter bar — sort between active, refis, etc. */}
+            <div className="flex flex-wrap gap-2">
+              {([
+                ['all', 'All'], ['active', 'Active'], ['refi', 'Refi eligible'],
+                ['pending', 'Pending'], ['paid', 'Paid'],
+              ] as const).map(([k, label]) => (
+                <button key={k} onClick={() => setFilter(k)}
+                  className={cn('px-3 py-1.5 rounded-full border text-xs font-medium transition',
+                    filter === k ? 'bg-primary text-primary-foreground border-primary' : 'bg-card border-border text-muted-foreground hover:text-foreground')}>
+                  {label}
+                </button>
+              ))}
+            </div>
             <Card className="overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm min-w-[760px]">
@@ -321,7 +364,7 @@ export default function CommissionsPage() {
                     <th className="w-8"></th>
                   </tr></thead>
                   <tbody className="divide-y divide-border/60">
-                    {rows.map((r) => (
+                    {filteredRows.map((r) => (
                       <>
                         <tr key={r.id} className="hover:bg-muted/20 cursor-pointer" onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
                           <td className="px-4 py-2.5 font-medium">{r.dealName}</td>
@@ -345,6 +388,7 @@ export default function CommissionsPage() {
                 </table>
               </div>
             </Card>
+            </>
           )}
         </>
       )}
@@ -389,6 +433,7 @@ export default function CommissionsPage() {
       {showAdd && <AddCommissionModal deals={deals} reps={reps} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
       {showNewLS && <NewLeadSourceModal onClose={() => setShowNewLS(false)} onSaved={() => { setShowNewLS(false); load(); }} />}
       {showLSAdd && <AssignLeadSourceModal deals={deals} leadSources={leadSources} onClose={() => setShowLSAdd(false)} onSaved={() => { setShowLSAdd(false); load(); }} />}
+      {showDraw && <LogDrawModal reps={reps} onClose={() => setShowDraw(false)} onSaved={() => { setShowDraw(false); load(); }} />}
 
       <style jsx>{`.th{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-foreground,#6b7280)}`}</style>
     </div>
@@ -658,6 +703,43 @@ function AssignLeadSourceModal({ deals, leadSources, onClose, onSaved }: { deals
           ? <Field label="Split %"><Input inputMode="decimal" value={f.splitPct} onChange={(e) => setF({ ...f, splitPct: e.target.value })} placeholder="10" /></Field>
           : <Field label="Flat amount ($)"><Input inputMode="decimal" value={f.flatAmount} onChange={(e) => setF({ ...f, flatAmount: e.target.value })} placeholder="500" /></Field>}
         <Field label="Notes"><Input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---------- Log draw (advance not tied to a deal) ---------- */
+function LogDrawModal({ reps, onClose, onSaved }: { reps: Rep[]; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [f, setF] = useState({ repId: '', amount: '', drawDate: new Date().toISOString().slice(0, 10), notes: '' });
+  const [saving, setSaving] = useState(false);
+  async function save() {
+    if (!f.repId) { toast.error('Pick a rep.'); return; }
+    if (!f.amount) { toast.error('Enter an amount.'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/commission-draws', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repId: f.repId, amount: f.amount, drawDate: f.drawDate, notes: f.notes || null }),
+      });
+      const j = await res.json();
+      if (!res.ok) { toast.error(j.error || 'Failed'); return; }
+      toast.success('Draw logged.'); onSaved();
+    } finally { setSaving(false); }
+  }
+  return (
+    <Modal title="Log a draw / advance" onClose={onClose} onSave={save} saving={saving}>
+      <div className="space-y-3">
+        <p className="text-xs text-muted-foreground">A draw is an advance paid to a rep, not tied to a specific deal. It's deducted from future commissions owed.</p>
+        <Field label="Rep *">
+          <select value={f.repId} onChange={(e) => setF({ ...f, repId: e.target.value })} className="sel">
+            <option value="">— Pick a rep —</option>
+            {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        </Field>
+        <MoneyField label="Draw amount ($) *" value={f.amount} onChange={(v) => setF({ ...f, amount: v })} placeholder="2,000" />
+        <Field label="Date"><Input type="date" value={f.drawDate} onChange={(e) => setF({ ...f, drawDate: e.target.value })} /></Field>
+        <Field label="Notes"><Input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="optional" /></Field>
       </div>
     </Modal>
   );

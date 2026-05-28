@@ -7,7 +7,7 @@ import { DEAL_STATUS_META } from '@/lib/deals/paydown';
 
 interface RepRow {
   repId: string; name: string; deals: number; funded: number; commission: number;
-  paid: number; pending: number; draws: number; active: number; defaults: number; renewals: number; paidOff: number;
+  paid: number; pending: number; draws: number; fundedCount: number; renewals: number; payingDown: number;
 }
 interface Portfolio {
   admin: boolean;
@@ -25,8 +25,8 @@ const TONE_CLASS: Record<string, string> = {
   teal: 'bg-teal-100 text-teal-800', cyan: 'bg-cyan-100 text-cyan-800',
 };
 
-// Order in which to surface portfolio statuses on the dashboard.
-const STATUS_ORDER = ['active', 'pending_funding', 'payment_issues', 'eligible_for_renewal', 'renewal_sent', 'default', 'in_collections', 'paid_off', 'on_hold', 'closed', 'funded'];
+// Order in which to surface deal statuses on the dashboard.
+const STATUS_ORDER = ['submitted', 'waiting_on_offer', 'offer', 'funded', 'declined'];
 
 export default function PortfolioDashboard() {
   const [data, setData] = useState<Portfolio | null>(null);
@@ -47,9 +47,9 @@ export default function PortfolioDashboard() {
         <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Portfolio overview</div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Tile label="Funded volume" value={formatCurrency(overview.fundedVolume, { compact: true })} accent="amber" />
-          <Tile label="Active deals" value={String(overview.statusCounts['active'] ?? 0)} accent="blue" />
-          <Tile label="Eligible renewals" value={String((overview.statusCounts['eligible_for_renewal'] ?? 0) + (overview.statusCounts['renewal_sent'] ?? 0))} accent="teal" />
-          <Tile label="Defaults / collections" value={String((overview.statusCounts['default'] ?? 0) + (overview.statusCounts['in_collections'] ?? 0))} accent="rose" />
+          <Tile label="Funded deals" value={String(overview.statusCounts['funded'] ?? 0)} accent="emerald" />
+          <Tile label="Offers out" value={String(overview.statusCounts['offer'] ?? 0)} accent="blue" />
+          <Tile label="Submitted" value={String((overview.statusCounts['submitted'] ?? 0) + (overview.statusCounts['waiting_on_offer'] ?? 0))} accent="teal" />
         </div>
       </section>
 
@@ -90,10 +90,9 @@ export default function PortfolioDashboard() {
                 {expandedRep === rep.repId && (
                   <div className="px-4 py-3 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                     <Mini label="Funded volume" value={formatCurrency(rep.funded)} />
-                    <Mini label="Active" value={String(rep.active)} />
+                    <Mini label="Funded deals" value={String(rep.fundedCount)} />
+                    <Mini label="Paying down" value={String(rep.payingDown)} />
                     <Mini label="Eligible renewals" value={String(rep.renewals)} />
-                    <Mini label="Defaults" value={String(rep.defaults)} />
-                    <Mini label="Paid off" value={String(rep.paidOff)} />
                     <Mini label="Commission" value={formatCurrency(rep.commission)} />
                     <Mini label="Paid" value={formatCurrency(rep.paid)} />
                     <Mini label="Pending" value={formatCurrency(rep.pending)} />

@@ -137,14 +137,15 @@ export function computePaydown(inputs: PaydownInputs, now: Date = new Date()): P
 
 /** Status display metadata: label + color tone for the 10 portfolio statuses (+ legacy). */
 export const DEAL_STATUS_META: Record<string, { label: string; tone: string }> = {
-  // modern workflow
+  // modern workflow (the only statuses shown in the UI)
   submitted: { label: 'Submitted', tone: 'amber' },
-  active: { label: 'Active', tone: 'blue' },
-  not_active: { label: 'Not Active', tone: 'gray' },
+  waiting_on_offer: { label: 'Waiting on Offer', tone: 'blue' },
   offer: { label: 'Offer', tone: 'violet' },
   funded: { label: 'Funded', tone: 'emerald' },
   declined: { label: 'Declined', tone: 'rose' },
-  // portfolio lifecycle
+  // legacy / other values — kept only so existing rows still display sensibly
+  active: { label: 'Active', tone: 'blue' },
+  not_active: { label: 'Not Active', tone: 'gray' },
   pending_funding: { label: 'Pending Funding', tone: 'amber' },
   payment_issues: { label: 'Payment Issues', tone: 'orange' },
   eligible_for_renewal: { label: 'Eligible for Renewal', tone: 'teal' },
@@ -154,14 +155,42 @@ export const DEAL_STATUS_META: Record<string, { label: string; tone: string }> =
   paid_off: { label: 'Paid Off', tone: 'emerald' },
   closed: { label: 'Closed', tone: 'gray' },
   on_hold: { label: 'On Hold', tone: 'slate' },
-  // legacy
   shopping: { label: 'Submitted (legacy)', tone: 'amber' },
   dead: { label: 'Declined (legacy)', tone: 'rose' },
 };
 
-/** Ordered list of statuses to offer in editors/filters (excludes legacy). */
+/** The ONLY statuses shown in editors/filters. */
 export const DEAL_STATUS_OPTIONS = [
-  'pending_funding', 'funded', 'active', 'payment_issues', 'eligible_for_renewal',
-  'renewal_sent', 'default', 'in_collections', 'paid_off', 'closed', 'on_hold',
-  'submitted', 'offer', 'not_active', 'declined',
+  'submitted', 'waiting_on_offer', 'offer', 'funded', 'declined',
 ] as const;
+
+export interface ScheduledPayment {
+  index: number;
+  date: Date;
+  amount: number;
+  cumulative: number;
+  isPast: boolean;
+}
+
+/**
+ * Generate the estimated payment schedule. Daily = business days (skips
+ * weekends), weekly = every 7 days from the funding date. Capped at 400 rows.
+ */
+export function buildPaymentSchedule(inputs: PaydownInputs, now: Date = new Date()): ScheduledPayment[] {
+  const p = computePaydown(inputs, now);
+  if (!p.hasStructure || !p.fundingDate || p.paymentAmount <= 0) return [];
+  const count = Math.min(400, Math.round(p.paymentsTotal));
+  const out: ScheduledPayment[] = [];
+  let cumulative = 0;
+  const cursor = new Date(p.fundingDate);
+  for (let i = 1; i <= count; i++) {
+    if (p.termMode === 'daily') {
+      do { cursor.setDate(cursor.getDate() + 1); } while (cursor.getDay() === 0 || cursor.getDay() === 6);
+    } else {
+      cursor.setDate(cursor.getDate() + 7);
+    }
+    cumulative = Math.round((cumulative + p.paymentAmount) * 100) / 100;
+    out.push({ index: i, date: new Date(cursor), amount: p.paymentAmount, cumulative, isPast: cursor.getTime() <= now.getTime() });
+  }
+  return out;
+}

@@ -31,6 +31,8 @@ export const dealStatusEnum = pgEnum('deal_status', [
   'funded',
   'dead',         // legacy — displayed as "Declined"
   'declined',
+  // Simplified workflow (current)
+  'waiting_on_offer',
   // Portfolio lifecycle statuses (additive)
   'payment_issues',
   'eligible_for_renewal',

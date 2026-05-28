@@ -6,7 +6,7 @@ import { useToast } from '@/components/toast';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import { Plus, Trash2, Briefcase, Search, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { computePaydown, DEAL_STATUS_META, DEAL_STATUS_OPTIONS } from '@/lib/deals/paydown';
+import { computePaydown, buildPaymentSchedule, DEAL_STATUS_META, DEAL_STATUS_OPTIONS } from '@/lib/deals/paydown';
 
 interface Deal {
   id: string;
@@ -65,7 +65,7 @@ const STATUS_OPTIONS = DEAL_STATUS_OPTIONS;
 const blankDeal = (): Deal => ({
   id: '', name: '', merchantFirstName: '', merchantLastName: '',
   merchantEmail: '', merchantPhone: '', offerNotes: '', offerAmount: '',
-  assignedRepId: null, status: 'pending_funding',
+  assignedRepId: null, status: 'submitted',
   fundedAmount: '', netAmount: '', factorRate: '', termMode: 'weekly', termCount: '',
   fundingDate: '', amountCollected: '', renewalNotes: '',
   createdAt: '', updatedAt: '',
@@ -228,10 +228,10 @@ export default function ActiveDealsPage() {
         }
       />
 
-      {/* Status filter chips (common) + full dropdown + search */}
+      {/* Status filter chips + search */}
       <div className="flex flex-wrap items-center gap-2">
         <FilterChip label="All" count={counts.all} active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} />
-        {(['active', 'pending_funding', 'payment_issues', 'eligible_for_renewal', 'default', 'paid_off'] as const).map((s) => (
+        {STATUS_OPTIONS.map((s) => (
           <FilterChip
             key={s}
             label={statusMeta(s).label}
@@ -241,14 +241,6 @@ export default function ActiveDealsPage() {
             tone={statusMeta(s).tone}
           />
         ))}
-        <select
-          value={STATUS_OPTIONS.includes(statusFilter as never) && !['active','pending_funding','payment_issues','eligible_for_renewal','default','paid_off'].includes(statusFilter) ? statusFilter : ''}
-          onChange={(e) => e.target.value && setStatusFilter(e.target.value)}
-          className="h-8 rounded-full border border-input bg-card px-3 text-xs text-muted-foreground"
-        >
-          <option value="">More statuses…</option>
-          {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{statusMeta(s).label} ({counts[s] ?? 0})</option>)}
-        </select>
         <div className="ml-auto relative w-full sm:w-auto sm:min-w-[240px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -617,6 +609,56 @@ function PaydownTracker({ deal }: { deal: Deal }) {
       {/* Deal timeline */}
       {p.fundingDate && p.payoffDate && (
         <DealTimeline funding={p.fundingDate} renewal={p.renewalDate} payoff={p.payoffDate} pct={p.pctPaidIn} />
+      )}
+
+      {/* Payment schedule (calendar of estimated payments) */}
+      <PaymentSchedule deal={deal} />
+    </div>
+  );
+}
+
+function PaymentSchedule({ deal }: { deal: Deal }) {
+  const [open, setOpen] = useState(false);
+  const schedule = useMemo(() => buildPaymentSchedule({
+    fundedAmount: deal.fundedAmount, factorRate: deal.factorRate, termMode: deal.termMode,
+    termCount: deal.termCount, fundingDate: deal.fundingDate, amountCollected: deal.amountCollected,
+  }), [deal.fundedAmount, deal.factorRate, deal.termMode, deal.termCount, deal.fundingDate, deal.amountCollected]);
+
+  if (!schedule.length) return null;
+  const paidCount = schedule.filter((s) => s.isPast).length;
+
+  return (
+    <div className="pt-1">
+      <button onClick={() => setOpen(!open)} className="text-xs text-primary hover:underline">
+        {open ? '▲ Hide' : '▼ Show'} payment schedule ({paidCount}/{schedule.length} estimated paid)
+      </button>
+      {open && (
+        <div className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-border">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/40 sticky top-0">
+              <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                <th className="px-3 py-1.5">#</th>
+                <th className="px-3 py-1.5">Date</th>
+                <th className="px-3 py-1.5 text-right">Payment</th>
+                <th className="px-3 py-1.5 text-right">Cumulative</th>
+                <th className="px-3 py-1.5">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/50">
+              {schedule.map((s) => (
+                <tr key={s.index} className={s.isPast ? 'bg-emerald-50/40' : ''}>
+                  <td className="px-3 py-1.5 text-muted-foreground tabular-nums">{s.index}</td>
+                  <td className="px-3 py-1.5 tabular-nums">{s.date.toLocaleDateString()}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(s.amount)}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{formatCurrency(s.cumulative)}</td>
+                  <td className="px-3 py-1.5">
+                    {s.isPast ? <span className="text-emerald-700">✓ est. paid</span> : <span className="text-muted-foreground">upcoming</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

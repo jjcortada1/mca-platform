@@ -35,15 +35,20 @@ export const createCompanySchema = z.object({
 export const createUserSchema = z.object({
   email: z.string().email().toLowerCase().trim(),
   name: z.string().min(2).max(200),
-  role: z.enum(['company_admin', 'rep']),
+  role: z.enum(['company_admin', 'rep', 'lead_source']),
   password: passwordRequirements,
   permissions: z.array(z.string()).default([]),
+  leadSourceId: z.string().uuid().optional().nullable(),
 });
 
 export const updateUserSchema = z.object({
   name: z.string().min(2).max(200).optional(),
+  email: z.string().email().toLowerCase().trim().optional(),
+  role: z.enum(['company_admin', 'rep', 'lead_source']).optional(),
+  password: z.string().min(8).optional(),
   isActive: z.boolean().optional(),
   permissions: z.array(z.string()).optional(),
+  leadSourceId: z.string().uuid().optional().nullable(),
 });
 
 /* ---------- Funders ---------- */
@@ -105,6 +110,7 @@ export const upsertDealSchema = z.object({
   assignedRepId: z.string().uuid().optional().nullable(),
   status: z.enum([
     'shopping', 'submitted', 'active', 'not_active', 'offer', 'funded', 'dead', 'declined',
+    'waiting_on_offer',
     'payment_issues', 'eligible_for_renewal', 'default', 'paid_off', 'closed',
     'pending_funding', 'renewal_sent', 'in_collections', 'on_hold',
   ]).optional(),

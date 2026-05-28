@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { db } from '@/lib/db/client';
-import { users, permissions } from '@/lib/db/schema';
-import { eq, inArray } from 'drizzle-orm';
+import { users, permissions, leadSources } from '@/lib/db/schema';
+import { eq, inArray, and } from 'drizzle-orm';
 import { requireTenantContext, requireCompanyAdmin } from '@/lib/auth/context';
 import { createUserSchema } from '@/lib/validation/schemas';
 import { ALL_REP_PERMISSIONS } from '@/lib/db/schema';
@@ -21,6 +21,7 @@ export async function GET() {
     const isAdmin = ctx.user.role === 'company_admin';
 
     const permsByUser = new Map<string, string[]>();
+    const lsByUser = new Map<string, string>();
     if (isAdmin && list.length) {
       const ids = list.map((u) => u.id);
       const rows = await db.select().from(permissions).where(inArray(permissions.userId, ids));
@@ -29,6 +30,9 @@ export async function GET() {
         arr.push(p.permissionKey);
         permsByUser.set(p.userId, arr);
       }
+      const lsRows = await db.select({ id: leadSources.id, userId: leadSources.userId })
+        .from(leadSources).where(eq(leadSources.companyId, ctx.companyId));
+      for (const ls of lsRows) if (ls.userId) lsByUser.set(ls.userId, ls.id);
     }
 
     const result = list.map((u) => {
@@ -45,6 +49,7 @@ export async function GET() {
         lastLoginAt: u.lastLoginAt,
         hasSmtp: !!u.smtpConfig,
         permissions: permsByUser.get(u.id) ?? [],
+        leadSourceId: lsByUser.get(u.id) ?? null,
       };
     });
 
@@ -83,6 +88,15 @@ export async function POST(req: NextRequest) {
       await db.insert(permissions).values(
         permsToInsert.map((k) => ({ userId: u.id, permissionKey: k }))
       );
+    }
+
+    // Link a lead_source login to its lead source so the portal scopes correctly.
+    if (body.role === 'lead_source' && body.leadSourceId) {
+      const [ls] = await db.select().from(leadSources)
+        .where(and(eq(leadSources.id, body.leadSourceId), eq(leadSources.companyId, ctx.companyId))).limit(1);
+      if (ls) {
+        await db.update(leadSources).set({ userId: u.id }).where(eq(leadSources.id, ls.id));
+      }
     }
 
     return NextResponse.json({ user: { id: u.id, email: u.email, role: u.role } });

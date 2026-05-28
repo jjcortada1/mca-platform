@@ -710,9 +710,10 @@ interface AppUser {
   id: string;
   email: string;
   name: string;
-  role: 'company_admin' | 'rep';
+  role: 'company_admin' | 'rep' | 'lead_source';
   isActive: boolean;
   permissions: string[];
+  leadSourceId?: string | null;
 }
 
 const ALL_PERMS = [
@@ -727,11 +728,16 @@ function UsersSection() {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<(AppUser & { password?: string }) | null>(null);
+  const [leadSourceList, setLeadSourceList] = useState<{ id: string; name: string }[]>([]);
 
   async function load() {
     setLoading(true);
     const j = await (await fetch('/api/users')).json();
     setUsers(j.data ?? []);
+    try {
+      const ls = await (await fetch('/api/lead-sources')).json();
+      setLeadSourceList((ls.leadSources ?? []).map((x: { id: string; name: string }) => ({ id: x.id, name: x.name })));
+    } catch { /* ignore */ }
     setLoading(false);
   }
 
@@ -760,6 +766,11 @@ function UsersSection() {
       return;
     }
 
+    if (editing.role === 'lead_source' && !editing.leadSourceId) {
+      toast.error('Pick which lead source this login is linked to.');
+      return;
+    }
+
     const body: Record<string, unknown> = {
       name: editing.name.trim(),
       email: editing.email.trim().toLowerCase(),
@@ -767,6 +778,7 @@ function UsersSection() {
       isActive: editing.isActive,
       permissions: editing.permissions,
     };
+    if (editing.role === 'lead_source') body.leadSourceId = editing.leadSourceId;
     // Only include password if one was typed
     if (editing.password && editing.password.length > 0) {
       body.password = editing.password;
@@ -848,13 +860,26 @@ function UsersSection() {
               <Field label="Role">
                 <select
                   value={editing.role}
-                  onChange={(e) => setEditing({ ...editing, role: e.target.value as 'company_admin' | 'rep' })}
+                  onChange={(e) => setEditing({ ...editing, role: e.target.value as 'company_admin' | 'rep' | 'lead_source' })}
                   className="w-full rounded border border-input bg-background px-3 py-2 text-sm"
                 >
                   <option value="rep">Rep</option>
                   <option value="company_admin">Company admin</option>
+                  <option value="lead_source">Lead source (restricted portal)</option>
                 </select>
               </Field>
+              {editing.role === 'lead_source' && (
+                <Field label="Linked lead source" hint="This login will see ONLY this lead source's commissions.">
+                  <select
+                    value={editing.leadSourceId ?? ''}
+                    onChange={(e) => setEditing({ ...editing, leadSourceId: e.target.value || null })}
+                    className="w-full rounded border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">— Pick a lead source —</option>
+                    {leadSourceList.map((ls) => <option key={ls.id} value={ls.id}>{ls.name}</option>)}
+                  </select>
+                </Field>
+              )}
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={editing.isActive} onChange={(e) => setEditing({ ...editing, isActive: e.target.checked })} />
                 Active
