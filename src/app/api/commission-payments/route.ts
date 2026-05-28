@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { commissionPayments, users, dealCommissions } from '@/lib/db/schema';
+import { commissionPayments, users, dealCommissions, leadSourceCommissions } from '@/lib/db/schema';
 import { and, eq, desc } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import type { SessionUser } from '@/lib/auth/context';
@@ -47,6 +47,7 @@ export async function GET(req: NextRequest) {
 const schema = z.object({
   repId: z.string().uuid().nullable().optional(),
   dealCommissionId: z.string().uuid().nullable().optional(),
+  leadSourceCommissionId: z.string().uuid().nullable().optional(),
   amount: z.coerce.number().positive(),
   paidDate: z.string().optional().nullable(),
   method: z.enum(['ach', 'wire', 'check', 'cash', 'zelle', 'other']).optional().nullable(),
@@ -67,10 +68,22 @@ export async function POST(req: NextRequest) {
       if (!rep) return NextResponse.json({ error: 'Rep not in this company' }, { status: 400 });
     }
 
+    // If linked to a lead source commission, pull its lead source id so the
+    // portal's payment history can scope to it.
+    let leadSourceId: string | null = null;
+    if (body.leadSourceCommissionId) {
+      const [lsc] = await db.select().from(leadSourceCommissions)
+        .where(and(eq(leadSourceCommissions.id, body.leadSourceCommissionId), eq(leadSourceCommissions.companyId, ctx.companyId))).limit(1);
+      if (!lsc) return NextResponse.json({ error: 'Lead source commission not found' }, { status: 404 });
+      leadSourceId = lsc.leadSourceId;
+    }
+
     const [row] = await db.insert(commissionPayments).values({
       companyId: ctx.companyId,
       repId: body.repId ?? null,
       dealCommissionId: body.dealCommissionId ?? null,
+      leadSourceCommissionId: body.leadSourceCommissionId ?? null,
+      leadSourceId,
       amount: String(body.amount),
       paidDate: body.paidDate ? new Date(body.paidDate) : new Date(),
       method: body.method ?? null,
@@ -87,6 +100,17 @@ export async function POST(req: NextRequest) {
         await db.update(dealCommissions)
           .set({ paidAmount: String(Number(dc.paidAmount) + body.amount), updatedAt: new Date() })
           .where(eq(dealCommissions.id, dc.id));
+      }
+    }
+
+    // Same for lead source commission.
+    if (body.leadSourceCommissionId) {
+      const [lsc] = await db.select().from(leadSourceCommissions)
+        .where(and(eq(leadSourceCommissions.id, body.leadSourceCommissionId), eq(leadSourceCommissions.companyId, ctx.companyId))).limit(1);
+      if (lsc) {
+        await db.update(leadSourceCommissions)
+          .set({ paidAmount: String(Number(lsc.paidAmount) + body.amount), updatedAt: new Date(), syncState: 'pending' })
+          .where(eq(leadSourceCommissions.id, lsc.id));
       }
     }
 

@@ -538,6 +538,7 @@ export const leadSourceCommissions = pgTable(
     paidAmount: numeric('paid_amount', { precision: 14, scale: 2 }).notNull().default('0'),
 
     status: commissionStatusEnum('status').notNull().default('pending'),
+    earlyPayoffDiscount: text('early_payoff_discount'),
     notes: text('notes'),
     isDeleted: boolean('is_deleted').notNull().default(false),
 
@@ -572,6 +573,10 @@ export const commissionPayments = pgTable(
     repId: uuid('rep_id').references(() => users.id, { onDelete: 'set null' }),
     // Optional link to a specific deal commission (null = general payout to rep).
     dealCommissionId: uuid('deal_commission_id').references(() => dealCommissions.id, { onDelete: 'set null' }),
+    // Optional link to a lead source commission instead.
+    leadSourceCommissionId: uuid('lead_source_commission_id').references(() => leadSourceCommissions.id, { onDelete: 'set null' }),
+    // Optional link to the lead source itself (so the lead-source portal can show its history)
+    leadSourceId: uuid('lead_source_id').references(() => leadSources.id, { onDelete: 'set null' }),
     amount: numeric('amount', { precision: 14, scale: 2 }).notNull().default('0'),
     paidDate: timestamp('paid_date', { withTimezone: true }).notNull().defaultNow(),
     method: varchar('method', { length: 20 }), // ach | wire | check | cash | zelle | other

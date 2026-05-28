@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { leadSourceCommissions, leadSources } from '@/lib/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { leadSourceCommissions, leadSources, commissionPayments } from '@/lib/db/schema';
+import { and, eq, desc } from 'drizzle-orm';
 import { requireUser } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
 import { rollupTotals } from '@/lib/commissions/calc';
@@ -59,10 +59,26 @@ export async function GET() {
       }))
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
+    // Actual logged payments — amount, date, method only. NO deal/merchant data.
+    const paymentRows = await db.select({
+      amount: commissionPayments.amount,
+      paidDate: commissionPayments.paidDate,
+      method: commissionPayments.method,
+    })
+      .from(commissionPayments)
+      .where(eq(commissionPayments.leadSourceId, ls.id))
+      .orderBy(desc(commissionPayments.paidDate));
+    const payments = paymentRows.map((p) => ({
+      amount: Number(p.amount),
+      paidDate: p.paidDate,
+      method: p.method,
+    }));
+
     return NextResponse.json({
       leadSourceName: ls.name,
-      totals,   // { total, paid, pending, owed, clawedBack }
-      history,  // amounts + status only — no merchant/deal data
+      totals,
+      history,  // commission-level history (amounts + status)
+      payments, // actual paid amounts logged
     });
   } catch (e) { return apiError(e); }
 }

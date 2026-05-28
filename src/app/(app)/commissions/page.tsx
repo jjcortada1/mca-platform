@@ -78,8 +78,10 @@ interface LSCommission {
   id: string; dealId: string; dealName: string; merchantName: string | null;
   leadSourceId: string; leadSourceName: string;
   grossCommission: string | null; splitPct: string | null; flatAmount: string | null;
-  commissionAmount: string; paidAmount: string; owedAmount: number;
-  status: 'pending' | 'cleared' | 'clawed_back'; notes: string | null;
+  commissionAmount: string; paidAmount: string; owedAmount: number; pendingAmount: number;
+  status: 'pending' | 'cleared' | 'clawed_back';
+  earlyPayoffDiscount: string | null;
+  notes: string | null;
 }
 
 const STATUS_TONE = { pending: 'warning', cleared: 'success', clawed_back: 'destructive' } as const;
@@ -99,6 +101,7 @@ export default function CommissionsPage() {
   const [leadSources, setLeadSources] = useState<LeadSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [lsExpanded, setLsExpanded] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'active' | 'refi' | 'funded' | 'declined' | 'pending' | 'paid'>('all');
 
   const [showAdd, setShowAdd] = useState(false);
@@ -204,10 +207,33 @@ export default function CommissionsPage() {
     });
   }, [rows, filter]);
 
+  // Lead source commission totals (mirrors rep stats).
+  const lsStats = useMemo(() => {
+    let total = 0, paid = 0, pending = 0, owed = 0, clawed = 0;
+    for (const r of lsRows) {
+      const amt = Number(r.commissionAmount);
+      if (r.status === 'clawed_back') { clawed += amt; continue; }
+      total += amt; paid += Number(r.paidAmount); owed += r.owedAmount; pending += r.pendingAmount;
+    }
+    return { total, paid, pending, owed, clawed };
+  }, [lsRows]);
+
   async function patch(id: string, body: Record<string, unknown>) {
     const res = await fetch(`/api/commissions/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!res.ok) { const j = await res.json().catch(() => ({})); toast.error(j.error || 'Update failed'); return; }
     toast.success('Updated.'); load();
+  }
+
+  async function lsPatch(id: string, body: Record<string, unknown>) {
+    const res = await fetch(`/api/lead-source-commissions/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!res.ok) { const j = await res.json().catch(() => ({})); toast.error(j.error || 'Update failed'); return; }
+    toast.success('Updated.'); load();
+  }
+  async function lsSoftDelete(id: string) {
+    if (!confirm('Remove this lead source commission? It will be marked deleted (kept in the backup).')) return;
+    const res = await fetch(`/api/lead-source-commissions/${id}`, { method: 'DELETE' });
+    if (!res.ok) { toast.error('Delete failed'); return; }
+    toast.success('Removed.'); load();
   }
   async function softDelete(id: string) {
     if (!confirm('Remove this commission? It will be marked deleted (kept in the backup).')) return;
@@ -394,40 +420,62 @@ export default function CommissionsPage() {
       )}
 
       {tab === 'lead' && isAdmin && (
-        <Card className="overflow-hidden">
-          {lsRows.length === 0 ? (
-            <CardContent className="py-12 text-center text-sm text-muted-foreground">
-              No lead source commissions yet. Add a lead source, then assign it to a deal.
-            </CardContent>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[700px]">
-                <thead><tr className="bg-muted/40 border-b border-border text-left">
-                  <th className="px-4 py-2 th">Lead source</th>
-                  <th className="px-3 py-2 th">Deal</th>
-                  <th className="px-3 py-2 th text-right">Split / Flat</th>
-                  <th className="px-3 py-2 th text-right">Commission</th>
-                  <th className="px-3 py-2 th text-right">Paid</th>
-                  <th className="px-3 py-2 th text-right">Owed</th>
-                  <th className="px-3 py-2 th">Status</th>
-                </tr></thead>
-                <tbody className="divide-y divide-border/60">
-                  {lsRows.map((r) => (
-                    <tr key={r.id} className="hover:bg-muted/20">
-                      <td className="px-4 py-2.5 font-medium">{r.leadSourceName}</td>
-                      <td className="px-3 py-2.5 text-muted-foreground">{r.dealName}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{r.flatAmount ? `$${Number(r.flatAmount).toLocaleString()}` : r.splitPct ? `${Number(r.splitPct)}%` : '—'}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatCurrency(Number(r.commissionAmount))}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">{formatCurrency(Number(r.paidAmount))}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(r.owedAmount)}</td>
-                      <td className="px-3 py-2.5"><Badge variant={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
+        <>
+          {/* Lead source commission dashboard */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <Tile label="Total" value={formatCurrency(lsStats.total)} />
+            <Tile label="Paid" value={formatCurrency(lsStats.paid)} tone="emerald" />
+            <Tile label="Pending" value={formatCurrency(lsStats.pending)} tone="amber" />
+            <Tile label="Owed" value={formatCurrency(lsStats.owed)} />
+            <Tile label="Clawed back" value={formatCurrency(lsStats.clawed)} tone="rose" />
+          </div>
+
+          <Card className="overflow-hidden">
+            {lsRows.length === 0 ? (
+              <CardContent className="py-12 text-center text-sm text-muted-foreground">
+                No lead source commissions yet. Add a lead source, then assign it to a deal.
+              </CardContent>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[760px]">
+                  <thead><tr className="bg-muted/40 border-b border-border text-left">
+                    <th className="px-4 py-2 th">Lead source</th>
+                    <th className="px-3 py-2 th">Deal</th>
+                    <th className="px-3 py-2 th text-right">Split / Flat</th>
+                    <th className="px-3 py-2 th text-right">Commission</th>
+                    <th className="px-3 py-2 th text-right">Paid</th>
+                    <th className="px-3 py-2 th text-right">Owed</th>
+                    <th className="px-3 py-2 th">Status</th>
+                    <th className="w-8"></th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-border/60">
+                    {lsRows.map((r) => (
+                      <>
+                        <tr key={r.id} className="hover:bg-muted/20 cursor-pointer" onClick={() => setLsExpanded(lsExpanded === r.id ? null : r.id)}>
+                          <td className="px-4 py-2.5 font-medium">{r.leadSourceName}</td>
+                          <td className="px-3 py-2.5 text-muted-foreground">{r.dealName}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{r.flatAmount ? formatCurrency(Number(r.flatAmount)) : r.splitPct ? `${Number(r.splitPct)}%` : '—'}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatCurrency(Number(r.commissionAmount))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">{formatCurrency(Number(r.paidAmount))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(r.owedAmount)}</td>
+                          <td className="px-3 py-2.5"><Badge variant={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge></td>
+                          <td className="px-2 py-2.5 text-muted-foreground text-xs">{lsExpanded === r.id ? '▲' : '▼'}</td>
+                        </tr>
+                        {lsExpanded === r.id && (
+                          <tr className="bg-muted/10">
+                            <td colSpan={8} className="px-4 py-3">
+                              <LSCommissionDetail r={r} onPatch={lsPatch} onDelete={lsSoftDelete} />
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </>
       )}
 
       {showAdd && <AddCommissionModal deals={deals} reps={reps} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
@@ -916,4 +964,116 @@ function LogPaymentInline({ commissionId, repId, onLogged }: { commissionId: str
 
 function Detail({ label, value }: { label: string; value: string }) {
   return <div><div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</div><div className="tabular-nums">{value}</div></div>;
+}
+
+/* ---------- Dashboard tile (used by LS commissions header) ---------- */
+function Tile({ label, value, tone }: { label: string; value: string; tone?: 'emerald' | 'amber' | 'rose' }) {
+  const bar = tone === 'emerald' ? 'bg-emerald-500' : tone === 'amber' ? 'bg-amber-500' : tone === 'rose' ? 'bg-rose-500' : 'bg-primary';
+  const text = tone === 'emerald' ? 'text-emerald-700' : tone === 'amber' ? 'text-amber-700' : tone === 'rose' ? 'text-rose-700' : 'text-foreground';
+  return (
+    <div className="rounded-lg border border-border bg-card p-4">
+      <div className={`h-1 w-8 rounded-full ${bar} mb-2`} />
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <div className={`text-xl font-semibold tracking-tight mt-1 tabular-nums ${text}`}>{value}</div>
+    </div>
+  );
+}
+
+/* ---------- Lead source commission detail (expanded row) ---------- */
+function LSCommissionDetail({
+  r,
+  onPatch,
+  onDelete,
+}: {
+  r: LSCommission;
+  onPatch: (id: string, body: Record<string, unknown>) => void | Promise<void>;
+  onDelete: (id: string) => void | Promise<void>;
+}) {
+  const [paid, setPaid] = useState(String(r.paidAmount));
+  const [status, setStatus] = useState<'pending' | 'cleared' | 'clawed_back'>(r.status);
+  const [earlyPayoffDiscount, setEarlyPayoffDiscount] = useState(r.earlyPayoffDiscount ?? '');
+  const [notes, setNotes] = useState(r.notes ?? '');
+
+  return (
+    <div className="space-y-3">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+        <Detail label="Lead source" value={r.leadSourceName} />
+        <Detail label="Deal" value={r.dealName} />
+        <Detail label="Commission" value={formatCurrency(Number(r.commissionAmount))} />
+        <Detail label="Owed" value={formatCurrency(r.owedAmount)} />
+      </div>
+
+      <div className="flex flex-wrap items-end gap-2 pt-2 border-t border-dashed border-border">
+        <Field label="Paid amount" className="w-32">
+          <Input inputMode="decimal" value={paid} onChange={(e) => setPaid(e.target.value)} />
+        </Field>
+        <Field label="Status" className="w-36">
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as 'pending' | 'cleared' | 'clawed_back')}
+            className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm"
+          >
+            <option value="pending">Pending</option>
+            <option value="cleared">Cleared (Paid)</option>
+            <option value="clawed_back">Clawed Back</option>
+          </select>
+        </Field>
+        <Field label="Early payoff discount" className="w-48">
+          <Input value={earlyPayoffDiscount} onChange={(e) => setEarlyPayoffDiscount(e.target.value)} placeholder="e.g. 10% or $500" />
+        </Field>
+        <Field label="Notes" className="flex-1 min-w-[180px]">
+          <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </Field>
+        <Button size="sm" onClick={() => onPatch(r.id, { paidAmount: Number(paid), status, earlyPayoffDiscount: earlyPayoffDiscount || null, notes })}>Save</Button>
+        <Button size="sm" variant="outline" onClick={() => onDelete(r.id)}>Remove</Button>
+      </div>
+
+      <LogLSPaymentInline lsCommissionId={r.id} onLogged={() => onPatch(r.id, {})} />
+    </div>
+  );
+}
+
+/* ---------- Inline "log a payment against this lead-source commission" ---------- */
+function LogLSPaymentInline({ lsCommissionId, onLogged }: { lsCommissionId: string; onLogged: () => void }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState('ach');
+  const [confirmationNumber, setConfirmationNumber] = useState('');
+  const [paidDate, setPaidDate] = useState(new Date().toISOString().slice(0, 10));
+  const [saving, setSaving] = useState(false);
+
+  async function log() {
+    if (!amount) { toast.error('Enter an amount.'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/commission-payments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leadSourceCommissionId: lsCommissionId, amount, method, confirmationNumber, paidDate }),
+      });
+      const j = await res.json();
+      if (!res.ok) { toast.error(j.error || 'Failed'); return; }
+      toast.success('Payment logged.');
+      setOpen(false); setAmount(''); setConfirmationNumber('');
+      onLogged();
+    } finally { setSaving(false); }
+  }
+
+  if (!open) {
+    return <button onClick={() => setOpen(true)} className="text-xs text-primary hover:underline">+ Log a payment</button>;
+  }
+  return (
+    <div className="flex flex-wrap items-end gap-2 pt-2 border-t border-dashed border-border">
+      <Field label="Amount" className="w-28"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000" /></Field>
+      <Field label="Method" className="w-28">
+        <select value={method} onChange={(e) => setMethod(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
+          {['ach', 'wire', 'check', 'cash', 'zelle', 'other'].map((m) => <option key={m} value={m}>{m.toUpperCase()}</option>)}
+        </select>
+      </Field>
+      <Field label="Confirmation #" className="w-36"><Input value={confirmationNumber} onChange={(e) => setConfirmationNumber(e.target.value)} /></Field>
+      <Field label="Date" className="w-36"><Input type="date" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} /></Field>
+      <Button size="sm" onClick={log} loading={saving}>Log</Button>
+      <Button size="sm" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+    </div>
+  );
 }
