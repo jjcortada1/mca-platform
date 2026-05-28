@@ -259,6 +259,7 @@ export const deals = pgTable(
     // ---- Funding / paydown fields (additive, nullable so legacy rows work) ----
     fundedAmount: numeric('funded_amount', { precision: 14, scale: 2 }),
     netAmount: numeric('net_amount', { precision: 14, scale: 2 }),
+    feePct: numeric('fee_pct', { precision: 6, scale: 3 }),
     factorRate: numeric('factor_rate', { precision: 6, scale: 4 }),
     termMode: varchar('term_mode', { length: 10 }),         // 'daily' | 'weekly'
     termCount: numeric('term_count', { precision: 8, scale: 2 }), // # of days or weeks

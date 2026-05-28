@@ -118,6 +118,7 @@ export const upsertDealSchema = z.object({
   // Paydown / funding fields
   fundedAmount: z.coerce.number().nonnegative().optional().nullable(),
   netAmount: z.coerce.number().nonnegative().optional().nullable(),
+  feePct: z.coerce.number().min(0).max(100).optional().nullable(),
   factorRate: z.coerce.number().nonnegative().optional().nullable(),
   termMode: z.enum(['daily', 'weekly']).optional().nullable(),
   termCount: z.coerce.number().nonnegative().optional().nullable(),

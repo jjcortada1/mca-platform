@@ -22,6 +22,7 @@ interface Deal {
   // paydown
   fundedAmount: string | null;
   netAmount: string | null;
+  feePct: string | null;
   factorRate: string | null;
   termMode: string | null;
   termCount: string | null;
@@ -66,7 +67,7 @@ const blankDeal = (): Deal => ({
   id: '', name: '', merchantFirstName: '', merchantLastName: '',
   merchantEmail: '', merchantPhone: '', offerNotes: '', offerAmount: '',
   assignedRepId: null, status: 'submitted',
-  fundedAmount: '', netAmount: '', factorRate: '', termMode: 'weekly', termCount: '',
+  fundedAmount: '', netAmount: '', feePct: '', factorRate: '', termMode: 'weekly', termCount: '',
   fundingDate: '', amountCollected: '', renewalNotes: '',
   createdAt: '', updatedAt: '',
 });
@@ -324,7 +325,7 @@ export default function ActiveDealsPage() {
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Last</th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Phone</th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Email</th>
-                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Offer / Notes</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Live progress</th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Status</th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Rep</th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Updated</th>
@@ -354,8 +355,8 @@ export default function ActiveDealsPage() {
                       <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground truncate max-w-[200px]" title={d.merchantEmail ?? ''}>
                         {d.merchantEmail || '—'}
                       </td>
-                      <td className="px-3 py-2.5 text-muted-foreground text-xs max-w-[280px]">
-                        <div className="line-clamp-2 whitespace-pre-wrap">{d.offerNotes || <span className="italic text-muted-foreground/60">none</span>}</div>
+                      <td className="px-3 py-2.5 min-w-[180px]" onClick={(e) => e.stopPropagation()}>
+                        <LiveProgressCell deal={d} />
                       </td>
                       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-2">
@@ -454,8 +455,8 @@ export default function ActiveDealsPage() {
                                 <LabeledInline label="Funded amount ($)">
                                   <Input inputMode="decimal" defaultValue={d.fundedAmount ?? ''} placeholder="150000" onChange={(e) => patchDraft('fundedAmount', e.target.value)} />
                                 </LabeledInline>
-                                <LabeledInline label="Net to merchant ($)">
-                                  <Input inputMode="decimal" defaultValue={d.netAmount ?? ''} placeholder="142500" onChange={(e) => patchDraft('netAmount', e.target.value)} />
+                                <LabeledInline label="Funding fee (%)">
+                                  <Input inputMode="decimal" defaultValue={d.feePct ?? ''} placeholder="5" onChange={(e) => patchDraft('feePct', e.target.value)} />
                                 </LabeledInline>
                                 <LabeledInline label="Factor rate">
                                   <Input inputMode="decimal" defaultValue={d.factorRate ?? ''} placeholder="1.40" onChange={(e) => patchDraft('factorRate', e.target.value)} />
@@ -556,6 +557,41 @@ function LabeledInline({ label, children }: { label: string; children: React.Rea
 }
 
 /* ---------- Live paydown tracker ---------- */
+function LiveProgressCell({ deal }: { deal: Deal }) {
+  // Auto-estimate as of today: amountCollected left as-is so computePaydown
+  // estimates payments made from elapsed business days/weeks when it's blank.
+  const p = computePaydown({
+    fundedAmount: deal.fundedAmount,
+    factorRate: deal.factorRate,
+    termMode: deal.termMode,
+    termCount: deal.termCount,
+    fundingDate: deal.fundingDate,
+    amountCollected: deal.amountCollected,
+  });
+
+  if (!p.hasStructure) {
+    return <span className="text-xs italic text-muted-foreground/60">add funding details</span>;
+  }
+
+  return (
+    <div className="w-[170px]">
+      <div className="flex justify-between text-[10px] mb-0.5">
+        <span className="tabular-nums font-medium">{p.pctPaidIn}% paid</span>
+        <span className="tabular-nums text-muted-foreground">{formatCurrency(p.remainingBalance)} left</span>
+      </div>
+      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+        <div className={cn('h-full rounded-full', p.renewalEligible ? 'bg-teal-500' : 'bg-primary')} style={{ width: `${Math.min(100, p.pctPaidIn)}%` }} />
+      </div>
+      <div className="flex justify-between text-[9px] text-muted-foreground mt-0.5">
+        <span>{p.paymentsMade}/{p.paymentsTotal} pmts</span>
+        {p.renewalEligible
+          ? <span className="text-teal-700 font-medium">Refi ready</span>
+          : <span>refi {p.renewalDate ? p.renewalDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—'}</span>}
+      </div>
+    </div>
+  );
+}
+
 function PaydownTracker({ deal }: { deal: Deal }) {
   const p = computePaydown({
     fundedAmount: deal.fundedAmount,
@@ -579,9 +615,11 @@ function PaydownTracker({ deal }: { deal: Deal }) {
   return (
     <div className="mt-3 rounded-lg border border-border bg-muted/20 p-4 space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+        <Metric label="Funded" value={formatCurrency(p.fundedAmount)} />
+        {deal.feePct && <Metric label={`Net (after ${Number(deal.feePct)}% fee)`} value={formatCurrency(p.fundedAmount * (1 - Number(deal.feePct) / 100))} />}
         <Metric label="Total payback" value={formatCurrency(p.totalPayback)} />
         <Metric label={p.termMode === 'daily' ? 'Daily payment' : 'Weekly payment'} value={formatCurrency(p.paymentAmount)} />
-        <Metric label="Collected" value={formatCurrency(p.amountCollected)} />
+        <Metric label="Collected (est.)" value={formatCurrency(p.amountCollected)} />
         <Metric label="Remaining" value={formatCurrency(p.remainingBalance)} />
         <Metric label="Funding date" value={fmtDate(p.fundingDate)} />
         <Metric label="Est. payoff" value={fmtDate(p.payoffDate)} />

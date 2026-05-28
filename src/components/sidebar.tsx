@@ -79,9 +79,7 @@ export function Sidebar({ user, branding }: { user: SessionUser; branding: Brand
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         {NAV_SECTIONS.map((section) => {
-          const visible = section.items.filter((it) =>
-            isAdmin || it.perm === 'commissions.view' || user.permissions.includes(it.perm)
-          );
+          const visible = section.items.filter((it) => isAdmin || user.permissions.includes(it.perm));
           if (visible.length === 0) return null;
           return (
             <div key={section.title} className="mb-5">

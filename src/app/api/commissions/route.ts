@@ -23,6 +23,10 @@ export async function GET() {
       return NextResponse.json({ error: 'Not available for this account' }, { status: 403 });
     }
     const isAdmin = hasPermission(ctx.user, 'commissions.manage') || ctx.user.role === 'company_admin' || ctx.user.role === 'master_admin';
+    // Non-admins must have the commissions.view permission toggled on.
+    if (!isAdmin && !hasPermission(ctx.user, 'commissions.view')) {
+      return NextResponse.json({ error: 'You do not have access to commissions.' }, { status: 403 });
+    }
 
     const rows = await db
       .select({

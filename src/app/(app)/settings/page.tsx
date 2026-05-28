@@ -720,8 +720,15 @@ const ALL_PERMS = [
   'deals.view', 'deals.shop', 'deals.submit', 'submissions.view', 'submissions.edit',
   'active_deals.view', 'active_deals.edit', 'funders.view', 'funders.edit',
   'funded_board.view', 'funded_board.edit', 'calculator.use', 'info.view', 'info.edit',
+  'commissions.view', 'commissions.manage',
   'settings.manage',
 ];
+
+// Friendly labels for permission keys (shown next to the toggle).
+const PERM_LABELS: Record<string, string> = {
+  'commissions.view': 'commissions.view — see own commissions',
+  'commissions.manage': 'commissions.manage — manage all commissions (admin)',
+};
 
 function UsersSection() {
   const toast = useToast();
@@ -891,7 +898,7 @@ function UsersSection() {
                   {ALL_PERMS.map((p) => (
                     <label key={p} className="flex items-center gap-2">
                       <input type="checkbox" checked={editing.permissions.includes(p)} onChange={() => togglePerm(p)} />
-                      <span className="font-mono text-xs">{p}</span>
+                      <span className="font-mono text-xs">{PERM_LABELS[p] ?? p}</span>
                     </label>
                   ))}
                 </div>

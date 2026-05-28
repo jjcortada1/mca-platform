@@ -32,7 +32,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (updates.merchantEmail === '') updates.merchantEmail = null;
 
     // Numeric columns: '' → null, numbers → string (Drizzle numeric wants string).
-    for (const k of ['offerAmount', 'fundedAmount', 'netAmount', 'factorRate', 'termCount', 'amountCollected'] as const) {
+    for (const k of ['offerAmount', 'fundedAmount', 'netAmount', 'feePct', 'factorRate', 'termCount', 'amountCollected'] as const) {
       if (updates[k] === '' ) updates[k] = null;
       else if (updates[k] != null) updates[k] = String(updates[k]);
     }
