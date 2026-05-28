@@ -30,13 +30,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     const updates: any = { ...body, updatedAt: new Date() };
     if (updates.merchantEmail === '') updates.merchantEmail = null;
-    // offerAmount is numeric in the DB; allow empty string → null
-    if (updates.offerAmount === '' || updates.offerAmount === undefined) {
-      // leave undefined (no-op) or null if explicitly empty string
-      if (updates.offerAmount === '') updates.offerAmount = null;
-    } else if (updates.offerAmount != null) {
-      updates.offerAmount = String(updates.offerAmount);
+
+    // Numeric columns: '' → null, numbers → string (Drizzle numeric wants string).
+    for (const k of ['offerAmount', 'fundedAmount', 'netAmount', 'factorRate', 'termCount', 'amountCollected'] as const) {
+      if (updates[k] === '' ) updates[k] = null;
+      else if (updates[k] != null) updates[k] = String(updates[k]);
     }
+    // Funding date: '' → null, string → Date
+    if (updates.fundingDate === '') updates.fundingDate = null;
+    else if (updates.fundingDate != null) updates.fundingDate = new Date(updates.fundingDate);
+
     await db.update(deals).set(updates)
       .where(and(eq(deals.id, params.id), eq(deals.companyId, ctx.companyId)));
     return NextResponse.json({ ok: true });

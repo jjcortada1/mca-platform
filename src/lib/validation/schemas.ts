@@ -103,8 +103,21 @@ export const upsertDealSchema = z.object({
   merchantPhone: z.string().max(50).optional().nullable(),
   offerNotes: z.string().max(10000).optional().nullable(),
   assignedRepId: z.string().uuid().optional().nullable(),
-  status: z.enum(['shopping', 'submitted', 'active', 'not_active', 'offer', 'funded', 'dead', 'declined']).optional(),
+  status: z.enum([
+    'shopping', 'submitted', 'active', 'not_active', 'offer', 'funded', 'dead', 'declined',
+    'payment_issues', 'eligible_for_renewal', 'default', 'paid_off', 'closed',
+    'pending_funding', 'renewal_sent', 'in_collections', 'on_hold',
+  ]).optional(),
   offerAmount: z.coerce.number().nonnegative().optional().nullable(),
+  // Paydown / funding fields
+  fundedAmount: z.coerce.number().nonnegative().optional().nullable(),
+  netAmount: z.coerce.number().nonnegative().optional().nullable(),
+  factorRate: z.coerce.number().nonnegative().optional().nullable(),
+  termMode: z.enum(['daily', 'weekly']).optional().nullable(),
+  termCount: z.coerce.number().nonnegative().optional().nullable(),
+  fundingDate: z.string().optional().nullable(),
+  amountCollected: z.coerce.number().nonnegative().optional().nullable(),
+  renewalNotes: z.string().max(10000).optional().nullable(),
 });
 
 /* ---------- Submissions ---------- */

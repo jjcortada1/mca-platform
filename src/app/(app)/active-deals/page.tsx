@@ -3,9 +3,10 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, Button, Input, Textarea, Badge, PageHeader, EmptyState } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
-import { formatDate } from '@/lib/utils';
+import { formatDate, formatCurrency } from '@/lib/utils';
 import { Plus, Trash2, Briefcase, Search, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { computePaydown, DEAL_STATUS_META, DEAL_STATUS_OPTIONS } from '@/lib/deals/paydown';
 
 interface Deal {
   id: string;
@@ -17,37 +18,57 @@ interface Deal {
   offerNotes: string | null;
   offerAmount: string | null;
   assignedRepId: string | null;
-  status: 'shopping' | 'submitted' | 'active' | 'not_active' | 'offer' | 'funded' | 'dead' | 'declined';
+  status: string;
+  // paydown
+  fundedAmount: string | null;
+  netAmount: string | null;
+  factorRate: string | null;
+  termMode: string | null;
+  termCount: string | null;
+  fundingDate: string | null;
+  amountCollected: string | null;
+  renewalNotes: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-// User-facing statuses. Legacy values ('shopping' → 'submitted', 'dead' → 'declined')
-// still exist on legacy rows; we map them in the UI so old records display correctly
-// without being lost.
-const STATUS_OPTIONS: { value: Deal['status']; label: string; tone: 'success' | 'warning' | 'destructive' | 'default' | 'outline' }[] = [
-  { value: 'submitted',  label: 'Submitted',  tone: 'warning' },
-  { value: 'active',     label: 'Active',     tone: 'default' },
-  { value: 'not_active', label: 'Not Active', tone: 'outline' },
-  { value: 'offer',      label: 'Offer',      tone: 'default' },
-  { value: 'funded',     label: 'Funded',     tone: 'success' },
-  { value: 'declined',   label: 'Declined',   tone: 'destructive' },
-];
+// Tailwind classes per status tone (color-coded badges).
+const TONE_CLASS: Record<string, string> = {
+  amber: 'bg-amber-100 text-amber-800 border-amber-200',
+  blue: 'bg-blue-100 text-blue-800 border-blue-200',
+  gray: 'bg-gray-100 text-gray-700 border-gray-200',
+  slate: 'bg-slate-100 text-slate-700 border-slate-200',
+  violet: 'bg-violet-100 text-violet-800 border-violet-200',
+  emerald: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  rose: 'bg-rose-100 text-rose-800 border-rose-200',
+  red: 'bg-red-100 text-red-800 border-red-200',
+  orange: 'bg-orange-100 text-orange-800 border-orange-200',
+  teal: 'bg-teal-100 text-teal-800 border-teal-200',
+  cyan: 'bg-cyan-100 text-cyan-800 border-cyan-200',
+};
 
-// Legacy status display fallback — kept so existing rows ('shopping', 'dead')
-// still render with a sensible label until the user updates them.
-function displayStatus(status: Deal['status']): { label: string; tone: 'success' | 'warning' | 'destructive' | 'default' | 'outline' } {
-  const opt = STATUS_OPTIONS.find((s) => s.value === status);
-  if (opt) return { label: opt.label, tone: opt.tone };
-  if (status === 'shopping') return { label: 'Submitted (legacy)', tone: 'warning' };
-  if (status === 'dead') return { label: 'Declined (legacy)', tone: 'destructive' };
-  return { label: status, tone: 'outline' };
+function statusMeta(status: string): { label: string; tone: string } {
+  return DEAL_STATUS_META[status] ?? { label: status, tone: 'gray' };
 }
+
+function StatusBadge({ status }: { status: string }) {
+  const m = statusMeta(status);
+  return (
+    <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border', TONE_CLASS[m.tone] ?? TONE_CLASS.gray)}>
+      {m.label}
+    </span>
+  );
+}
+
+const STATUS_OPTIONS = DEAL_STATUS_OPTIONS;
 
 const blankDeal = (): Deal => ({
   id: '', name: '', merchantFirstName: '', merchantLastName: '',
   merchantEmail: '', merchantPhone: '', offerNotes: '', offerAmount: '',
-  assignedRepId: null, status: 'submitted', createdAt: '', updatedAt: '',
+  assignedRepId: null, status: 'pending_funding',
+  fundedAmount: '', netAmount: '', factorRate: '', termMode: 'weekly', termCount: '',
+  fundingDate: '', amountCollected: '', renewalNotes: '',
+  createdAt: '', updatedAt: '',
 });
 
 export default function ActiveDealsPage() {
@@ -191,7 +212,7 @@ export default function ActiveDealsPage() {
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: deals.length };
-    for (const s of STATUS_OPTIONS) c[s.value] = deals.filter((d) => d.status === s.value).length;
+    for (const s of STATUS_OPTIONS) c[s] = deals.filter((d) => d.status === s).length;
     return c;
   }, [deals]);
 
@@ -207,24 +228,27 @@ export default function ActiveDealsPage() {
         }
       />
 
-      {/* Status filter chips + search */}
+      {/* Status filter chips (common) + full dropdown + search */}
       <div className="flex flex-wrap items-center gap-2">
-        <FilterChip
-          label="All"
-          count={counts.all}
-          active={statusFilter === 'all'}
-          onClick={() => setStatusFilter('all')}
-        />
-        {STATUS_OPTIONS.map((s) => (
+        <FilterChip label="All" count={counts.all} active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} />
+        {(['active', 'pending_funding', 'payment_issues', 'eligible_for_renewal', 'default', 'paid_off'] as const).map((s) => (
           <FilterChip
-            key={s.value}
-            label={s.label}
-            count={counts[s.value] ?? 0}
-            active={statusFilter === s.value}
-            onClick={() => setStatusFilter(s.value)}
-            tone={s.tone}
+            key={s}
+            label={statusMeta(s).label}
+            count={counts[s] ?? 0}
+            active={statusFilter === s}
+            onClick={() => setStatusFilter(s)}
+            tone={statusMeta(s).tone}
           />
         ))}
+        <select
+          value={STATUS_OPTIONS.includes(statusFilter as never) && !['active','pending_funding','payment_issues','eligible_for_renewal','default','paid_off'].includes(statusFilter) ? statusFilter : ''}
+          onChange={(e) => e.target.value && setStatusFilter(e.target.value)}
+          className="h-8 rounded-full border border-input bg-card px-3 text-xs text-muted-foreground"
+        >
+          <option value="">More statuses…</option>
+          {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{statusMeta(s).label} ({counts[s] ?? 0})</option>)}
+        </select>
         <div className="ml-auto relative w-full sm:w-auto sm:min-w-[240px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -342,20 +366,21 @@ export default function ActiveDealsPage() {
                         <div className="line-clamp-2 whitespace-pre-wrap">{d.offerNotes || <span className="italic text-muted-foreground/60">none</span>}</div>
                       </td>
                       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                        <select
-                          value={d.status}
-                          onChange={(e) => quickStatusChange(d, e.target.value as Deal['status'])}
-                          disabled={savingId === d.id}
-                          className="h-8 rounded-md border border-input bg-card px-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
-                        >
-                          {STATUS_OPTIONS.map((s) => (
-                            <option key={s.value} value={s.value}>{s.label}</option>
-                          ))}
-                          {/* Legacy values — keep selectable so existing records still display */}
-                          {(d.status === 'shopping' || d.status === 'dead') && (
-                            <option value={d.status}>{displayStatus(d.status).label}</option>
-                          )}
-                        </select>
+                        <div className="flex items-center gap-2">
+                          <StatusBadge status={d.status} />
+                          <select
+                            value={STATUS_OPTIONS.includes(d.status as never) ? d.status : ''}
+                            onChange={(e) => quickStatusChange(d, e.target.value)}
+                            disabled={savingId === d.id}
+                            className="h-7 rounded-md border border-input bg-card px-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+                            title="Change status"
+                          >
+                            {!STATUS_OPTIONS.includes(d.status as never) && <option value="">{statusMeta(d.status).label}</option>}
+                            {STATUS_OPTIONS.map((s) => (
+                              <option key={s} value={s}>{statusMeta(s).label}</option>
+                            ))}
+                          </select>
+                        </div>
                       </td>
                       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                         <select
@@ -429,6 +454,45 @@ export default function ActiveDealsPage() {
                                 onChange={(e) => patchDraft('offerAmount', e.target.value)}
                               />
                             </LabeledInline>
+
+                            {/* Funding / paydown structure */}
+                            <div className="pt-3 border-t border-border">
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Funding & paydown</div>
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                <LabeledInline label="Funded amount ($)">
+                                  <Input inputMode="decimal" defaultValue={d.fundedAmount ?? ''} placeholder="150000" onChange={(e) => patchDraft('fundedAmount', e.target.value)} />
+                                </LabeledInline>
+                                <LabeledInline label="Net to merchant ($)">
+                                  <Input inputMode="decimal" defaultValue={d.netAmount ?? ''} placeholder="142500" onChange={(e) => patchDraft('netAmount', e.target.value)} />
+                                </LabeledInline>
+                                <LabeledInline label="Factor rate">
+                                  <Input inputMode="decimal" defaultValue={d.factorRate ?? ''} placeholder="1.40" onChange={(e) => patchDraft('factorRate', e.target.value)} />
+                                </LabeledInline>
+                                <LabeledInline label="Term type">
+                                  <select
+                                    defaultValue={d.termMode ?? 'weekly'}
+                                    onChange={(e) => patchDraft('termMode', e.target.value)}
+                                    className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+                                  >
+                                    <option value="weekly">Weekly</option>
+                                    <option value="daily">Daily</option>
+                                  </select>
+                                </LabeledInline>
+                                <LabeledInline label="# of payments">
+                                  <Input inputMode="decimal" defaultValue={d.termCount ?? ''} placeholder="26" onChange={(e) => patchDraft('termCount', e.target.value)} />
+                                </LabeledInline>
+                                <LabeledInline label="Funding date">
+                                  <Input type="date" defaultValue={d.fundingDate ? String(d.fundingDate).slice(0, 10) : ''} onChange={(e) => patchDraft('fundingDate', e.target.value)} />
+                                </LabeledInline>
+                                <LabeledInline label="Amount collected ($)">
+                                  <Input inputMode="decimal" defaultValue={d.amountCollected ?? ''} placeholder="auto from date if blank" onChange={(e) => patchDraft('amountCollected', e.target.value)} />
+                                </LabeledInline>
+                              </div>
+
+                              {/* Live tracker */}
+                              <PaydownTracker deal={{ ...d, ...draft }} />
+                            </div>
+
                             <LabeledInline label="Offer notes">
                               <Textarea
                                 rows={3}
@@ -469,7 +533,7 @@ function FilterChip({
   count: number;
   active: boolean;
   onClick: () => void;
-  tone?: 'success' | 'warning' | 'destructive' | 'default' | 'outline';
+  tone?: string;
 }) {
   return (
     <button
@@ -495,6 +559,113 @@ function LabeledInline({ label, children }: { label: string; children: React.Rea
     <div className="space-y-1">
       <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
       {children}
+    </div>
+  );
+}
+
+/* ---------- Live paydown tracker ---------- */
+function PaydownTracker({ deal }: { deal: Deal }) {
+  const p = computePaydown({
+    fundedAmount: deal.fundedAmount,
+    factorRate: deal.factorRate,
+    termMode: deal.termMode,
+    termCount: deal.termCount,
+    fundingDate: deal.fundingDate,
+    amountCollected: deal.amountCollected,
+  });
+
+  if (!p.hasStructure) {
+    return (
+      <div className="mt-3 rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
+        Enter funded amount, factor rate, term type + count, and funding date to see the live paydown tracker.
+      </div>
+    );
+  }
+
+  const fmtDate = (d: Date | null) => (d ? d.toLocaleDateString() : '—');
+
+  return (
+    <div className="mt-3 rounded-lg border border-border bg-muted/20 p-4 space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+        <Metric label="Total payback" value={formatCurrency(p.totalPayback)} />
+        <Metric label={p.termMode === 'daily' ? 'Daily payment' : 'Weekly payment'} value={formatCurrency(p.paymentAmount)} />
+        <Metric label="Collected" value={formatCurrency(p.amountCollected)} />
+        <Metric label="Remaining" value={formatCurrency(p.remainingBalance)} />
+        <Metric label="Funding date" value={fmtDate(p.fundingDate)} />
+        <Metric label="Est. payoff" value={fmtDate(p.payoffDate)} />
+        <Metric label="Renewal (50%)" value={fmtDate(p.renewalDate)} />
+        <Metric label="Payments" value={`${p.paymentsMade} / ${p.paymentsTotal}`} />
+      </div>
+
+      {/* Progress bar */}
+      <div>
+        <div className="flex justify-between text-xs mb-1">
+          <span className="text-muted-foreground">Paid in</span>
+          <span className="font-medium tabular-nums">{p.pctPaidIn}%</span>
+        </div>
+        <div className="h-2.5 bg-muted rounded-full overflow-hidden">
+          <div
+            className={cn('h-full rounded-full transition-all', p.renewalEligible ? 'bg-teal-500' : 'bg-primary')}
+            style={{ width: `${Math.min(100, p.pctPaidIn)}%` }}
+          />
+        </div>
+        {p.renewalEligible && (
+          <div className="mt-2 text-xs text-teal-700 font-medium">✓ Eligible for renewal (50%+ paid in)</div>
+        )}
+      </div>
+
+      {/* Deal timeline */}
+      {p.fundingDate && p.payoffDate && (
+        <DealTimeline funding={p.fundingDate} renewal={p.renewalDate} payoff={p.payoffDate} pct={p.pctPaidIn} />
+      )}
+    </div>
+  );
+}
+
+/** Compact funding → renewal → payoff timeline with a "today" marker. */
+function DealTimeline({ funding, renewal, payoff, pct }: { funding: Date; renewal: Date | null; payoff: Date; pct: number }) {
+  const start = funding.getTime();
+  const end = payoff.getTime();
+  const span = Math.max(1, end - start);
+  const now = Date.now();
+  const nowPct = Math.max(0, Math.min(100, ((now - start) / span) * 100));
+  const renewalPct = renewal ? Math.max(0, Math.min(100, ((renewal.getTime() - start) / span) * 100)) : null;
+  const d = (x: Date) => x.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+  return (
+    <div className="pt-1">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Timeline</div>
+      <div className="relative h-8">
+        {/* track */}
+        <div className="absolute top-3 left-0 right-0 h-1 bg-muted rounded-full" />
+        {/* elapsed (paydown) */}
+        <div className="absolute top-3 left-0 h-1 bg-primary rounded-full" style={{ width: `${pct}%` }} />
+        {/* renewal marker */}
+        {renewalPct != null && (
+          <div className="absolute -top-0.5 flex flex-col items-center" style={{ left: `${renewalPct}%`, transform: 'translateX(-50%)' }}>
+            <div className="h-3 w-3 rounded-full bg-teal-500 border-2 border-card" />
+            <span className="text-[9px] text-teal-700 mt-0.5 whitespace-nowrap">Renewal</span>
+          </div>
+        )}
+        {/* today marker */}
+        <div className="absolute -top-1 flex flex-col items-center" style={{ left: `${nowPct}%`, transform: 'translateX(-50%)' }}>
+          <div className="h-4 w-0.5 bg-foreground" />
+          <span className="text-[9px] text-foreground mt-0.5 whitespace-nowrap">Today</span>
+        </div>
+      </div>
+      <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+        <span>Funded {d(funding)}</span>
+        <span>Payoff {d(payoff)}</span>
+      </div>
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</div>
+      <div className="tabular-nums font-medium mt-0.5">{value}</div>
     </div>
   );
 }

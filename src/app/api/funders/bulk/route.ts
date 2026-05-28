@@ -4,7 +4,7 @@ import {
   funders, funderTiers, funderTierAssignments, funderContacts,
   funderRestrictedStates, funderRestrictedIndustries,
 } from '@/lib/db/schema';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
 import { z } from 'zod';
@@ -48,6 +48,19 @@ const rowSchema = z.object({
   restricted_states: z.string().optional(),
   restricted_industries: z.string().optional(),
   additional_rules: z.string().optional(),
+  // Multiple funder-level emails / phones (pipe- or comma-separated)
+  emails: z.string().optional(),
+  phones: z.string().optional(),
+  // Named role contacts
+  iso_rep: z.string().optional(),
+  iso_rep_email: z.string().optional(),
+  iso_rep_phone: z.string().optional(),
+  underwriter: z.string().optional(),
+  underwriter_email: z.string().optional(),
+  underwriter_phone: z.string().optional(),
+  funding_manager: z.string().optional(),
+  funding_manager_email: z.string().optional(),
+  funding_manager_phone: z.string().optional(),
 
   // LEGACY 1-3 contact columns — still supported
   contact_name_1: z.string().optional(),
@@ -184,10 +197,25 @@ export async function POST(req: NextRequest) {
         const maxPositions = parseInt(parsed.max_positions || '99') || 99;
         const supportsRev = parseBool(parsed.supports_reverse_consolidation);
 
+        // Duplicate detection — skip if a funder with this name already exists
+        // for the company (case-insensitive).
+        const dupName = parsed.name.trim().toLowerCase();
+        const [dupe] = await db.select({ id: funders.id }).from(funders)
+          .where(and(eq(funders.companyId, ctx.companyId), sql`lower(${funders.name}) = ${dupName}`))
+          .limit(1);
+        if (dupe) {
+          rowErrors.push({ row: rowNum, message: `Skipped — funder "${parsed.name.trim()}" already exists` });
+          continue;
+        }
+
         // Combine `notes` and `additional_rules` if both present
         const combinedNotes = [parsed.notes?.trim(), parsed.additional_rules?.trim()]
           .filter(Boolean)
           .join('\n');
+
+        // Multiple emails / phones (pipe- or comma-separated columns)
+        const emails = parseList(parsed.emails || '').filter(Boolean);
+        const phones = parseList(parsed.phones || '').filter(Boolean);
 
         // Insert funder
         const [funder] = await db.insert(funders).values({
@@ -198,6 +226,8 @@ export async function POST(req: NextRequest) {
           minRevenue,
           maxPositions,
           minCreditTier,
+          emails: emails.length ? emails : null,
+          phones: phones.length ? phones : null,
           notes: combinedNotes || null,
           isActive: true,
         }).returning();
@@ -211,7 +241,7 @@ export async function POST(req: NextRequest) {
 
         // Contacts — accept simplified single-contact OR legacy 1-3 form
         // Priority: simplified contact_name/phone/email + submission_email become contact 1
-        const contactsToInsert: { funderId: string; name: string; email: string | null; phone: string | null; isPrimary: boolean; sortOrder: number }[] = [];
+        const contactsToInsert: { funderId: string; name: string; role: string | null; email: string | null; phone: string | null; isPrimary: boolean; sortOrder: number }[] = [];
 
         const simpleName = parsed.contact_name?.trim();
         const simplePhone = parsed.contact_phone?.trim();
@@ -220,11 +250,35 @@ export async function POST(req: NextRequest) {
           contactsToInsert.push({
             funderId: funder.id,
             name: simpleName || simpleEmail || 'Primary contact',
+            role: null,
             email: simpleEmail || null,
             phone: simplePhone || null,
             isPrimary: true,
             sortOrder: 0,
           });
+        }
+
+        // Named role contacts (ISO rep / underwriter / funding manager)
+        const roleDefs: { role: string; nameKey: string; emailKey: string; phoneKey: string }[] = [
+          { role: 'iso_rep', nameKey: 'iso_rep', emailKey: 'iso_rep_email', phoneKey: 'iso_rep_phone' },
+          { role: 'underwriter', nameKey: 'underwriter', emailKey: 'underwriter_email', phoneKey: 'underwriter_phone' },
+          { role: 'funding_manager', nameKey: 'funding_manager', emailKey: 'funding_manager_email', phoneKey: 'funding_manager_phone' },
+        ];
+        for (const rd of roleDefs) {
+          const name = (parsed as any)[rd.nameKey]?.trim();
+          const email = (parsed as any)[rd.emailKey]?.trim();
+          const phone = (parsed as any)[rd.phoneKey]?.trim();
+          if (name || email || phone) {
+            contactsToInsert.push({
+              funderId: funder.id,
+              name: name || email || rd.role.replace('_', ' '),
+              role: rd.role,
+              email: email || null,
+              phone: phone || null,
+              isPrimary: contactsToInsert.length === 0,
+              sortOrder: contactsToInsert.length,
+            });
+          }
         }
 
         // Also pick up legacy contact_name_N columns
@@ -236,6 +290,7 @@ export async function POST(req: NextRequest) {
             contactsToInsert.push({
               funderId: funder.id,
               name: name || email || `Contact ${cn}`,
+              role: null,
               email: email || null,
               phone: phone || null,
               isPrimary: contactsToInsert.length === 0,

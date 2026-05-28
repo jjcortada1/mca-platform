@@ -728,7 +728,53 @@ function CommissionDetail({ r, isAdmin, onPatch, onDelete }: {
           <Button size="sm" variant="outline" onClick={() => onDelete(r.id)}>Remove</Button>
         </div>
       )}
+      {isAdmin && <LogPaymentInline commissionId={r.id} repId={r.repId} onLogged={() => onPatch(r.id, {})} />}
       {r.notes && !isAdmin && <div className="text-xs text-muted-foreground italic">Note: {r.notes}</div>}
+    </div>
+  );
+}
+
+/** Inline "log a payment against this commission" row. */
+function LogPaymentInline({ commissionId, repId, onLogged }: { commissionId: string; repId: string | null; onLogged: () => void }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState('ach');
+  const [confirmationNumber, setConfirmationNumber] = useState('');
+  const [paidDate, setPaidDate] = useState(new Date().toISOString().slice(0, 10));
+  const [saving, setSaving] = useState(false);
+
+  async function log() {
+    if (!amount) { toast.error('Enter an amount.'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/commission-payments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dealCommissionId: commissionId, repId, amount, method, confirmationNumber, paidDate }),
+      });
+      const j = await res.json();
+      if (!res.ok) { toast.error(j.error || 'Failed'); return; }
+      toast.success('Payment logged.');
+      setOpen(false); setAmount(''); setConfirmationNumber('');
+      onLogged();
+    } finally { setSaving(false); }
+  }
+
+  if (!open) {
+    return <button onClick={() => setOpen(true)} className="text-xs text-primary hover:underline mt-2">+ Log a payment</button>;
+  }
+  return (
+    <div className="flex flex-wrap items-end gap-2 mt-2 pt-2 border-t border-dashed border-border">
+      <Field label="Amount" className="w-28"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000" /></Field>
+      <Field label="Method" className="w-28">
+        <select value={method} onChange={(e) => setMethod(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
+          {['ach', 'wire', 'check', 'cash', 'zelle', 'other'].map((m) => <option key={m} value={m}>{m.toUpperCase()}</option>)}
+        </select>
+      </Field>
+      <Field label="Confirmation #" className="w-36"><Input value={confirmationNumber} onChange={(e) => setConfirmationNumber(e.target.value)} /></Field>
+      <Field label="Date" className="w-36"><Input type="date" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} /></Field>
+      <Button size="sm" onClick={log} loading={saving}>Log</Button>
+      <Button size="sm" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
     </div>
   );
 }

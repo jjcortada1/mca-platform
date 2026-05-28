@@ -5,6 +5,7 @@ import { eq, and, gte, count, sum } from 'drizzle-orm';
 import { pageRequireTenant } from '@/lib/auth/context';
 import { Briefcase, Inbox, TrendingUp, DollarSign, ShoppingBag, Send, Calculator, Users } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
+import PortfolioDashboard from '@/components/portfolio-dashboard';
 
 export default async function DashboardPage() {
   const { user, companyId } = await pageRequireTenant();
@@ -54,7 +55,10 @@ export default async function DashboardPage() {
         <h1 className="text-2xl font-semibold tracking-tight mt-1">{user.name.split(' ')[0]}</h1>
       </div>
 
-      {/* KPI tiles */}
+      {/* Portfolio overview (statuses, pipeline, per-rep) leads the page */}
+      <PortfolioDashboard />
+
+      {/* This-month KPI tiles */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((s) => {
           const Icon = s.icon;

@@ -31,6 +31,16 @@ export const dealStatusEnum = pgEnum('deal_status', [
   'funded',
   'dead',         // legacy — displayed as "Declined"
   'declined',
+  // Portfolio lifecycle statuses (additive)
+  'payment_issues',
+  'eligible_for_renewal',
+  'default',
+  'paid_off',
+  'closed',
+  'pending_funding',
+  'renewal_sent',
+  'in_collections',
+  'on_hold',
 ]);
 export const submissionFunderStatusEnum = pgEnum('submission_funder_status', [
   'no_response',
@@ -156,6 +166,9 @@ export const funders = pgTable(
     minRevenue: numeric('min_revenue', { precision: 14, scale: 2 }).notNull().default('0'),
     maxPositions: integer('max_positions').notNull().default(99),
     minCreditTier: creditTierEnum('min_credit_tier').notNull().default('unknown'),
+    // Multiple funder-level emails / phones (in addition to named contacts).
+    emails: jsonb('emails').$type<string[]>(),
+    phones: jsonb('phones').$type<string[]>(),
     notes: text('notes'),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -179,6 +192,8 @@ export const funderContacts = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     funderId: uuid('funder_id').notNull().references(() => funders.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 200 }).notNull(),
+    // Optional role label: 'iso_rep' | 'underwriter' | 'funding_manager' | 'other'
+    role: varchar('role', { length: 40 }),
     phone: varchar('phone', { length: 50 }),
     email: varchar('email', { length: 255 }),
     isPrimary: boolean('is_primary').notNull().default(false),
@@ -239,6 +254,16 @@ export const deals = pgTable(
     offerAmount: numeric('offer_amount', { precision: 14, scale: 2 }),
     assignedRepId: uuid('assigned_rep_id').references(() => users.id, { onDelete: 'set null' }),
     status: dealStatusEnum('status').notNull().default('shopping'),
+    // ---- Funding / paydown fields (additive, nullable so legacy rows work) ----
+    fundedAmount: numeric('funded_amount', { precision: 14, scale: 2 }),
+    netAmount: numeric('net_amount', { precision: 14, scale: 2 }),
+    factorRate: numeric('factor_rate', { precision: 6, scale: 4 }),
+    termMode: varchar('term_mode', { length: 10 }),         // 'daily' | 'weekly'
+    termCount: numeric('term_count', { precision: 8, scale: 2 }), // # of days or weeks
+    fundingDate: timestamp('funding_date', { withTimezone: true }),
+    // Total collected so far (drives the paydown tracker). Defaults handled in app.
+    amountCollected: numeric('amount_collected', { precision: 14, scale: 2 }),
+    renewalNotes: text('renewal_notes'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -532,6 +557,56 @@ export const leadSourceCommissions = pgTable(
  * Holds the encrypted service-account JSON + target Sheet ID. The Sheet is an
  * external live backup mirror; the CRM database stays the source of truth.
  */
+/**
+ * Logged commission payments — a payout actually sent to a rep (or recorded
+ * against a specific deal commission). Builds the payment history.
+ */
+export const commissionPayments = pgTable(
+  'commission_payments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    repId: uuid('rep_id').references(() => users.id, { onDelete: 'set null' }),
+    // Optional link to a specific deal commission (null = general payout to rep).
+    dealCommissionId: uuid('deal_commission_id').references(() => dealCommissions.id, { onDelete: 'set null' }),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull().default('0'),
+    paidDate: timestamp('paid_date', { withTimezone: true }).notNull().defaultNow(),
+    method: varchar('method', { length: 20 }), // ach | wire | check | cash | zelle | other
+    confirmationNumber: varchar('confirmation_number', { length: 120 }),
+    notes: text('notes'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    companyIdx: index('commission_payments_company_idx').on(t.companyId),
+    repIdx: index('commission_payments_rep_idx').on(t.repId),
+  })
+);
+
+/**
+ * Commission draws / advances — money fronted to a rep, deducted from future
+ * commission owed. Positive amount = draw taken.
+ */
+export const commissionDraws = pgTable(
+  'commission_draws',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    repId: uuid('rep_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull().default('0'),
+    drawDate: timestamp('draw_date', { withTimezone: true }).notNull().defaultNow(),
+    // How much of this draw has been recouped from commissions so far.
+    recoupedAmount: numeric('recouped_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+    notes: text('notes'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    companyIdx: index('commission_draws_company_idx').on(t.companyId),
+    repIdx: index('commission_draws_rep_idx').on(t.repId),
+  })
+);
+
 export const sheetSyncConfig = pgTable(
   'sheet_sync_config',
   {
@@ -699,3 +774,5 @@ export type LeadSourceRow = typeof leadSources.$inferSelect;
 export type DealCommissionRow = typeof dealCommissions.$inferSelect;
 export type LeadSourceCommissionRow = typeof leadSourceCommissions.$inferSelect;
 export type SheetSyncConfigRow = typeof sheetSyncConfig.$inferSelect;
+export type CommissionPaymentRow = typeof commissionPayments.$inferSelect;
+export type CommissionDrawRow = typeof commissionDraws.$inferSelect;
