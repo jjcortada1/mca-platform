@@ -19,16 +19,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const branding = await getPublicBranding();
 
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head suppressHydrationWarning>
-        {/* Inject tenant primary color into CSS custom property */}
+    <html lang="en">
+      <body>
         <style
           dangerouslySetInnerHTML={{
             __html: `:root{--primary:${branding.primaryColor};--accent:${branding.primaryColor};--ring:${branding.primaryColor};}`,
           }}
         />
-      </head>
-      <body>
         <SessionProvider>
           <ToastProvider>{children}</ToastProvider>
         </SessionProvider>
