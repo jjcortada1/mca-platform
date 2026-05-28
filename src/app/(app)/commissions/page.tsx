@@ -100,14 +100,43 @@ export default function CommissionsPage() {
   }
   useEffect(() => { load(); }, []);
 
-  const totals = useMemo(() => {
+  const stats = useMemo(() => {
     let total = 0, paid = 0, pending = 0, owed = 0, clawed = 0;
+    let fundedVolume = 0, grossTotal = 0;
+    let countPending = 0, countCleared = 0, countClawed = 0;
+    const now = new Date();
+    const thisMonth = now.getMonth(), thisYear = now.getFullYear();
+    let mtdFunded = 0, mtdCommission = 0;
+    const byRep = new Map<string, { name: string; commission: number; funded: number; count: number }>();
+
     for (const r of rows) {
       const amt = Number(r.repCommissionAmount);
-      if (r.status === 'clawed_back') { clawed += amt; continue; }
-      total += amt; paid += Number(r.paidAmount); owed += r.owedAmount; pending += r.pendingAmount;
+      const funded = Number(r.fundedAmount) || 0;
+      const gross = Number(r.grossCommission) || 0;
+      fundedVolume += funded; grossTotal += gross;
+
+      if (r.status === 'clawed_back') { clawed += amt; countClawed++; }
+      else {
+        total += amt; paid += Number(r.paidAmount); owed += r.owedAmount; pending += r.pendingAmount;
+        if (r.status === 'pending') countPending++; else countCleared++;
+      }
+
+      if (r.fundingDate) {
+        const fd = new Date(r.fundingDate);
+        if (fd.getMonth() === thisMonth && fd.getFullYear() === thisYear) {
+          mtdFunded += funded; mtdCommission += amt;
+        }
+      }
+
+      if (r.repId && r.status !== 'clawed_back') {
+        const e = byRep.get(r.repId) ?? { name: r.repName ?? 'Unknown', commission: 0, funded: 0, count: 0 };
+        e.commission += amt; e.funded += funded; e.count++;
+        byRep.set(r.repId, e);
+      }
     }
-    return { total, paid, pending, owed, clawed };
+    const topReps = Array.from(byRep.values()).sort((a, b) => b.commission - a.commission).slice(0, 5);
+    const paidPct = total > 0 ? Math.round((paid / total) * 100) : 0;
+    return { total, paid, pending, owed, clawed, fundedVolume, grossTotal, countPending, countCleared, countClawed, mtdFunded, mtdCommission, topReps, paidPct, dealCount: rows.length };
   }, [rows]);
 
   async function patch(id: string, body: Record<string, unknown>) {
@@ -150,13 +179,87 @@ export default function CommissionsPage() {
 
       {tab === 'rep' && (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            <TotalCard label="Total" value={totals.total} />
-            <TotalCard label="Paid" value={totals.paid} tone="success" />
-            <TotalCard label="Pending" value={totals.pending} tone="warning" />
-            <TotalCard label="Owed" value={totals.owed} />
-            <TotalCard label="Clawed back" value={totals.clawed} tone="destructive" />
+          {/* Top-tier dashboard */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Hero: payout progress */}
+            <Card className="lg:col-span-2">
+              <CardContent className="p-5">
+                <div className="flex items-start justify-between flex-wrap gap-4">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Total commission</div>
+                    <div className="text-3xl font-semibold tabular-nums mt-1">{formatCurrency(stats.total)}</div>
+                    <div className="text-xs text-muted-foreground mt-1">{stats.dealCount} deal{stats.dealCount === 1 ? '' : 's'} · {formatCurrency(stats.fundedVolume)} funded volume</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">This month</div>
+                    <div className="text-xl font-semibold tabular-nums mt-1 text-primary">{formatCurrency(stats.mtdCommission)}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{formatCurrency(stats.mtdFunded)} funded</div>
+                  </div>
+                </div>
+                {/* Payout progress bar */}
+                <div className="mt-4">
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-muted-foreground">Paid {formatCurrency(stats.paid)} of {formatCurrency(stats.total)}</span>
+                    <span className="font-medium tabular-nums">{stats.paidPct}%</span>
+                  </div>
+                  <div className="h-2.5 bg-muted rounded-full overflow-hidden flex">
+                    <div className="h-full bg-emerald-500" style={{ width: `${stats.paidPct}%` }} />
+                    <div className="h-full bg-amber-400" style={{ width: `${stats.total > 0 ? Math.round((stats.pending / stats.total) * 100) : 0}%` }} />
+                  </div>
+                  <div className="flex gap-4 mt-2 text-[11px] text-muted-foreground">
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Paid {formatCurrency(stats.paid)}</span>
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-400" /> Pending {formatCurrency(stats.pending)}</span>
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-muted-foreground/40" /> Owed {formatCurrency(stats.owed)}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Status breakdown */}
+            <Card>
+              <CardContent className="p-5">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-3">Status breakdown</div>
+                <div className="space-y-2.5">
+                  <StatusRow label="Pending" count={stats.countPending} tone="warning" />
+                  <StatusRow label="Cleared" count={stats.countCleared} tone="success" />
+                  <StatusRow label="Clawed back" count={stats.countClawed} tone="destructive" amount={stats.clawed} />
+                </div>
+                <div className="mt-3 pt-3 border-t border-border flex justify-between text-xs">
+                  <span className="text-muted-foreground">Gross (pre-split)</span>
+                  <span className="font-medium tabular-nums">{formatCurrency(stats.grossTotal)}</span>
+                </div>
+              </CardContent>
+            </Card>
           </div>
+
+          {/* Top reps (admin only) */}
+          {isAdmin && stats.topReps.length > 0 && (
+            <Card>
+              <CardContent className="p-5">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-3">Top reps by commission</div>
+                <div className="space-y-2">
+                  {stats.topReps.map((rep, i) => {
+                    const maxC = stats.topReps[0].commission || 1;
+                    return (
+                      <div key={i} className="flex items-center gap-3">
+                        <div className="w-6 text-xs text-muted-foreground tabular-nums">#{i + 1}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between text-sm">
+                            <span className="font-medium truncate">{rep.name}</span>
+                            <span className="tabular-nums">{formatCurrency(rep.commission)}</span>
+                          </div>
+                          <div className="h-1.5 bg-muted rounded-full overflow-hidden mt-1">
+                            <div className="h-full bg-primary rounded-full" style={{ width: `${Math.round((rep.commission / maxC) * 100)}%` }} />
+                          </div>
+                        </div>
+                        <div className="text-[11px] text-muted-foreground tabular-nums w-16 text-right">{rep.count} deal{rep.count === 1 ? '' : 's'}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {loading ? <div className="text-sm text-muted-foreground">Loading…</div>
           : rows.length === 0 ? (
@@ -256,6 +359,8 @@ export default function CommissionsPage() {
 /* ---------- Add Commission modal ---------- */
 function AddCommissionModal({ deals, reps, onClose, onSaved }: { deals: Deal[]; reps: Rep[]; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
+  const [dealMode, setDealMode] = useState<'existing' | 'new'>(deals.length ? 'existing' : 'new');
+  const [newDeal, setNewDeal] = useState({ name: '', merchantFirstName: '', merchantLastName: '', merchantPhone: '', merchantEmail: '' });
   const [f, setF] = useState({
     dealId: '', repId: '', fundedAmount: '', rate: '', termMonths: '', fees: '',
     brokerFee: '', grossCommission: '', repSplitPct: '', fundingDate: new Date().toISOString().slice(0, 10),
@@ -271,13 +376,41 @@ function AddCommissionModal({ deals, reps, onClose, onSaved }: { deals: Deal[]; 
   }, [f.grossCommission, f.brokerFee, f.repSplitPct]);
 
   async function save() {
-    if (!f.dealId) { toast.error('Pick a deal.'); return; }
+    let dealId = f.dealId;
+
+    if (dealMode === 'new') {
+      if (!newDeal.name.trim()) { toast.error('Enter a deal name.'); return; }
+    } else if (!dealId) {
+      toast.error('Pick a deal.'); return;
+    }
+
     setSaving(true);
     try {
+      // If logging a brand-new deal, create it first (status = funded, since we're
+      // recording its commission), then attach the commission to it.
+      if (dealMode === 'new') {
+        const dRes = await fetch('/api/deals', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: newDeal.name.trim(),
+            merchantFirstName: newDeal.merchantFirstName || null,
+            merchantLastName: newDeal.merchantLastName || null,
+            merchantPhone: newDeal.merchantPhone || null,
+            merchantEmail: newDeal.merchantEmail || null,
+            assignedRepId: f.repId || null,
+            status: 'funded',
+          }),
+        });
+        const dJson = await dRes.json();
+        if (!dRes.ok) { toast.error(dJson.error || 'Could not create deal'); return; }
+        dealId = dJson.deal?.id;
+        if (!dealId) { toast.error('Deal created but no ID returned'); return; }
+      }
+
       const res = await fetch('/api/commissions', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          dealId: f.dealId, repId: f.repId || null,
+          dealId, repId: f.repId || null,
           fundedAmount: f.fundedAmount || null, rate: f.rate || null, termMonths: f.termMonths || null,
           fees: f.fees || null, brokerFee: f.brokerFee || null,
           grossCommission: f.grossCommission || 0, repSplitPct: f.repSplitPct || 0,
@@ -286,7 +419,8 @@ function AddCommissionModal({ deals, reps, onClose, onSaved }: { deals: Deal[]; 
       });
       const j = await res.json();
       if (!res.ok) { toast.error(j.error || 'Save failed'); return; }
-      toast.success('Commission saved.'); onSaved();
+      toast.success(dealMode === 'new' ? 'Deal logged and commission saved.' : 'Commission saved.');
+      onSaved();
     } finally { setSaving(false); }
   }
 
@@ -294,13 +428,35 @@ function AddCommissionModal({ deals, reps, onClose, onSaved }: { deals: Deal[]; 
     <Modal title="Add / edit rep commission" onClose={onClose} onSave={save} saving={saving}>
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2">
-          <Field label="Deal *">
-            <select value={f.dealId} onChange={(e) => setF({ ...f, dealId: e.target.value })} className="sel">
-              <option value="">— Pick a deal —</option>
-              {deals.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
+          <Field label="Deal">
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              {(['existing', 'new'] as const).map((m) => (
+                <button key={m} type="button" onClick={() => setDealMode(m)}
+                  className={`px-3 py-2 rounded border-2 text-sm font-medium ${dealMode === m ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground'}`}>
+                  {m === 'existing' ? 'Pick existing deal' : 'Log new deal'}
+                </button>
+              ))}
+            </div>
+            {dealMode === 'existing' ? (
+              <select value={f.dealId} onChange={(e) => setF({ ...f, dealId: e.target.value })} className="sel">
+                <option value="">— Pick a deal —</option>
+                {deals.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            ) : (
+              <Input value={newDeal.name} onChange={(e) => setNewDeal({ ...newDeal, name: e.target.value })} placeholder="New deal name (e.g. ABC Plumbing)" />
+            )}
           </Field>
         </div>
+
+        {dealMode === 'new' && (
+          <>
+            <Field label="Merchant first name"><Input value={newDeal.merchantFirstName} onChange={(e) => setNewDeal({ ...newDeal, merchantFirstName: e.target.value })} /></Field>
+            <Field label="Merchant last name"><Input value={newDeal.merchantLastName} onChange={(e) => setNewDeal({ ...newDeal, merchantLastName: e.target.value })} /></Field>
+            <Field label="Merchant phone"><Input value={newDeal.merchantPhone} onChange={(e) => setNewDeal({ ...newDeal, merchantPhone: e.target.value })} /></Field>
+            <Field label="Merchant email"><Input value={newDeal.merchantEmail} onChange={(e) => setNewDeal({ ...newDeal, merchantEmail: e.target.value })} /></Field>
+          </>
+        )}
+
         <Field label="Assign rep">
           <select value={f.repId} onChange={(e) => setF({ ...f, repId: e.target.value })} className="sel">
             <option value="">— Unassigned —</option>
@@ -430,13 +586,13 @@ function Modal({ title, children, onClose, onSave, saving }: { title: string; ch
 }
 
 /* ---------- bits ---------- */
-function TotalCard({ label, value, tone }: { label: string; value: number; tone?: 'success' | 'warning' | 'destructive' }) {
-  const color = tone === 'success' ? 'text-emerald-700' : tone === 'warning' ? 'text-amber-700' : tone === 'destructive' ? 'text-rose-700' : 'text-foreground';
+function StatusRow({ label, count, tone, amount }: { label: string; count: number; tone: 'success' | 'warning' | 'destructive'; amount?: number }) {
+  const dot = tone === 'success' ? 'bg-emerald-500' : tone === 'warning' ? 'bg-amber-400' : 'bg-rose-500';
   return (
-    <Card><CardContent className="p-4">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</div>
-      <div className={`text-xl font-semibold tabular-nums mt-1 ${color}`}>{formatCurrency(value)}</div>
-    </CardContent></Card>
+    <div className="flex items-center justify-between text-sm">
+      <span className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${dot}`} /> {label}</span>
+      <span className="tabular-nums text-muted-foreground">{count}{amount ? ` · ${formatCurrency(amount)}` : ''}</span>
+    </div>
   );
 }
 

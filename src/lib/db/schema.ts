@@ -523,6 +523,31 @@ export const leadSourceCommissions = pgTable(
   })
 );
 
+/**
+ * Google Sheets sync configuration — one row per company.
+ * Holds the encrypted service-account JSON + target Sheet ID. The Sheet is an
+ * external live backup mirror; the CRM database stays the source of truth.
+ */
+export const sheetSyncConfig = pgTable(
+  'sheet_sync_config',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().unique().references(() => companies.id, { onDelete: 'cascade' }),
+    enabled: boolean('enabled').notNull().default(false),
+    // Service-account JSON, encrypted at rest (AES-256-GCM via lib/crypto).
+    encryptedCredentials: text('encrypted_credentials'),
+    // The service account email (safe to store plain; shown in UI so admin knows
+    // which address to share the Sheet with).
+    serviceAccountEmail: varchar('service_account_email', { length: 320 }),
+    spreadsheetId: varchar('spreadsheet_id', { length: 120 }),
+    lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+    lastSyncStatus: varchar('last_sync_status', { length: 20 }), // 'ok' | 'error'
+    lastSyncError: text('last_sync_error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  }
+);
+
 /* ---------- Relations ---------- */
 
 export const companiesRelations = relations(companies, ({ many }) => ({
@@ -669,3 +694,4 @@ export type SubmissionFunderRow = typeof submissionFunders.$inferSelect;
 export type LeadSourceRow = typeof leadSources.$inferSelect;
 export type DealCommissionRow = typeof dealCommissions.$inferSelect;
 export type LeadSourceCommissionRow = typeof leadSourceCommissions.$inferSelect;
+export type SheetSyncConfigRow = typeof sheetSyncConfig.$inferSelect;

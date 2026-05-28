@@ -5,6 +5,7 @@ import { and, eq, desc } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import type { SessionUser } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
+import { triggerSync } from '@/lib/sheets/sync';
 import { computeLeadSourceCommission, resolveAutoStatus } from '@/lib/commissions/calc';
 import { z } from 'zod';
 
@@ -133,6 +134,7 @@ export async function POST(req: NextRequest) {
     } else {
       [row] = await db.insert(leadSourceCommissions).values(values).returning();
     }
+    triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true, commission: row });
   } catch (e) { return apiError(e); }
 }

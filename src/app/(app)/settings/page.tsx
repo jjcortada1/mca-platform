@@ -7,7 +7,7 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 
-type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security';
+type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets';
 
 const TAB_GROUPS: { title: string; tabs: { key: Tab; label: string }[] }[] = [
   {
@@ -40,6 +40,10 @@ const TAB_GROUPS: { title: string; tabs: { key: Tab; label: string }[] }[] = [
   {
     title: 'Team',
     tabs: [{ key: 'users', label: 'Users' }],
+  },
+  {
+    title: 'Integrations',
+    tabs: [{ key: 'sheets', label: 'Google Sheets backup' }],
   },
 ];
 
@@ -86,6 +90,7 @@ export default function SettingsPage() {
       {tab === 'tiers' && <TiersSection />}
       {tab === 'options' && <MatchOptionsSection />}
       {tab === 'security' && <SecuritySection />}
+      {tab === 'sheets' && <SheetSyncSection />}
     </div>
   );
 }
@@ -1478,5 +1483,133 @@ function SecuritySection() {
       </CardContent>
     </Card>
     </div>
+  );
+}
+
+/* ============================================================
+   GOOGLE SHEETS BACKUP
+   ============================================================ */
+function SheetSyncSection() {
+  const toast = useToast();
+  const [loading, setLoading] = useState(true);
+  const [cfg, setCfg] = useState<{
+    configured: boolean; enabled: boolean; serviceAccountEmail: string | null;
+    spreadsheetId: string | null; lastSyncAt: string | null; lastSyncStatus: string | null; lastSyncError: string | null;
+  } | null>(null);
+  const [spreadsheetId, setSpreadsheetId] = useState('');
+  const [credentials, setCredentials] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [forcing, setForcing] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/settings/sheet-sync');
+      const j = await res.json();
+      setCfg(j);
+      setSpreadsheetId(j.spreadsheetId ?? '');
+    } finally { setLoading(false); }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function save(enabledOverride?: boolean) {
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = { spreadsheetId };
+      if (credentials.trim()) body.credentials = credentials.trim();
+      if (enabledOverride !== undefined) body.enabled = enabledOverride;
+      const res = await fetch('/api/settings/sheet-sync', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const j = await res.json();
+      if (!res.ok) { toast.error(j.error || 'Save failed'); return; }
+      toast.success('Saved.');
+      setCredentials('');
+      load();
+    } finally { setSaving(false); }
+  }
+
+  async function runAction(action: 'test' | 'force') {
+    const set = action === 'test' ? setTesting : setForcing;
+    set(true);
+    try {
+      const res = await fetch('/api/settings/sheet-sync/action', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
+      });
+      const j = await res.json();
+      if (!j.ok) { toast.error(j.error || `${action} failed`); return; }
+      if (action === 'test') toast.success(`Connected to "${j.title}". Tabs: ${j.tabs.join(', ') || 'none yet'}.`);
+      else { toast.success(`Synced ${j.repCount ?? 0} rep + ${j.lsCount ?? 0} lead source rows.`); load(); }
+    } finally { set(false); }
+  }
+
+  if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Google Sheets backup</CardTitle>
+        <CardDescription>
+          Continuously mirror commission data to one permanent Google Sheet. The CRM database
+          stays the source of truth; the Sheet is a live external backup that updates automatically.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5 max-w-2xl">
+        {/* Status */}
+        <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <span className={`h-2.5 w-2.5 rounded-full ${cfg?.enabled ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
+            <span className="font-medium">{cfg?.enabled ? 'Sync enabled' : 'Sync disabled'}</span>
+            {cfg?.lastSyncStatus && (
+              <Badge variant={cfg.lastSyncStatus === 'ok' ? 'success' : 'destructive'} className="text-[10px]">
+                last: {cfg.lastSyncStatus === 'ok' ? 'Synced' : 'Failed'}
+              </Badge>
+            )}
+          </div>
+          <Button size="sm" variant={cfg?.enabled ? 'outline' : 'default'} onClick={() => save(!cfg?.enabled)} loading={saving}>
+            {cfg?.enabled ? 'Disable sync' : 'Enable sync'}
+          </Button>
+        </div>
+        {cfg?.lastSyncError && (
+          <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded p-2">{cfg.lastSyncError}</div>
+        )}
+
+        {/* Setup steps */}
+        <div className="text-xs text-muted-foreground space-y-1 rounded-lg border border-border p-3">
+          <div className="font-semibold text-foreground text-sm mb-1">One-time setup</div>
+          <div>1. In Google Cloud Console, create a project and enable the <strong>Google Sheets API</strong>.</div>
+          <div>2. Create a <strong>service account</strong> and download its <strong>JSON key</strong>.</div>
+          <div>3. Create your permanent Google Sheet; copy its <strong>Sheet ID</strong> (the long string in the URL between /d/ and /edit).</div>
+          <div>4. Share the Sheet (as Editor) with the service account email shown below after you paste credentials.</div>
+          <div>5. Paste the JSON + Sheet ID here, Save, then Test connection.</div>
+        </div>
+
+        <Field label="Google Sheet ID">
+          <Input value={spreadsheetId} onChange={(e) => setSpreadsheetId(e.target.value)} placeholder="1AbC...xyz" />
+        </Field>
+
+        <Field label={cfg?.configured ? 'Service account JSON (paste to replace)' : 'Service account JSON'} hint={cfg?.configured ? 'Leave blank to keep the saved credentials.' : 'Paste the full contents of the downloaded key file.'}>
+          <Textarea rows={5} value={credentials} onChange={(e) => setCredentials(e.target.value)} placeholder='{ "type": "service_account", "client_email": "...", "private_key": "..." }' />
+        </Field>
+
+        {cfg?.serviceAccountEmail && (
+          <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2.5 text-amber-900">
+            Share your Google Sheet (Editor access) with this address:<br />
+            <span className="font-mono font-medium break-all">{cfg.serviceAccountEmail}</span>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button onClick={() => save()} loading={saving}>Save settings</Button>
+          <Button variant="outline" onClick={() => runAction('test')} loading={testing} disabled={!cfg?.configured}>Test connection</Button>
+          <Button variant="outline" onClick={() => runAction('force')} loading={forcing} disabled={!cfg?.enabled}>Force sync now</Button>
+        </div>
+
+        {cfg?.lastSyncAt && (
+          <div className="text-xs text-muted-foreground">Last sync: {new Date(cfg.lastSyncAt).toLocaleString()}</div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

@@ -4,6 +4,7 @@ import { dealCommissions, deals, users } from '@/lib/db/schema';
 import { and, eq, desc } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
+import { triggerSync } from '@/lib/sheets/sync';
 import { computeRepCommission, resolveAutoStatus } from '@/lib/commissions/calc';
 import { z } from 'zod';
 
@@ -154,6 +155,7 @@ export async function POST(req: NextRequest) {
       [row] = await db.insert(dealCommissions).values(values).returning();
     }
 
+    triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true, commission: row });
   } catch (e) { return apiError(e); }
 }

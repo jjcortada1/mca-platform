@@ -261,26 +261,16 @@ function ReverseCalc() {
     ? (termBusinessDays > 0 ? predictedPayback / termBusinessDays : 0)
     : (termWeeks > 0 ? predictedPayback / termWeeks : 0);
 
-  // "Cleanness" score — how close are we to a clean MCA structure?
+  // Match quality — purely how closely THIS structure reproduces the observed
+  // payment for the given deposit. A structure that exactly recreates the funded
+  // deal scores 100, regardless of whether the factor/fee/term are "round".
+  // (Roundness is only used to *suggest* candidates, never to score them.)
   const cleanScore = useMemo(() => {
     if (!dep || !pmt) return null;
-
-    // Score factors:
-    //   - payment match: how close is predicted payment to observed?
-    //   - rounded fee %: 3, 5, 7, 10 are clean
-    //   - rounded factor: 1.30, 1.35, 1.40, 1.45, 1.50, 1.55 are clean
-    //   - rounded term: 10, 12, 16, 20, 24, 30, 40 weeks are clean
     const paymentDelta = pmt > 0 ? Math.abs(predictedPaymentAmount - pmt) / pmt : 1;
-    const cleanFactors = [1.30, 1.35, 1.40, 1.45, 1.49, 1.50];
-    const factorDelta = Math.min(...cleanFactors.map((f) => Math.abs(factorRate - f)));
-    const cleanFees = [3, 5, 7, 10];
-    const feeDelta = Math.min(...cleanFees.map((f) => Math.abs(feePct - f)));
-    const cleanTerms = [10, 12, 16, 20, 24, 30, 40];
-    const termDelta = Math.min(...cleanTerms.map((t) => Math.abs(termWeeks - t)));
-
-    const score = Math.max(0, 100 - (paymentDelta * 60 + factorDelta * 80 + feeDelta * 5 + termDelta * 2));
+    const score = Math.max(0, 100 - paymentDelta * 100);
     return Math.round(score);
-  }, [dep, pmt, predictedPaymentAmount, factorRate, feePct, termWeeks]);
+  }, [dep, pmt, predictedPaymentAmount]);
 
   // When user changes deposit/payment, try to find a sensible default
   useEffect(() => {
