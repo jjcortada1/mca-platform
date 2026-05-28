@@ -15,6 +15,7 @@ interface FundedEntry {
   repName: string;
   dealInitials: string;
   amountFunded: string;
+  fundedWith: string | null;
   fundedDate: string;
   notes: string | null;
   createdAt: string;
@@ -33,6 +34,7 @@ export default function FundedBoardPage() {
     repId: '',
     dealInitials: '',
     amountFunded: '',
+    fundedWith: '',
     fundedDate: new Date().toISOString().slice(0, 10),
     notes: '',
   });
@@ -69,6 +71,7 @@ export default function FundedBoardPage() {
     setShowForm(false);
     setNewEntry({
       repId: '', dealInitials: '', amountFunded: '',
+      fundedWith: '',
       fundedDate: new Date().toISOString().slice(0, 10), notes: '',
     });
     load();
@@ -255,6 +258,15 @@ export default function FundedBoardPage() {
                   onChange={(e) => setNewEntry({ ...newEntry, fundedDate: e.target.value })}
                 />
               </Field>
+              <div className="col-span-2 sm:col-span-2">
+                <Field label="Funded with" hint="Type any funder name">
+                  <Input
+                    value={newEntry.fundedWith}
+                    onChange={(e) => setNewEntry({ ...newEntry, fundedWith: e.target.value })}
+                    placeholder="e.g. Velocity Capital"
+                  />
+                </Field>
+              </div>
               <div className="col-span-2 sm:col-span-4">
                 <Field label="Notes (optional)">
                   <Input
@@ -385,6 +397,11 @@ function DealCard({ entry, onDelete }: { entry: FundedEntry; onDelete: () => voi
       <div className="text-[10px] text-muted-foreground tabular-nums mt-1">
         {formatDate(entry.fundedDate)}
       </div>
+      {entry.fundedWith && (
+        <div className="text-[10px] text-foreground/70 mt-1 truncate" title={entry.fundedWith}>
+          via <span className="font-medium">{entry.fundedWith}</span>
+        </div>
+      )}
       {entry.notes && (
         <div className="text-[10px] text-muted-foreground mt-1 line-clamp-2 italic" title={entry.notes}>
           {entry.notes}

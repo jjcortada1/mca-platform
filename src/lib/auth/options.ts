@@ -12,7 +12,7 @@ declare module 'next-auth' {
       id: string;
       email: string;
       name: string;
-      role: 'master_admin' | 'company_admin' | 'rep';
+      role: 'master_admin' | 'company_admin' | 'rep' | 'lead_source';
       companyId: string | null;
       permissions: string[];
     } & DefaultSession['user'];
@@ -21,7 +21,7 @@ declare module 'next-auth' {
     id: string;
     email: string;
     name: string;
-    role: 'master_admin' | 'company_admin' | 'rep';
+    role: 'master_admin' | 'company_admin' | 'rep' | 'lead_source';
     companyId: string | null;
     permissions: string[];
   }
@@ -30,7 +30,7 @@ declare module 'next-auth' {
 declare module 'next-auth/jwt' {
   interface JWT {
     id: string;
-    role: 'master_admin' | 'company_admin' | 'rep';
+    role: 'master_admin' | 'company_admin' | 'rep' | 'lead_source';
     companyId: string | null;
     permissions: string[];
   }

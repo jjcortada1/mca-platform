@@ -39,8 +39,11 @@ export async function POST(req: NextRequest) {
       merchantEmail: body.merchantEmail || null,
       merchantPhone: body.merchantPhone ?? null,
       offerNotes: body.offerNotes ?? null,
+      offerAmount: body.offerAmount != null ? String(body.offerAmount) : null,
       assignedRepId: body.assignedRepId ?? null,
-      status: body.status ?? 'shopping',
+      // New deals default to 'submitted' (modern enum); legacy 'shopping' kept
+      // only for existing rows. Caller may still send 'shopping' explicitly.
+      status: body.status ?? 'submitted',
       createdBy: ctx.user.id,
     }).returning();
     return NextResponse.json({ deal: d });

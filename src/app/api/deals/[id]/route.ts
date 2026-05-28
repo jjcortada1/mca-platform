@@ -30,6 +30,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     const updates: any = { ...body, updatedAt: new Date() };
     if (updates.merchantEmail === '') updates.merchantEmail = null;
+    // offerAmount is numeric in the DB; allow empty string → null
+    if (updates.offerAmount === '' || updates.offerAmount === undefined) {
+      // leave undefined (no-op) or null if explicitly empty string
+      if (updates.offerAmount === '') updates.offerAmount = null;
+    } else if (updates.offerAmount != null) {
+      updates.offerAmount = String(updates.offerAmount);
+    }
     await db.update(deals).set(updates)
       .where(and(eq(deals.id, params.id), eq(deals.companyId, ctx.companyId)));
     return NextResponse.json({ ok: true });

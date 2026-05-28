@@ -17,10 +17,21 @@ import { relations, sql } from 'drizzle-orm';
 
 /* ---------- Enums ---------- */
 
-export const userRoleEnum = pgEnum('user_role', ['master_admin', 'company_admin', 'rep']);
+export const userRoleEnum = pgEnum('user_role', ['master_admin', 'company_admin', 'rep', 'lead_source']);
 export const submissionMethodEnum = pgEnum('submission_method', ['email', 'portal']);
 export const dealTypeEnum = pgEnum('deal_type', ['standard_mca', 'reverse_consolidation']);
-export const dealStatusEnum = pgEnum('deal_status', ['shopping', 'submitted', 'active', 'funded', 'dead']);
+// NOTE: `shopping` and `dead` are LEGACY values kept for existing rows.
+// New deals should use the modern set: submitted, active, not_active, offer, funded, declined.
+export const dealStatusEnum = pgEnum('deal_status', [
+  'shopping',     // legacy — displayed as "Submitted"
+  'submitted',
+  'active',
+  'not_active',
+  'offer',
+  'funded',
+  'dead',         // legacy — displayed as "Declined"
+  'declined',
+]);
 export const submissionFunderStatusEnum = pgEnum('submission_funder_status', [
   'no_response',
   'approved',
@@ -223,6 +234,9 @@ export const deals = pgTable(
     merchantEmail: varchar('merchant_email', { length: 255 }),
     merchantPhone: varchar('merchant_phone', { length: 50 }),
     offerNotes: text('offer_notes'),
+    // Structured numeric offer amount (separate from free-text offerNotes).
+    // Nullable so legacy rows continue to work.
+    offerAmount: numeric('offer_amount', { precision: 14, scale: 2 }),
     assignedRepId: uuid('assigned_rep_id').references(() => users.id, { onDelete: 'set null' }),
     status: dealStatusEnum('status').notNull().default('shopping'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
@@ -298,6 +312,9 @@ export const fundedEntries = pgTable(
     repId: uuid('rep_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     dealInitials: varchar('deal_initials', { length: 50 }).notNull(),
     amountFunded: numeric('amount_funded', { precision: 14, scale: 2 }).notNull(),
+    // Free-text name of the funder that funded the deal — NOT tied to the funder
+    // directory on purpose, so reps can type anything. Nullable for legacy rows.
+    fundedWith: varchar('funded_with', { length: 200 }),
     fundedDate: timestamp('funded_date', { withTimezone: true }).notNull().defaultNow(),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -381,6 +398,128 @@ export const matchOptions = pgTable(
   (t) => ({
     companyKindIdx: index('match_options_company_kind_idx').on(t.companyId, t.kind),
     uniq: uniqueIndex('match_options_company_kind_value_idx').on(t.companyId, t.kind, t.value),
+  })
+);
+
+/* ---------- Commissions (Slice B) ---------- */
+
+// Commission lifecycle. Auto: pending for 30 days post-funding, then cleared.
+// Admin can manually set any of these.
+export const commissionStatusEnum = pgEnum('commission_status', [
+  'pending',
+  'cleared',
+  'clawed_back',
+]);
+
+// Sync state for the external Google Sheet mirror (used in the next slice).
+export const syncStateEnum = pgEnum('sync_state', ['pending', 'synced', 'failed']);
+
+/**
+ * Lead sources — external partners who refer deals and get paid a commission.
+ * Optionally linked to a login user (role 'lead_source') for the restricted portal.
+ */
+export const leadSources = pgTable(
+  'lead_sources',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 200 }).notNull(),
+    contactEmail: varchar('contact_email', { length: 255 }),
+    contactPhone: varchar('contact_phone', { length: 50 }),
+    // Optional portal login. When set, that user sees ONLY their own payout summary.
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    isActive: boolean('is_active').notNull().default(true),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ companyIdx: index('lead_sources_company_idx').on(t.companyId) })
+);
+
+/**
+ * Rep commission for a funded deal. One per deal (unique dealId).
+ * The deal stays the source of truth; this holds the money math.
+ */
+export const dealCommissions = pgTable(
+  'deal_commissions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    dealId: uuid('deal_id').notNull().references(() => deals.id, { onDelete: 'cascade' }),
+    repId: uuid('rep_id').references(() => users.id, { onDelete: 'set null' }),
+
+    // Deal financials (entered by admin; mirror of the funded structure)
+    fundedAmount: numeric('funded_amount', { precision: 14, scale: 2 }),
+    rate: numeric('rate', { precision: 6, scale: 4 }),           // e.g. 1.4900
+    termMonths: numeric('term_months', { precision: 6, scale: 2 }),
+    fees: numeric('fees', { precision: 14, scale: 2 }),
+    brokerFee: numeric('broker_fee', { precision: 14, scale: 2 }),
+
+    // Commission math
+    grossCommission: numeric('gross_commission', { precision: 14, scale: 2 }).notNull().default('0'),
+    repSplitPct: numeric('rep_split_pct', { precision: 6, scale: 3 }).notNull().default('0'), // e.g. 30.000
+    // Computed + stored for convenience (admin can override)
+    repCommissionAmount: numeric('rep_commission_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+
+    paidAmount: numeric('paid_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+
+    status: commissionStatusEnum('status').notNull().default('pending'),
+    fundingDate: timestamp('funding_date', { withTimezone: true }),
+    clearedDate: timestamp('cleared_date', { withTimezone: true }),
+    earlyPayoffDiscount: text('early_payoff_discount'),
+    notes: text('notes'),
+
+    // Soft-delete: never hard-delete so the Sheet backup stays meaningful
+    isDeleted: boolean('is_deleted').notNull().default(false),
+
+    // Sheet sync bookkeeping (used next slice)
+    syncState: syncStateEnum('sync_state').notNull().default('pending'),
+    syncedAt: timestamp('synced_at', { withTimezone: true }),
+    syncError: text('sync_error'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    companyIdx: index('deal_commissions_company_idx').on(t.companyId),
+    dealUniq: uniqueIndex('deal_commissions_deal_idx').on(t.dealId),
+    repIdx: index('deal_commissions_rep_idx').on(t.repId),
+  })
+);
+
+/**
+ * Lead source commission for a deal. Separate from rep commissions.
+ * Either a split % of gross OR a flat amount.
+ */
+export const leadSourceCommissions = pgTable(
+  'lead_source_commissions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    dealId: uuid('deal_id').notNull().references(() => deals.id, { onDelete: 'cascade' }),
+    leadSourceId: uuid('lead_source_id').notNull().references(() => leadSources.id, { onDelete: 'cascade' }),
+
+    // Either splitPct (of gross commission) OR flatAmount is used.
+    splitPct: numeric('split_pct', { precision: 6, scale: 3 }),
+    flatAmount: numeric('flat_amount', { precision: 14, scale: 2 }),
+    // Resolved commission owed (computed from whichever method, stored for convenience)
+    commissionAmount: numeric('commission_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+    paidAmount: numeric('paid_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+
+    status: commissionStatusEnum('status').notNull().default('pending'),
+    notes: text('notes'),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+
+    syncState: syncStateEnum('sync_state').notNull().default('pending'),
+    syncedAt: timestamp('synced_at', { withTimezone: true }),
+    syncError: text('sync_error'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    companyIdx: index('lead_source_commissions_company_idx').on(t.companyId),
+    dealIdx: index('lead_source_commissions_deal_idx').on(t.dealId),
+    leadSourceIdx: index('lead_source_commissions_ls_idx').on(t.leadSourceId),
   })
 );
 
@@ -502,6 +641,8 @@ export const PERMISSION_KEYS = {
   INFO_EDIT: 'info.edit',
   SETTINGS_MANAGE: 'settings.manage',
   USERS_MANAGE: 'users.manage',
+  COMMISSIONS_VIEW: 'commissions.view',       // rep: see own commissions
+  COMMISSIONS_MANAGE: 'commissions.manage',   // admin: edit all commissions + lead sources
 } as const;
 
 export const ALL_REP_PERMISSIONS = [
@@ -516,6 +657,7 @@ export const ALL_REP_PERMISSIONS = [
   PERMISSION_KEYS.FUNDED_BOARD_VIEW,
   PERMISSION_KEYS.CALCULATOR_USE,
   PERMISSION_KEYS.INFO_VIEW,
+  PERMISSION_KEYS.COMMISSIONS_VIEW,
 ];
 
 export type CompanyRow = typeof companies.$inferSelect;
@@ -524,3 +666,6 @@ export type FunderRow = typeof funders.$inferSelect;
 export type DealRow = typeof deals.$inferSelect;
 export type SubmissionRow = typeof submissions.$inferSelect;
 export type SubmissionFunderRow = typeof submissionFunders.$inferSelect;
+export type LeadSourceRow = typeof leadSources.$inferSelect;
+export type DealCommissionRow = typeof dealCommissions.$inferSelect;
+export type LeadSourceCommissionRow = typeof leadSourceCommissions.$inferSelect;

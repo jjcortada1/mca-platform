@@ -42,7 +42,7 @@ export default function CalculatorPage() {
       <div className="inline-flex bg-card border border-border rounded-lg p-1">
         {([
           { k: 'fwd', label: 'Deal Calculator', icon: Calculator },
-          { k: 'rev', label: 'Reverse Calculator', icon: RotateCcw },
+          { k: 'rev', label: 'Merchant Funding Estimator', icon: RotateCcw },
         ] as const).map(({ k, label, icon: Icon }) => (
           <button
             key={k}
@@ -137,7 +137,8 @@ function ForwardCalc({ rules }: { rules: { threshold: number; commissionPct: num
               <MoneyInput
                 value={funding}
                 onValueChange={setFunding}
-                placeholder="100,000"
+                decimals={2}
+                placeholder="100,000.00"
               />
             </Field>
 
@@ -306,14 +307,62 @@ function ReverseCalc() {
     setTermWeeks(20);
   }
 
+  const [suggestions, setSuggestions] = useState<
+    { factor: number; fee: number; termWeeks: number; score: number; predictedPayment: number }[]
+  >([]);
+
+  function scoreStructure(factor: number, fee: number, termWks: number): { score: number; predictedPayment: number } {
+    const funded = fee < 100 ? dep / (1 - fee / 100) : 0;
+    const payback = funded * factor;
+    const tBizDays = termWks * BUSINESS_DAYS_PER_WEEK;
+    const predictedPayment = freq === 'daily'
+      ? (tBizDays > 0 ? payback / tBizDays : 0)
+      : (termWks > 0 ? payback / termWks : 0);
+    const paymentDelta = pmt > 0 ? Math.abs(predictedPayment - pmt) / pmt : 1;
+    const score = Math.max(0, Math.round(100 - paymentDelta * 100));
+    return { score, predictedPayment };
+  }
+
   function snapToClean() {
-    // Snap all sliders to nearest clean values
-    const cleanFactors = [1.30, 1.35, 1.40, 1.45, 1.49];
+    if (!dep || !pmt) return;
+    // Generate candidate clean structures across common factor/fee/term values,
+    // score each by how closely it reproduces the observed payment, and show the
+    // best several so the user can pick the most likely one.
+    const cleanFactors = [1.30, 1.35, 1.40, 1.45, 1.49, 1.50];
     const cleanFees = [3, 5, 7, 10];
-    const cleanTerms = [10, 12, 16, 20, 24, 30];
-    setFactorRate(cleanFactors.reduce((a, b) => Math.abs(b - factorRate) < Math.abs(a - factorRate) ? b : a));
-    setFeePct(cleanFees.reduce((a, b) => Math.abs(b - feePct) < Math.abs(a - feePct) ? b : a));
-    setTermWeeks(cleanTerms.reduce((a, b) => Math.abs(b - termWeeks) < Math.abs(a - termWeeks) ? b : a));
+    const cleanTerms = [10, 12, 16, 20, 24, 30, 40, 52];
+
+    const candidates: { factor: number; fee: number; termWeeks: number; score: number; predictedPayment: number }[] = [];
+    for (const factor of cleanFactors) {
+      for (const fee of cleanFees) {
+        for (const t of cleanTerms) {
+          const { score, predictedPayment } = scoreStructure(factor, fee, t);
+          candidates.push({ factor, fee, termWeeks: t, score, predictedPayment });
+        }
+      }
+    }
+    // Sort by score desc, dedupe near-identical, keep top 5
+    candidates.sort((a, b) => b.score - a.score);
+    const top: typeof candidates = [];
+    for (const c of candidates) {
+      if (top.length >= 5) break;
+      // skip if a very similar structure already chosen
+      if (top.some((t) => t.factor === c.factor && t.fee === c.fee && Math.abs(t.termWeeks - c.termWeeks) <= 2)) continue;
+      top.push(c);
+    }
+    setSuggestions(top);
+    // Apply the best immediately
+    if (top[0]) {
+      setFactorRate(top[0].factor);
+      setFeePct(top[0].fee);
+      setTermWeeks(top[0].termWeeks);
+    }
+  }
+
+  function applySuggestion(s: { factor: number; fee: number; termWeeks: number }) {
+    setFactorRate(s.factor);
+    setFeePct(s.fee);
+    setTermWeeks(s.termWeeks);
   }
 
   const fmt = (x: number) => (!isFinite(x) || !x ? '—' : formatCurrency(x));
@@ -337,7 +386,8 @@ function ReverseCalc() {
               <MoneyInput
                 value={deposit}
                 onValueChange={setDeposit}
-                placeholder="95,000"
+                decimals={2}
+                placeholder="95,000.00"
               />
             </Field>
 
@@ -345,7 +395,8 @@ function ReverseCalc() {
               <MoneyInput
                 value={payment}
                 onValueChange={setPayment}
-                placeholder={freq === 'daily' ? '710' : '3,550'}
+                decimals={2}
+                placeholder={freq === 'daily' ? '710.00' : '3,550.00'}
               />
             </Field>
 
@@ -377,9 +428,45 @@ function ReverseCalc() {
               <div className="text-sm font-semibold">Adjust assumptions</div>
               <Button variant="outline" size="sm" onClick={snapToClean} className="gap-1.5">
                 <Sparkles className="h-3 w-3" />
-                Snap to clean
+                Suggest clean structures
               </Button>
             </div>
+
+            {suggestions.length > 0 && (
+              <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5">
+                <div className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground mb-1">
+                  Possible structures — tap to apply
+                </div>
+                {suggestions.map((s, i) => {
+                  const active = s.factor === factorRate && s.fee === feePct && s.termWeeks === termWeeks;
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => applySuggestion(s)}
+                      className={cn(
+                        'w-full flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-xs transition text-left',
+                        active ? 'border-primary bg-primary/5' : 'border-border bg-card hover:border-foreground/30'
+                      )}
+                    >
+                      <span className="tabular-nums">
+                        {s.factor.toFixed(2)}× · {s.fee}% fee · {s.termWeeks}wk
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <span className="text-muted-foreground tabular-nums">
+                          ≈ {formatCurrency(s.predictedPayment)}/{freq === 'daily' ? 'day' : 'wk'}
+                        </span>
+                        <Badge
+                          variant={s.score >= 95 ? 'success' : s.score >= 80 ? 'warning' : 'outline'}
+                          className="text-[10px] tabular-nums"
+                        >
+                          {s.score}%
+                        </Badge>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             <Slider
               label="Factor rate"

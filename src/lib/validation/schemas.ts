@@ -103,7 +103,8 @@ export const upsertDealSchema = z.object({
   merchantPhone: z.string().max(50).optional().nullable(),
   offerNotes: z.string().max(10000).optional().nullable(),
   assignedRepId: z.string().uuid().optional().nullable(),
-  status: z.enum(['shopping', 'submitted', 'active', 'funded', 'dead']).optional(),
+  status: z.enum(['shopping', 'submitted', 'active', 'not_active', 'offer', 'funded', 'dead', 'declined']).optional(),
+  offerAmount: z.coerce.number().nonnegative().optional().nullable(),
 });
 
 /* ---------- Submissions ---------- */
@@ -134,6 +135,7 @@ export const fundedEntrySchema = z.object({
   repId: z.string().uuid(),
   dealInitials: z.string().min(1).max(50),
   amountFunded: z.coerce.number().positive(),
+  fundedWith: z.string().max(200).optional().nullable(),
   // Accept either a date (YYYY-MM-DD) or a full ISO datetime
   fundedDate: z.string().min(1).optional(),
   notes: z.string().max(2000).optional().nullable(),

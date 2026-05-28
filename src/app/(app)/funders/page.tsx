@@ -8,7 +8,7 @@ import {
 import { useToast } from '@/components/toast';
 import { US_STATES, COMMON_INDUSTRIES, CREDIT_TIER_OPTIONS } from '@/lib/constants';
 import { formatCurrency, cn } from '@/lib/utils';
-import { Upload, Plus, Search, X, Download, FileText, AlertCircle, CheckCircle2, Trash2 } from 'lucide-react';
+import { Upload, Plus, Search, X, Download, FileText, AlertCircle, CheckCircle2, Trash2, Eye, Phone, Mail } from 'lucide-react';
 
 interface Contact {
   id?: string;
@@ -61,6 +61,7 @@ export default function FundersPage() {
   const [tiers, setTiers] = useState<FunderTier[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Funder | null>(null);
+  const [quickView, setQuickView] = useState<Funder | null>(null);
   const [tierFilter, setTierFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -207,6 +208,7 @@ export default function FundersPage() {
                   <th className="px-4 py-2 font-medium text-xs uppercase tracking-wide text-muted-foreground">Max pos.</th>
                   <th className="px-4 py-2 font-medium text-xs uppercase tracking-wide text-muted-foreground">Min credit</th>
                   <th className="px-4 py-2 font-medium text-xs uppercase tracking-wide text-muted-foreground">Status</th>
+                  <th className="px-4 py-2 font-medium text-xs uppercase tracking-wide text-muted-foreground w-12"></th>
                 </tr>
               </thead>
               <tbody>
@@ -242,6 +244,15 @@ export default function FundersPage() {
                       <td className="px-4 py-3">
                         {f.isActive ? <Badge variant="success">active</Badge> : <Badge variant="outline">inactive</Badge>}
                       </td>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => setQuickView(f)}
+                          title="Quick view"
+                          className="text-muted-foreground hover:text-primary transition p-1 rounded"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -249,6 +260,113 @@ export default function FundersPage() {
             </table>
           </CardContent>
         </Card>
+      )}
+
+      {quickView && (
+        <div className="fixed inset-0 z-50 bg-foreground/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setQuickView(null)}>
+          <div className="bg-card rounded-xl shadow-2xl border border-border w-full max-w-md max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-border flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold flex items-center gap-2">
+                  {quickView.name}
+                  {quickView.isActive
+                    ? <Badge variant="success" className="text-[10px]">active</Badge>
+                    : <Badge variant="outline" className="text-[10px]">inactive</Badge>}
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {quickView.submissionMethod === 'email' ? 'Submits by email' : 'Submits by portal'}
+                  {quickView.supportsReverseConsolidation && ' • reverse consolidation'}
+                </p>
+              </div>
+              <button onClick={() => setQuickView(null)} className="text-muted-foreground hover:text-foreground p-1">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4 text-sm">
+              {/* Basic info */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Min revenue</div>
+                  <div className="tabular-nums">{formatCurrency(Number(quickView.minRevenue))}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Max positions</div>
+                  <div className="tabular-nums">{quickView.maxPositions}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Min credit</div>
+                  <div>{CREDIT_TIER_OPTIONS.find((c) => c.value === quickView.minCreditTier)?.label ?? '—'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Tiers</div>
+                  <div className="flex gap-1 flex-wrap">
+                    {quickView.tiers.length ? quickView.tiers.map((t) => (
+                      <Badge key={t.id} variant="outline" className="text-[10px]">{t.name}</Badge>
+                    )) : <span className="text-muted-foreground/60">none</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Contacts */}
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Contacts</div>
+                {quickView.contacts.length === 0 ? (
+                  <div className="text-muted-foreground/60 text-xs">No contacts on file</div>
+                ) : (
+                  <div className="space-y-2">
+                    {quickView.contacts.map((c, i) => (
+                      <div key={c.id ?? i} className="rounded-lg border border-border p-2.5">
+                        <div className="font-medium text-sm flex items-center gap-2">
+                          {c.name || 'Unnamed'}
+                          {c.isPrimary && <Badge variant="outline" className="text-[10px]">primary</Badge>}
+                        </div>
+                        {c.email && (
+                          <a href={`mailto:${c.email}`} className="flex items-center gap-1.5 text-xs text-primary hover:underline mt-1">
+                            <Mail className="h-3 w-3" /> {c.email}
+                          </a>
+                        )}
+                        {c.phone && (
+                          <a href={`tel:${c.phone}`} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground mt-0.5">
+                            <Phone className="h-3 w-3" /> {c.phone}
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Restrictions */}
+              {(quickView.restrictedStates.length > 0 || quickView.restrictedIndustries.length > 0) && (
+                <div className="grid grid-cols-2 gap-3">
+                  {quickView.restrictedStates.length > 0 && (
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Restricted states</div>
+                      <div className="text-xs">{quickView.restrictedStates.join(', ')}</div>
+                    </div>
+                  )}
+                  {quickView.restrictedIndustries.length > 0 && (
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Restricted industries</div>
+                      <div className="text-xs">{quickView.restrictedIndustries.join(', ')}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {quickView.notes && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Notes</div>
+                  <div className="text-xs whitespace-pre-wrap">{quickView.notes}</div>
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-3 border-t border-border flex items-center justify-end gap-2">
+              <Button variant="outline" onClick={() => setQuickView(null)}>Close</Button>
+              <Button onClick={() => { setEditing(quickView); setQuickView(null); }}>Edit full details</Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {editing && (

@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import {
   ShoppingBag, Send, Inbox, Briefcase, Users, TrendingUp, Calculator, BookOpen,
-  Settings, LogOut, Building2,
+  Settings, LogOut, Building2, DollarSign,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { SessionUser } from '@/lib/auth/context';
@@ -25,6 +25,12 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
       { href: '/submit', label: 'Submit Deal', icon: Send, perm: 'deals.submit' },
       { href: '/submissions', label: 'Submissions', icon: Inbox, perm: 'submissions.view' },
       { href: '/active-deals', label: 'Active Deals', icon: Briefcase, perm: 'active_deals.view' },
+    ],
+  },
+  {
+    title: 'Commissions',
+    items: [
+      { href: '/commissions', label: 'Commissions', icon: DollarSign, perm: 'commissions.view' },
     ],
   },
   {

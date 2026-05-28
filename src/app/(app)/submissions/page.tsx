@@ -33,6 +33,16 @@ export default function SubmissionsPage() {
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Record<string, { status: string; notes: string }>>({});
+  const [showManualAdd, setShowManualAdd] = useState(false);
+  const [funderList, setFunderList] = useState<{ id: string; name: string }[]>([]);
+  const [manualForm, setManualForm] = useState({
+    dealName: '',
+    funderId: '',
+    manualFunderName: '',
+    status: 'no_response' as 'no_response' | 'approved' | 'declined',
+    notes: '',
+  });
+  const [manualSaving, setManualSaving] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -42,7 +52,59 @@ export default function SubmissionsPage() {
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  async function loadFunders() {
+    try {
+      const res = await fetch('/api/funders');
+      const json = await res.json();
+      const list = (json.data ?? json.funders ?? []).map((f: { id: string; name: string }) => ({ id: f.id, name: f.name }));
+      setFunderList(list);
+    } catch {
+      // ignore — manual name field still works
+    }
+  }
+
+  async function deleteSubmission(submissionId: string, dealName: string) {
+    if (!confirm(`Delete submission for "${dealName}"? This removes all funder rows for it. The deal itself is NOT deleted.`)) return;
+    const res = await fetch(`/api/submissions/${submissionId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      alert(j.error || 'Delete failed.');
+      return;
+    }
+    load();
+  }
+
+  async function submitManual() {
+    if (!manualForm.dealName.trim()) { alert('Deal name is required.'); return; }
+    if (!manualForm.funderId && !manualForm.manualFunderName.trim()) {
+      alert('Pick a funder OR type a funder name.'); return;
+    }
+    setManualSaving(true);
+    try {
+      const body: Record<string, unknown> = {
+        dealName: manualForm.dealName.trim(),
+        status: manualForm.status,
+      };
+      if (manualForm.funderId) body.funderId = manualForm.funderId;
+      else body.manualFunderName = manualForm.manualFunderName.trim();
+      if (manualForm.notes.trim()) body.notes = manualForm.notes.trim();
+
+      const res = await fetch('/api/submissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const j = await res.json();
+      if (!res.ok) { alert(j.error || 'Failed.'); return; }
+      setShowManualAdd(false);
+      setManualForm({ dealName: '', funderId: '', manualFunderName: '', status: 'no_response', notes: '' });
+      load();
+    } finally {
+      setManualSaving(false);
+    }
+  }
+
+  useEffect(() => { load(); loadFunders(); }, []);
 
   async function saveFunder(sfId: string) {
     const e = editing[sfId];
@@ -82,9 +144,12 @@ export default function SubmissionsPage() {
             Track funder responses across all your shopped deals.
           </p>
         </div>
-        <Link href="/deal-shop">
-          <Button>Shop a deal</Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setShowManualAdd(true)}>+ Add manual</Button>
+          <Link href="/deal-shop">
+            <Button>Shop a deal</Button>
+          </Link>
+        </div>
       </header>
 
       {loading ? (
@@ -107,22 +172,31 @@ export default function SubmissionsPage() {
             };
             return (
               <Card key={row.submissionId}>
-                <button
-                  onClick={() => setExpanded((p) => ({ ...p, [row.submissionId]: !isOpen }))}
-                  className="w-full text-left px-6 py-4 flex items-center justify-between hover:bg-muted/40 transition"
-                >
-                  <div>
-                    <div className="font-medium">{row.dealName}</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">
-                      Last activity {formatDate(row.updatedAt)} • {counts.total} funder{counts.total === 1 ? '' : 's'}
+                <div className="flex items-stretch">
+                  <button
+                    onClick={() => setExpanded((p) => ({ ...p, [row.submissionId]: !isOpen }))}
+                    className="flex-1 text-left px-6 py-4 flex items-center justify-between hover:bg-muted/40 transition"
+                  >
+                    <div>
+                      <div className="font-medium">{row.dealName}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        Last activity {formatDate(row.updatedAt)} • {counts.total} funder{counts.total === 1 ? '' : 's'}
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {counts.approved > 0 && <Badge variant="success">{counts.approved} approved</Badge>}
-                    {counts.declined > 0 && <Badge variant="destructive">{counts.declined} declined</Badge>}
-                    {counts.pending > 0 && <Badge variant="outline">{counts.pending} pending</Badge>}
-                  </div>
-                </button>
+                    <div className="flex items-center gap-2">
+                      {counts.approved > 0 && <Badge variant="success">{counts.approved} approved</Badge>}
+                      {counts.declined > 0 && <Badge variant="destructive">{counts.declined} declined</Badge>}
+                      {counts.pending > 0 && <Badge variant="outline">{counts.pending} pending</Badge>}
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => deleteSubmission(row.submissionId, row.dealName)}
+                    title="Delete submission"
+                    className="px-4 text-muted-foreground hover:text-destructive hover:bg-destructive/5 transition border-l border-border"
+                  >
+                    ✕
+                  </button>
+                </div>
 
                 {isOpen && (
                   <CardContent className="border-t border-border">
@@ -197,6 +271,78 @@ export default function SubmissionsPage() {
               </Card>
             );
           })}
+        </div>
+      )}
+
+      {showManualAdd && (
+        <div className="fixed inset-0 z-50 bg-foreground/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowManualAdd(false)}>
+          <div className="bg-card rounded-xl shadow-2xl border border-border w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-border">
+              <h2 className="text-base font-semibold">Add submission manually</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Record a deal you already submitted (no email is sent).
+              </p>
+            </div>
+            <div className="p-6 space-y-3 text-sm">
+              <label className="block">
+                <span className="text-xs font-medium text-muted-foreground">Deal name *</span>
+                <input
+                  type="text"
+                  value={manualForm.dealName}
+                  onChange={(e) => setManualForm({ ...manualForm, dealName: e.target.value })}
+                  placeholder="ABC Plumbing"
+                  className="mt-1 w-full h-10 px-3 rounded-md border border-input bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-muted-foreground">Funder (pick one)</span>
+                <select
+                  value={manualForm.funderId}
+                  onChange={(e) => setManualForm({ ...manualForm, funderId: e.target.value })}
+                  className="mt-1 w-full h-10 px-3 rounded-md border border-input bg-card text-sm"
+                >
+                  <option value="">— Type a name below instead —</option>
+                  {funderList.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+              </label>
+              {!manualForm.funderId && (
+                <label className="block">
+                  <span className="text-xs font-medium text-muted-foreground">Or type funder name *</span>
+                  <input
+                    type="text"
+                    value={manualForm.manualFunderName}
+                    onChange={(e) => setManualForm({ ...manualForm, manualFunderName: e.target.value })}
+                    placeholder="Some Funder Inc."
+                    className="mt-1 w-full h-10 px-3 rounded-md border border-input bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </label>
+              )}
+              <label className="block">
+                <span className="text-xs font-medium text-muted-foreground">Status</span>
+                <select
+                  value={manualForm.status}
+                  onChange={(e) => setManualForm({ ...manualForm, status: e.target.value as typeof manualForm.status })}
+                  className="mt-1 w-full h-10 px-3 rounded-md border border-input bg-card text-sm"
+                >
+                  <option value="no_response">No response</option>
+                  <option value="approved">Approved</option>
+                  <option value="declined">Declined</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-muted-foreground">Notes (optional)</span>
+                <Textarea
+                  value={manualForm.notes}
+                  onChange={(e) => setManualForm({ ...manualForm, notes: e.target.value })}
+                  rows={3}
+                />
+              </label>
+            </div>
+            <div className="px-6 py-3 border-t border-border flex items-center justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowManualAdd(false)} disabled={manualSaving}>Cancel</Button>
+              <Button onClick={submitManual} loading={manualSaving}>Save submission</Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

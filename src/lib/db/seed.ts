@@ -74,16 +74,16 @@ const DEFAULT_MATCH_OPTIONS: {
   meta?: Record<string, unknown>;
 }[] = [
   // Credit ranges (per JJ's spec: Above 700 / 650-699 / Below 600 / Unknown)
-  { kind: 'credit_range', value: 'unknown',     label: 'Unknown',      sortOrder: 0, meta: { minScore: null } },
-  { kind: 'credit_range', value: 'above_700',   label: 'Above 700',    sortOrder: 1, meta: { minScore: 700 } },
-  { kind: 'credit_range', value: '650_699',     label: '650 – 699',    sortOrder: 2, meta: { minScore: 650 } },
-  { kind: 'credit_range', value: '600_649',     label: '600 – 649',    sortOrder: 3, meta: { minScore: 600 } },
-  { kind: 'credit_range', value: 'below_600',   label: 'Below 600',    sortOrder: 4, meta: { minScore: 0 } },
+  { kind: 'credit_range', value: 'below_600',   label: 'Below 600',    sortOrder: 0, meta: { minScore: 0 } },
+  { kind: 'credit_range', value: '600_649',     label: '600 to 650',   sortOrder: 1, meta: { minScore: 600 } },
+  { kind: 'credit_range', value: '650_699',     label: '650 to 700',   sortOrder: 2, meta: { minScore: 650 } },
+  { kind: 'credit_range', value: 'above_700',   label: 'Above 700',    sortOrder: 3, meta: { minScore: 700 } },
+  { kind: 'credit_range', value: 'unknown',     label: 'Unknown',      sortOrder: 4, meta: { minScore: null } },
 
   // Revenue ranges (per JJ's spec: <25K / 25K-99K / 100K+)
-  { kind: 'revenue_range', value: '0-25000',     label: 'Below $25K',     sortOrder: 0, meta: { minRevenue: 0,      maxRevenue: 25000 } },
-  { kind: 'revenue_range', value: '25000-99999', label: '$25K – $99K',    sortOrder: 1, meta: { minRevenue: 25000,  maxRevenue: 99999 } },
-  { kind: 'revenue_range', value: '100000+',     label: '$100K+',         sortOrder: 2, meta: { minRevenue: 100000, maxRevenue: null } },
+  { kind: 'revenue_range', value: '0-25000',      label: 'Under $25K',       sortOrder: 0, meta: { minRevenue: 0,      maxRevenue: 25000 } },
+  { kind: 'revenue_range', value: '25000-100000', label: '$25K to $100K',    sortOrder: 1, meta: { minRevenue: 25000,  maxRevenue: 100000 } },
+  { kind: 'revenue_range', value: '100000+',      label: '$100K+',           sortOrder: 2, meta: { minRevenue: 100000, maxRevenue: null } },
 
   // Industries — start with common MCA industries; admin can edit later
   { kind: 'industry', value: 'restaurant',          label: 'Restaurant',           sortOrder: 0 },

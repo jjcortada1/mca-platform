@@ -84,3 +84,79 @@ export async function GET() {
     return NextResponse.json({ submissions: result });
   } catch (e) { return apiError(e); }
 }
+
+import { z } from 'zod';
+
+const manualSubmissionSchema = z.object({
+  // Use an existing deal OR create one from name
+  dealId: z.string().uuid().optional(),
+  dealName: z.string().min(1).max(200).optional(),
+  // Use an existing funder OR a free-text funder name
+  funderId: z.string().uuid().optional(),
+  manualFunderName: z.string().min(1).max(200).optional(),
+  status: z.enum(['no_response', 'approved', 'declined']).default('no_response'),
+  notes: z.string().max(2000).optional(),
+});
+
+/**
+ * POST /api/submissions
+ * Manually create a submission record (no email sent, just logged).
+ * Requires either dealId or dealName, and either funderId or manualFunderName.
+ */
+export async function POST(req: Request) {
+  try {
+    const ctx = await requirePermission('deals.submit');
+    const body = manualSubmissionSchema.parse(await req.json());
+
+    if (!body.dealId && !body.dealName) {
+      return NextResponse.json({ error: 'Either dealId or dealName is required' }, { status: 400 });
+    }
+    if (!body.funderId && !body.manualFunderName) {
+      return NextResponse.json({ error: 'Either funderId or manualFunderName is required' }, { status: 400 });
+    }
+
+    // Resolve or create the deal
+    let dealId = body.dealId;
+    if (!dealId) {
+      const [created] = await db.insert(deals).values({
+        companyId: ctx.companyId,
+        name: body.dealName!.trim(),
+        status: 'submitted',
+        createdBy: ctx.user.id,
+      }).returning();
+      dealId = created.id;
+    } else {
+      // Cross-tenant guard
+      const [d] = await db.select().from(deals).where(eq(deals.id, dealId)).limit(1);
+      if (!d || d.companyId !== ctx.companyId) {
+        return NextResponse.json({ error: 'Deal not found' }, { status: 404 });
+      }
+    }
+
+    // Guard funder ownership too if provided
+    if (body.funderId) {
+      const [f] = await db.select().from(funders).where(eq(funders.id, body.funderId)).limit(1);
+      if (!f || f.companyId !== ctx.companyId) {
+        return NextResponse.json({ error: 'Funder not found' }, { status: 404 });
+      }
+    }
+
+    // Create the submission shell
+    const [sub] = await db.insert(submissions).values({
+      companyId: ctx.companyId,
+      dealId,
+    }).returning();
+
+    // Attach the funder (no email sent — manual entry only)
+    await db.insert(submissionFunders).values({
+      submissionId: sub.id,
+      funderId: body.funderId ?? null,
+      manualFunderName: body.funderId ? null : (body.manualFunderName ?? null),
+      submittedBy: ctx.user.id,
+      status: body.status,
+      notes: body.notes ?? null,
+    });
+
+    return NextResponse.json({ ok: true, submissionId: sub.id });
+  } catch (e) { return apiError(e); }
+}

@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Card, CardContent, Badge, PageHeader, Field, MoneyInput } from '@/components/ui/primitives';
+import { Button, Card, CardContent, Badge, PageHeader, Field } from '@/components/ui/primitives';
 import { US_STATES } from '@/lib/constants';
 import { Send, ChevronDown, ChevronRight, Mail, Phone, MapPin, Ban, FileText, Zap, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -40,7 +40,6 @@ export default function DealShopPage() {
 
   // Form state
   const [revenueOption, setRevenueOption] = useState('');
-  const [exactRevenue, setExactRevenue] = useState<number | ''>('');
   const [creditOption, setCreditOption] = useState('unknown');
   const [position, setPosition] = useState('');
   const [industry, setIndustry] = useState('other');
@@ -82,8 +81,6 @@ export default function DealShopPage() {
   }, []);
 
   function getRevenueValue(): number {
-    // Prefer exact entered amount; else mid of selected range
-    if (exactRevenue !== '' && exactRevenue > 0) return exactRevenue;
     if (!revenueOption) return 0;
     const opt = revenueRanges.find((r) => r.value === revenueOption);
     if (!opt) return 0;
@@ -101,8 +98,8 @@ export default function DealShopPage() {
 
   async function runMatch() {
     setError(null);
-    if (!revenueOption && !exactRevenue) {
-      setError('Pick a revenue range or enter exact monthly revenue.');
+    if (!revenueOption) {
+      setError('Pick a revenue range.');
       return;
     }
     if (!position) {
@@ -208,7 +205,6 @@ export default function DealShopPage() {
 
   function clearForm() {
     setRevenueOption('');
-    setExactRevenue('');
     setCreditOption('unknown');
     setPosition('');
     setIndustry('other');
@@ -249,15 +245,11 @@ export default function DealShopPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Revenue */}
-              <Field label="Monthly Revenue (range)" required>
+              <Field label="Monthly Revenue" required>
                 <Select value={revenueOption} onChange={setRevenueOption} options={[
                   { value: '', label: '— Pick a range —' },
                   ...revenueRanges.map((r) => ({ value: r.value, label: r.label })),
                 ]} />
-              </Field>
-
-              <Field label="Or exact amount" hint="If exact > 0, used instead of range">
-                <MoneyInput value={exactRevenue} onValueChange={setExactRevenue} placeholder="50,000" />
               </Field>
 
               {/* Credit */}

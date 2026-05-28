@@ -26,6 +26,7 @@ export async function GET() {
       repName: repMap.get(e.repId) ?? 'Unknown',
       dealInitials: e.dealInitials,
       amountFunded: parseFloat(String(e.amountFunded)),
+      fundedWith: e.fundedWith,
       fundedDate: e.fundedDate,
       notes: e.notes,
       createdAt: e.createdAt,
@@ -56,6 +57,7 @@ export async function POST(req: NextRequest) {
       repId: body.repId,
       dealInitials: body.dealInitials,
       amountFunded: String(body.amountFunded),
+      fundedWith: body.fundedWith ?? null,
       fundedDate: body.fundedDate ? new Date(body.fundedDate) : new Date(),
       notes: body.notes ?? null,
     }).returning();

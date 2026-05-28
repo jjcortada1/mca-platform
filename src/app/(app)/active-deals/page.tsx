@@ -15,24 +15,39 @@ interface Deal {
   merchantEmail: string | null;
   merchantPhone: string | null;
   offerNotes: string | null;
+  offerAmount: string | null;
   assignedRepId: string | null;
-  status: 'shopping' | 'submitted' | 'active' | 'funded' | 'dead';
+  status: 'shopping' | 'submitted' | 'active' | 'not_active' | 'offer' | 'funded' | 'dead' | 'declined';
   createdAt: string;
   updatedAt: string;
 }
 
+// User-facing statuses. Legacy values ('shopping' → 'submitted', 'dead' → 'declined')
+// still exist on legacy rows; we map them in the UI so old records display correctly
+// without being lost.
 const STATUS_OPTIONS: { value: Deal['status']; label: string; tone: 'success' | 'warning' | 'destructive' | 'default' | 'outline' }[] = [
-  { value: 'shopping',  label: 'Shopping',  tone: 'outline' },
-  { value: 'submitted', label: 'Submitted', tone: 'warning' },
-  { value: 'active',    label: 'Active',    tone: 'default' },
-  { value: 'funded',    label: 'Funded',    tone: 'success' },
-  { value: 'dead',      label: 'Dead',      tone: 'destructive' },
+  { value: 'submitted',  label: 'Submitted',  tone: 'warning' },
+  { value: 'active',     label: 'Active',     tone: 'default' },
+  { value: 'not_active', label: 'Not Active', tone: 'outline' },
+  { value: 'offer',      label: 'Offer',      tone: 'default' },
+  { value: 'funded',     label: 'Funded',     tone: 'success' },
+  { value: 'declined',   label: 'Declined',   tone: 'destructive' },
 ];
+
+// Legacy status display fallback — kept so existing rows ('shopping', 'dead')
+// still render with a sensible label until the user updates them.
+function displayStatus(status: Deal['status']): { label: string; tone: 'success' | 'warning' | 'destructive' | 'default' | 'outline' } {
+  const opt = STATUS_OPTIONS.find((s) => s.value === status);
+  if (opt) return { label: opt.label, tone: opt.tone };
+  if (status === 'shopping') return { label: 'Submitted (legacy)', tone: 'warning' };
+  if (status === 'dead') return { label: 'Declined (legacy)', tone: 'destructive' };
+  return { label: status, tone: 'outline' };
+}
 
 const blankDeal = (): Deal => ({
   id: '', name: '', merchantFirstName: '', merchantLastName: '',
-  merchantEmail: '', merchantPhone: '', offerNotes: '',
-  assignedRepId: null, status: 'shopping', createdAt: '', updatedAt: '',
+  merchantEmail: '', merchantPhone: '', offerNotes: '', offerAmount: '',
+  assignedRepId: null, status: 'submitted', createdAt: '', updatedAt: '',
 });
 
 export default function ActiveDealsPage() {
@@ -336,6 +351,10 @@ export default function ActiveDealsPage() {
                           {STATUS_OPTIONS.map((s) => (
                             <option key={s.value} value={s.value}>{s.label}</option>
                           ))}
+                          {/* Legacy values — keep selectable so existing records still display */}
+                          {(d.status === 'shopping' || d.status === 'dead') && (
+                            <option value={d.status}>{displayStatus(d.status).label}</option>
+                          )}
                         </select>
                       </td>
                       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
@@ -401,6 +420,15 @@ export default function ActiveDealsPage() {
                                 />
                               </LabeledInline>
                             </div>
+                            <LabeledInline label="Offer amount ($)">
+                              <Input
+                                type="text"
+                                inputMode="decimal"
+                                defaultValue={d.offerAmount ?? ''}
+                                placeholder="e.g. 50000"
+                                onChange={(e) => patchDraft('offerAmount', e.target.value)}
+                              />
+                            </LabeledInline>
                             <LabeledInline label="Offer notes">
                               <Textarea
                                 rows={3}

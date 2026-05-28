@@ -19,8 +19,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const branding = await getPublicBranding();
 
   return (
-    <html lang="en">
-      <head>
+    <html lang="en" suppressHydrationWarning>
+      <head suppressHydrationWarning>
         {/* Inject tenant primary color into CSS custom property */}
         <style
           dangerouslySetInnerHTML={{

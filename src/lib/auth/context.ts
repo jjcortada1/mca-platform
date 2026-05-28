@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from './options';
 import { redirect } from 'next/navigation';
 
-export type Role = 'master_admin' | 'company_admin' | 'rep';
+export type Role = 'master_admin' | 'company_admin' | 'rep' | 'lead_source';
 
 export interface SessionUser {
   id: string;
