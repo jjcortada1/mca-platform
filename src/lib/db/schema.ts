@@ -451,6 +451,10 @@ export const dealCommissions = pgTable(
     fundedAmount: numeric('funded_amount', { precision: 14, scale: 2 }),
     rate: numeric('rate', { precision: 6, scale: 4 }),           // e.g. 1.4900
     termMonths: numeric('term_months', { precision: 6, scale: 2 }),
+    // Term structure: 'daily' or 'weekly', plus the count of days/weeks.
+    // Nullable so legacy rows keep working (they only had termMonths).
+    termMode: varchar('term_mode', { length: 10 }),
+    termCount: numeric('term_count', { precision: 8, scale: 2 }),
     fees: numeric('fees', { precision: 14, scale: 2 }),
     brokerFee: numeric('broker_fee', { precision: 14, scale: 2 }),
 

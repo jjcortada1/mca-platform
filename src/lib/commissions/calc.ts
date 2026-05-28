@@ -54,6 +54,49 @@ export function computeLeadSourceCommission(inputs: LeadSourceInputs): number {
   return round2(gross * pct);
 }
 
+export interface DealBreakdownInputs {
+  grossCommission: number;     // total commission earned on the deal ($)
+  brokerFee?: number;          // broker fee in DOLLARS
+  repSplitPct: number;         // rep split as a PERCENT (0-100)
+  leadSourceSplitPct?: number | null;   // lead source split as a PERCENT, OR
+  leadSourceFlatAmount?: number | null; // lead source flat amount in DOLLARS
+}
+
+export interface DealBreakdown {
+  gross: number;            // gross commission
+  brokerFee: number;        // broker fee ($)
+  totalPool: number;        // gross + broker fee (what gets split)
+  repOwed: number;          // rep split% of (gross + broker fee)
+  leadSourceOwed: number;   // lead source flat, or split% of gross
+  houseOwed: number;        // remainder kept by the house
+}
+
+/**
+ * Full per-deal commission breakdown.
+ *
+ * - Split inputs are PERCENTAGES; broker fee is a DOLLAR amount.
+ * - Rep earns their split % of BOTH the gross commission AND the broker fee.
+ * - Lead source earns a flat $ amount OR a split % of the gross commission.
+ * - House keeps whatever remains: (gross + broker fee) − rep − lead source.
+ */
+export function computeDealBreakdown(inputs: DealBreakdownInputs): DealBreakdown {
+  const gross = num(inputs.grossCommission);
+  const brokerFee = num(inputs.brokerFee);
+  const totalPool = round2(gross + brokerFee);
+
+  const repPct = num(inputs.repSplitPct) / 100;
+  const repOwed = round2((gross + brokerFee) * repPct);
+
+  const leadSourceOwed = computeLeadSourceCommission({
+    grossCommission: gross,
+    splitPct: inputs.leadSourceSplitPct ?? null,
+    flatAmount: inputs.leadSourceFlatAmount ?? null,
+  });
+
+  const houseOwed = round2(totalPool - repOwed - leadSourceOwed);
+  return { gross, brokerFee, totalPool, repOwed, leadSourceOwed, houseOwed };
+}
+
 export interface PayoutTotals {
   total: number;
   paid: number;

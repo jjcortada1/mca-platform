@@ -298,10 +298,10 @@ function ReverseCalc() {
   }
 
   const [suggestions, setSuggestions] = useState<
-    { factor: number; fee: number; termWeeks: number; score: number; predictedPayment: number }[]
+    { factor: number; fee: number; termWeeks: number; score: number; predictedPayment: number; impliedFunded: number }[]
   >([]);
 
-  function scoreStructure(factor: number, fee: number, termWks: number): { score: number; predictedPayment: number } {
+  function scoreStructure(factor: number, fee: number, termWks: number): { score: number; predictedPayment: number; impliedFunded: number } {
     const funded = fee < 100 ? dep / (1 - fee / 100) : 0;
     const payback = funded * factor;
     const tBizDays = termWks * BUSINESS_DAYS_PER_WEEK;
@@ -310,38 +310,57 @@ function ReverseCalc() {
       : (termWks > 0 ? payback / termWks : 0);
     const paymentDelta = pmt > 0 ? Math.abs(predictedPayment - pmt) / pmt : 1;
     const score = Math.max(0, Math.round(100 - paymentDelta * 100));
-    return { score, predictedPayment };
+    return { score, predictedPayment, impliedFunded: funded };
   }
+
+  // How "natural" is an implied funded amount? Rewards round numbers a real
+  // funder would actually write: nearest $5K/$10K. Net $95K @ 5% → $100,000
+  // (perfectly round) beats an odd structure that implies $98,420 funded.
+  function roundnessBonus(funded: number): number {
+    if (funded <= 0) return 0;
+    const nearest5k = Math.round(funded / 5000) * 5000;
+    const nearest10k = Math.round(funded / 10000) * 10000;
+    const d5 = Math.abs(funded - nearest5k) / funded;
+    const d10 = Math.abs(funded - nearest10k) / funded;
+    // within ~1% of a round 10k → big bonus; of a round 5k → smaller bonus
+    if (d10 < 0.01) return 12;
+    if (d5 < 0.01) return 7;
+    if (d10 < 0.025) return 4;
+    return 0;
+  }
+
+  // Common MCA fee preference (lower, standard fees first).
+  const FEE_PRIORITY: Record<number, number> = { 2: 6, 3: 5, 5: 6, 7: 3, 10: 2, 12: 0, 15: -2 };
 
   function snapToClean() {
     if (!dep || !pmt) return;
-    // Generate candidate clean structures across common factor/fee/term values,
-    // score each by how closely it reproduces the observed payment, and show the
-    // best several so the user can pick the most likely one.
-    const cleanFactors = [1.30, 1.35, 1.40, 1.45, 1.49, 1.50];
-    const cleanFees = [3, 5, 7, 10];
+    // Candidate structures: common fees first (2/3/5/7/10), common factors + terms.
+    const cleanFactors = [1.25, 1.30, 1.35, 1.40, 1.45, 1.49, 1.50];
+    const cleanFees = [2, 3, 5, 7, 10, 12, 15];
     const cleanTerms = [10, 12, 16, 20, 24, 30, 40, 52];
 
-    const candidates: { factor: number; fee: number; termWeeks: number; score: number; predictedPayment: number }[] = [];
+    const candidates: { factor: number; fee: number; termWeeks: number; score: number; predictedPayment: number; impliedFunded: number; rank: number }[] = [];
     for (const factor of cleanFactors) {
       for (const fee of cleanFees) {
         for (const t of cleanTerms) {
-          const { score, predictedPayment } = scoreStructure(factor, fee, t);
-          candidates.push({ factor, fee, termWeeks: t, score, predictedPayment });
+          const s = scoreStructure(factor, fee, t);
+          // Only keep structures that reproduce the payment reasonably well.
+          if (s.score < 80) continue;
+          // Final rank = payment accuracy + realism (round funded + common fee).
+          const rank = s.score + roundnessBonus(s.impliedFunded) + (FEE_PRIORITY[fee] ?? 0);
+          candidates.push({ factor, fee, termWeeks: t, ...s, rank });
         }
       }
     }
-    // Sort by score desc, dedupe near-identical, keep top 5
-    candidates.sort((a, b) => b.score - a.score);
+    // Sort by realism-weighted rank, then by raw payment score.
+    candidates.sort((a, b) => (b.rank - a.rank) || (b.score - a.score));
     const top: typeof candidates = [];
     for (const c of candidates) {
       if (top.length >= 5) break;
-      // skip if a very similar structure already chosen
-      if (top.some((t) => t.factor === c.factor && t.fee === c.fee && Math.abs(t.termWeeks - c.termWeeks) <= 2)) continue;
+      if (top.some((t) => t.fee === c.fee && Math.abs(t.factor - c.factor) < 0.001 && Math.abs(t.termWeeks - c.termWeeks) <= 2)) continue;
       top.push(c);
     }
-    setSuggestions(top);
-    // Apply the best immediately
+    setSuggestions(top.map(({ factor, fee, termWeeks, score, predictedPayment, impliedFunded }) => ({ factor, fee, termWeeks, score, predictedPayment, impliedFunded })));
     if (top[0]) {
       setFactorRate(top[0].factor);
       setFeePct(top[0].fee);

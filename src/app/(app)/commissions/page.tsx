@@ -5,6 +5,39 @@ import { Card, CardContent, Button, Input, Field, PageHeader, Badge } from '@/co
 import { useToast } from '@/components/toast';
 import { formatCurrency, formatDate } from '@/lib/utils';
 
+/* ---------- comma formatting helpers ---------- */
+// Display a numeric string with thousands separators while typing (keeps a
+// trailing "." or decimals intact). Stored value stays comma-free.
+function addCommas(raw: string): string {
+  if (raw === '' || raw == null) return '';
+  const neg = raw.trim().startsWith('-');
+  const cleaned = raw.replace(/[^0-9.]/g, '');
+  if (cleaned === '') return '';
+  const [intPart, ...rest] = cleaned.split('.');
+  const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const dec = rest.length ? '.' + rest.join('').slice(0, 2) : (cleaned.endsWith('.') ? '.' : '');
+  return (neg ? '-' : '') + withCommas + dec;
+}
+function stripCommas(v: string): string {
+  return (v ?? '').replace(/,/g, '');
+}
+
+/** A dollar input that shows commas as you type and stores a plain number string. */
+function MoneyField({ label, value, onChange, placeholder, hint }: {
+  label: string; value: string; onChange: (plain: string) => void; placeholder?: string; hint?: string;
+}) {
+  return (
+    <Field label={label} hint={hint}>
+      <Input
+        inputMode="decimal"
+        value={addCommas(value)}
+        onChange={(e) => onChange(stripCommas(e.target.value))}
+        placeholder={placeholder}
+      />
+    </Field>
+  );
+}
+
 /* ---------- types ---------- */
 interface Commission {
   id: string;
@@ -18,6 +51,8 @@ interface Commission {
   fundedAmount: string | null;
   rate: string | null;
   termMonths: string | null;
+  termMode: string | null;
+  termCount: string | null;
   fees: string | null;
   brokerFee: string | null;
   grossCommission: string;
@@ -88,7 +123,11 @@ export default function CommissionsPage() {
           fetch('/api/lead-sources'),
           fetch('/api/lead-source-commissions'),
         ]);
-        setDeals(((await dRes.json()).data ?? (await dRes.clone?.().json?.())?.deals ?? []) as Deal[]);
+        const dJson = await dRes.json();
+        const dealList = (dJson.data ?? dJson.deals ?? []) as Deal[];
+        // Dedupe by id so the Assign Deal dropdown never repeats a deal.
+        const seen = new Set<string>();
+        setDeals(dealList.filter((d) => (seen.has(d.id) ? false : (seen.add(d.id), true))));
         const uJson = await uRes.json();
         setReps(((uJson.data ?? uJson.users ?? []) as Rep[]).filter((u) => u.role === 'rep' || u.role === 'company_admin'));
         setLeadSources((await lsRes.json()).leadSources ?? []);
@@ -362,18 +401,28 @@ function AddCommissionModal({ deals, reps, onClose, onSaved }: { deals: Deal[]; 
   const [dealMode, setDealMode] = useState<'existing' | 'new'>(deals.length ? 'existing' : 'new');
   const [newDeal, setNewDeal] = useState({ name: '', merchantFirstName: '', merchantLastName: '', merchantPhone: '', merchantEmail: '' });
   const [f, setF] = useState({
-    dealId: '', repId: '', fundedAmount: '', rate: '', termMonths: '', fees: '',
-    brokerFee: '', grossCommission: '', repSplitPct: '', fundingDate: new Date().toISOString().slice(0, 10),
+    dealId: '', repId: '', fundedAmount: '', rate: '',
+    termMode: 'weekly' as 'daily' | 'weekly', termCount: '',
+    fees: '', brokerFee: '', grossCommission: '', repSplitPct: '',
+    leadSourceMode: 'none' as 'none' | 'split' | 'flat', leadSourceSplitPct: '', leadSourceFlatAmount: '',
+    fundingDate: new Date().toISOString().slice(0, 10),
     earlyPayoffDiscount: '', notes: '',
   });
   const [saving, setSaving] = useState(false);
 
-  const repShare = useMemo(() => {
+  // Full live breakdown: gross + broker pool, rep owed, lead source owed, house remainder.
+  const breakdown = useMemo(() => {
     const gross = parseFloat(f.grossCommission) || 0;
     const broker = parseFloat(f.brokerFee) || 0;
-    const pct = (parseFloat(f.repSplitPct) || 0) / 100;
-    return Math.round((gross + broker) * pct * 100) / 100;
-  }, [f.grossCommission, f.brokerFee, f.repSplitPct]);
+    const pool = gross + broker;
+    const repPct = (parseFloat(f.repSplitPct) || 0) / 100;
+    const repOwed = Math.round((gross + broker) * repPct * 100) / 100;
+    let lsOwed = 0;
+    if (f.leadSourceMode === 'flat') lsOwed = parseFloat(f.leadSourceFlatAmount) || 0;
+    else if (f.leadSourceMode === 'split') lsOwed = Math.round(gross * ((parseFloat(f.leadSourceSplitPct) || 0) / 100) * 100) / 100;
+    const houseOwed = Math.round((pool - repOwed - lsOwed) * 100) / 100;
+    return { gross, broker, pool, repOwed, lsOwed, houseOwed };
+  }, [f.grossCommission, f.brokerFee, f.repSplitPct, f.leadSourceMode, f.leadSourceSplitPct, f.leadSourceFlatAmount]);
 
   async function save() {
     let dealId = f.dealId;
@@ -411,7 +460,8 @@ function AddCommissionModal({ deals, reps, onClose, onSaved }: { deals: Deal[]; 
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           dealId, repId: f.repId || null,
-          fundedAmount: f.fundedAmount || null, rate: f.rate || null, termMonths: f.termMonths || null,
+          fundedAmount: f.fundedAmount || null, rate: f.rate || null,
+          termMonths: null, termMode: f.termMode, termCount: f.termCount || null,
           fees: f.fees || null, brokerFee: f.brokerFee || null,
           grossCommission: f.grossCommission || 0, repSplitPct: f.repSplitPct || 0,
           fundingDate: f.fundingDate || null, earlyPayoffDiscount: f.earlyPayoffDiscount || null, notes: f.notes || null,
@@ -464,23 +514,68 @@ function AddCommissionModal({ deals, reps, onClose, onSaved }: { deals: Deal[]; 
           </select>
         </Field>
         <Field label="Funding date"><Input type="date" value={f.fundingDate} onChange={(e) => setF({ ...f, fundingDate: e.target.value })} /></Field>
-        <Field label="Funded amount ($)"><Input inputMode="decimal" value={f.fundedAmount} onChange={(e) => setF({ ...f, fundedAmount: e.target.value })} placeholder="100000" /></Field>
+
+        <MoneyField label="Funded amount ($)" value={f.fundedAmount} onChange={(v) => setF({ ...f, fundedAmount: v })} placeholder="100,000" />
         <Field label="Rate (factor)"><Input inputMode="decimal" value={f.rate} onChange={(e) => setF({ ...f, rate: e.target.value })} placeholder="1.49" /></Field>
-        <Field label="Term (months)"><Input inputMode="decimal" value={f.termMonths} onChange={(e) => setF({ ...f, termMonths: e.target.value })} placeholder="6" /></Field>
-        <Field label="Fees ($)"><Input inputMode="decimal" value={f.fees} onChange={(e) => setF({ ...f, fees: e.target.value })} placeholder="0" /></Field>
-        <Field label="Gross commission ($)"><Input inputMode="decimal" value={f.grossCommission} onChange={(e) => setF({ ...f, grossCommission: e.target.value })} placeholder="10000" /></Field>
-        <Field label="Broker fee ($)"><Input inputMode="decimal" value={f.brokerFee} onChange={(e) => setF({ ...f, brokerFee: e.target.value })} placeholder="0" /></Field>
+
+        {/* Term structure: daily/weekly + count */}
+        <Field label="Term type">
+          <div className="grid grid-cols-2 gap-2">
+            {(['daily', 'weekly'] as const).map((m) => (
+              <button key={m} type="button" onClick={() => setF({ ...f, termMode: m })}
+                className={`px-3 py-2 rounded border-2 text-sm font-medium ${f.termMode === m ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground'}`}>
+                {m === 'daily' ? 'Daily' : 'Weekly'}
+              </button>
+            ))}
+          </div>
+        </Field>
+        <Field label={f.termMode === 'daily' ? 'Number of days' : 'Number of weeks'}>
+          <Input inputMode="decimal" value={f.termCount} onChange={(e) => setF({ ...f, termCount: e.target.value })} placeholder={f.termMode === 'daily' ? '120' : '24'} />
+        </Field>
+
+        <MoneyField label="Fees ($)" value={f.fees} onChange={(v) => setF({ ...f, fees: v })} placeholder="0" />
+        <MoneyField label="Gross commission ($)" value={f.grossCommission} onChange={(v) => setF({ ...f, grossCommission: v })} placeholder="10,000" />
+        <MoneyField label="Broker fee ($)" value={f.brokerFee} onChange={(v) => setF({ ...f, brokerFee: v })} placeholder="0" />
         <Field label="Rep split %"><Input inputMode="decimal" value={f.repSplitPct} onChange={(e) => setF({ ...f, repSplitPct: e.target.value })} placeholder="30" /></Field>
+
+        {/* Lead source (optional) */}
+        <Field label="Lead source commission">
+          <select value={f.leadSourceMode} onChange={(e) => setF({ ...f, leadSourceMode: e.target.value as typeof f.leadSourceMode })} className="sel">
+            <option value="none">None</option>
+            <option value="split">Split % of gross</option>
+            <option value="flat">Flat amount</option>
+          </select>
+        </Field>
+        {f.leadSourceMode === 'split' && <Field label="Lead source split %"><Input inputMode="decimal" value={f.leadSourceSplitPct} onChange={(e) => setF({ ...f, leadSourceSplitPct: e.target.value })} placeholder="10" /></Field>}
+        {f.leadSourceMode === 'flat' && <MoneyField label="Lead source flat ($)" value={f.leadSourceFlatAmount} onChange={(v) => setF({ ...f, leadSourceFlatAmount: v })} placeholder="500" />}
+
         <Field label="Early payoff discount"><Input value={f.earlyPayoffDiscount} onChange={(e) => setF({ ...f, earlyPayoffDiscount: e.target.value })} placeholder="optional" /></Field>
         <div className="col-span-2">
           <Field label="Notes"><Input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
         </div>
       </div>
-      <div className="mt-3 rounded-lg bg-primary/5 border border-primary/20 p-3 text-sm">
-        Rep commission (split of gross + same split of broker fee):{' '}
-        <span className="font-semibold tabular-nums">{formatCurrency(repShare)}</span>
+
+      {/* Full live breakdown */}
+      <div className="mt-3 rounded-lg bg-muted/30 border border-border p-3 text-sm space-y-1.5">
+        <BreakdownRow label="Gross + broker pool" value={breakdown.pool} />
+        <BreakdownRow label="Rep owed (split of gross + broker fee)" value={breakdown.repOwed} tone="primary" />
+        {f.leadSourceMode !== 'none' && <BreakdownRow label="Lead source owed" value={breakdown.lsOwed} />}
+        <div className="border-t border-border pt-1.5">
+          <BreakdownRow label="House keeps (remainder)" value={breakdown.houseOwed} tone={breakdown.houseOwed < 0 ? 'danger' : 'success'} bold />
+        </div>
+        {breakdown.houseOwed < 0 && <div className="text-xs text-rose-700">Rep + lead source exceed the pool — check the splits.</div>}
       </div>
     </Modal>
+  );
+}
+
+function BreakdownRow({ label, value, tone, bold }: { label: string; value: number; tone?: 'primary' | 'success' | 'danger'; bold?: boolean }) {
+  const color = tone === 'primary' ? 'text-primary' : tone === 'success' ? 'text-emerald-700' : tone === 'danger' ? 'text-rose-700' : 'text-foreground';
+  return (
+    <div className="flex justify-between">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`tabular-nums ${color} ${bold ? 'font-semibold' : ''}`}>{formatCurrency(value)}</span>
+    </div>
   );
 }
 
@@ -612,7 +707,7 @@ function CommissionDetail({ r, isAdmin, onPatch, onDelete }: {
         {isAdmin && <Detail label="Email" value={r.merchantEmail ?? '—'} />}
         <Detail label="Funded amount" value={r.fundedAmount ? formatCurrency(Number(r.fundedAmount)) : '—'} />
         <Detail label="Rate" value={r.rate ?? '—'} />
-        <Detail label="Term (mo)" value={r.termMonths ?? '—'} />
+        <Detail label="Term" value={r.termMode && r.termCount ? `${Number(r.termCount)} ${r.termMode === 'daily' ? 'days' : 'weeks'}` : (r.termMonths ? `${r.termMonths} mo` : '—')} />
         <Detail label="Fees" value={r.fees ? formatCurrency(Number(r.fees)) : '—'} />
         <Detail label="Broker fee" value={r.brokerFee ? formatCurrency(Number(r.brokerFee)) : '—'} />
         <Detail label="Pending" value={formatCurrency(r.pendingAmount)} />
