@@ -7,7 +7,7 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 
-type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets';
+type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources';
 
 const TAB_GROUPS: { title: string; tabs: { key: Tab; label: string }[] }[] = [
   {
@@ -39,7 +39,7 @@ const TAB_GROUPS: { title: string; tabs: { key: Tab; label: string }[] }[] = [
   },
   {
     title: 'Team',
-    tabs: [{ key: 'users', label: 'Users' }],
+    tabs: [{ key: 'users', label: 'Users' }, { key: 'leadsources', label: 'Lead Sources' }],
   },
   {
     title: 'Integrations',
@@ -91,6 +91,7 @@ export default function SettingsPage() {
       {tab === 'options' && <MatchOptionsSection />}
       {tab === 'security' && <SecuritySection />}
       {tab === 'sheets' && <SheetSyncSection />}
+      {tab === 'leadsources' && <LeadSourcesSection />}
     </div>
   );
 }
@@ -1642,6 +1643,135 @@ function SheetSyncSection() {
           <div className="text-xs text-muted-foreground">Last sync: {new Date(cfg.lastSyncAt).toLocaleString()}</div>
         )}
       </CardContent>
+    </Card>
+  );
+}
+
+/* ============================================================
+   LEAD SOURCES
+   ============================================================ */
+interface LeadSourceItem {
+  id: string;
+  name: string;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  notes: string | null;
+  isActive: boolean;
+}
+
+function LeadSourcesSection() {
+  const toast = useToast();
+  const [items, setItems] = useState<LeadSourceItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<(Partial<LeadSourceItem> & { id?: string }) | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/lead-sources');
+      const j = await res.json();
+      setItems(j.leadSources ?? []);
+    } finally { setLoading(false); }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function save() {
+    if (!editing?.name || !editing.name.trim()) { toast.error('Name is required.'); return; }
+    setSaving(true);
+    try {
+      const body = {
+        name: editing.name.trim(),
+        contactEmail: editing.contactEmail || '',
+        contactPhone: editing.contactPhone || '',
+        notes: editing.notes || '',
+        isActive: editing.isActive ?? true,
+      };
+      const res = editing.id
+        ? await fetch(`/api/lead-sources/${editing.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        : await fetch('/api/lead-sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await res.json();
+      if (!res.ok) { toast.error(j.error || 'Save failed'); return; }
+      toast.success(editing.id ? 'Lead source updated.' : 'Lead source added.');
+      setEditing(null);
+      load();
+    } finally { setSaving(false); }
+  }
+
+  async function remove(item: LeadSourceItem) {
+    if (!confirm(`Delete "${item.name}"? (If it has commissions, deactivate it instead.)`)) return;
+    const res = await fetch(`/api/lead-sources/${item.id}`, { method: 'DELETE' });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { toast.error(j.error || 'Delete failed'); return; }
+    toast.success('Deleted.');
+    load();
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>Lead Sources</CardTitle>
+            <CardDescription>
+              Partners who refer deals. Create one here, then assign commissions on the Commissions page,
+              and optionally create a restricted login under Users (role: Lead source).
+            </CardDescription>
+          </div>
+          <Button onClick={() => setEditing({ name: '', isActive: true })}>+ Add lead source</Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="text-sm text-muted-foreground">Loading…</div>
+        ) : items.length === 0 ? (
+          <div className="text-sm text-muted-foreground py-8 text-center">No lead sources yet. Click “+ Add lead source”.</div>
+        ) : (
+          <div className="space-y-2">
+            {items.map((item) => (
+              <div key={item.id} className="flex items-center justify-between rounded-lg border border-border p-3">
+                <div>
+                  <div className="font-medium flex items-center gap-2">
+                    {item.name}
+                    {!item.isActive && <Badge variant="outline" className="text-[10px]">inactive</Badge>}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {[item.contactEmail, item.contactPhone].filter(Boolean).join(' · ') || 'No contact info'}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => setEditing(item)}>Edit</Button>
+                  <Button size="sm" variant="outline" onClick={() => remove(item)}>Delete</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+
+      {editing && (
+        <div className="fixed inset-0 z-50 bg-foreground/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setEditing(null)}>
+          <div className="bg-card rounded-xl shadow-2xl border border-border w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-border">
+              <h2 className="text-base font-semibold">{editing.id ? 'Edit lead source' : 'New lead source'}</h2>
+            </div>
+            <div className="p-6 space-y-3">
+              <Field label="Name" required><Input value={editing.name ?? ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="e.g. ABC Referrals" /></Field>
+              <Field label="Contact email"><Input value={editing.contactEmail ?? ''} onChange={(e) => setEditing({ ...editing, contactEmail: e.target.value })} /></Field>
+              <Field label="Contact phone"><Input value={editing.contactPhone ?? ''} onChange={(e) => setEditing({ ...editing, contactPhone: e.target.value })} /></Field>
+              <Field label="Notes"><Textarea rows={3} value={editing.notes ?? ''} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} /></Field>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={editing.isActive ?? true} onChange={(e) => setEditing({ ...editing, isActive: e.target.checked })} />
+                Active
+              </label>
+            </div>
+            <div className="px-6 py-3 border-t border-border flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditing(null)} disabled={saving}>Cancel</Button>
+              <Button onClick={save} loading={saving}>Save</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }

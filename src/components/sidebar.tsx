@@ -25,6 +25,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
       { href: '/submit', label: 'Submit Deal', icon: Send, perm: 'deals.submit' },
       { href: '/submissions', label: 'Submissions', icon: Inbox, perm: 'submissions.view' },
       { href: '/active-deals', label: 'Active Deals', icon: Briefcase, perm: 'active_deals.view' },
+      { href: '/portfolio', label: 'Portfolio', icon: TrendingUp, perm: 'active_deals.view' },
     ],
   },
   {
