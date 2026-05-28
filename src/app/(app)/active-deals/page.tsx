@@ -95,7 +95,8 @@ export default function ActiveDealsPage() {
       fetch('/api/users').then((r) => r.json()).catch(() => ({ data: [] })),
     ]);
     setDeals(dRes.data ?? dRes ?? []);
-    setReps((uRes.data ?? []).filter((u: { role: string }) => u.role !== 'master_admin'));
+    // Reps only — exclude master admins and lead source accounts.
+    setReps((uRes.data ?? []).filter((u: { role: string }) => u.role === 'rep' || u.role === 'company_admin'));
     setLoading(false);
   }
 
@@ -197,8 +198,11 @@ export default function ActiveDealsPage() {
     load();
   }
 
+  // Active Deals = pre-funded pipeline only. Funded deals live in /portfolio.
+  const HIDDEN_FROM_ACTIVE = new Set(['funded', 'paid_off', 'closed']);
+
   const filtered = useMemo(() => {
-    let arr = deals;
+    let arr = deals.filter((d) => !HIDDEN_FROM_ACTIVE.has(d.status));
     if (statusFilter !== 'all') arr = arr.filter((d) => d.status === statusFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -212,8 +216,9 @@ export default function ActiveDealsPage() {
   }, [deals, statusFilter, search]);
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: deals.length };
-    for (const s of STATUS_OPTIONS) c[s] = deals.filter((d) => d.status === s).length;
+    const pipeline = deals.filter((d) => !HIDDEN_FROM_ACTIVE.has(d.status));
+    const c: Record<string, number> = { all: pipeline.length };
+    for (const s of STATUS_OPTIONS) c[s] = pipeline.filter((d) => d.status === s).length;
     return c;
   }, [deals]);
 
@@ -232,7 +237,7 @@ export default function ActiveDealsPage() {
       {/* Status filter chips + search */}
       <div className="flex flex-wrap items-center gap-2">
         <FilterChip label="All" count={counts.all} active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} />
-        {STATUS_OPTIONS.map((s) => (
+        {STATUS_OPTIONS.filter((s) => !HIDDEN_FROM_ACTIVE.has(s)).map((s) => (
           <FilterChip
             key={s}
             label={statusMeta(s).label}

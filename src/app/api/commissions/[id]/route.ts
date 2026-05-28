@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { dealCommissions } from '@/lib/db/schema';
+import { dealCommissions, deals } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import type { SessionUser } from '@/lib/auth/context';
@@ -15,10 +15,17 @@ function isAdmin(user: SessionUser) {
 }
 
 const patchSchema = z.object({
+  // Status / payment fields
   status: z.enum(['pending', 'cleared', 'clawed_back']).optional(),
   paidAmount: z.coerce.number().nonnegative().optional(),
   clearedDate: z.string().optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
+  // Editable commission math
+  grossCommission: z.coerce.number().nonnegative().optional(),
+  brokerFee: z.coerce.number().nonnegative().optional(),
+  repSplitPct: z.coerce.number().min(0).max(100).optional(),
+  fundingDate: z.string().optional().nullable(),
+  earlyPayoffDiscount: z.string().max(500).optional().nullable(),
 });
 
 /**
@@ -48,6 +55,29 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (body.paidAmount !== undefined) updates.paidAmount = String(body.paidAmount);
     if (body.clearedDate !== undefined) updates.clearedDate = body.clearedDate ? new Date(body.clearedDate) : null;
     if (body.notes !== undefined) updates.notes = body.notes;
+    if (body.earlyPayoffDiscount !== undefined) updates.earlyPayoffDiscount = body.earlyPayoffDiscount;
+
+    // Editable math — recompute repCommissionAmount when gross/brokerFee/split changes.
+    const gross = body.grossCommission ?? Number(row.grossCommission);
+    const brokerFee = body.brokerFee ?? Number(row.brokerFee);
+    const split = body.repSplitPct ?? Number(row.repSplitPct);
+    if (body.grossCommission !== undefined) updates.grossCommission = String(gross);
+    if (body.brokerFee !== undefined) updates.brokerFee = String(brokerFee);
+    if (body.repSplitPct !== undefined) updates.repSplitPct = String(split);
+    if (body.grossCommission !== undefined || body.brokerFee !== undefined || body.repSplitPct !== undefined) {
+      const newRepAmount = Math.round((gross + brokerFee) * (split / 100) * 100) / 100;
+      updates.repCommissionAmount = String(newRepAmount);
+    }
+
+    // Funding date — also propagate to the parent deal so the LS portal sees it.
+    if (body.fundingDate !== undefined) {
+      const fd = body.fundingDate ? new Date(body.fundingDate) : null;
+      updates.fundingDate = fd;
+      if (fd) {
+        await db.update(deals).set({ fundingDate: fd })
+          .where(and(eq(deals.id, row.dealId), eq(deals.companyId, ctx.companyId)));
+      }
+    }
 
     await db.update(dealCommissions).set(updates).where(eq(dealCommissions.id, params.id));
     triggerSync(ctx.companyId);

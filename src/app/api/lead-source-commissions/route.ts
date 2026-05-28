@@ -31,6 +31,7 @@ export async function GET() {
         merchantFirstName: deals.merchantFirstName,
         merchantLastName: deals.merchantLastName,
         fundedAmount: dealCommissions.fundedAmount,
+        fundingDate: deals.fundingDate,
         grossCommission: dealCommissions.grossCommission,
         brokerFee: dealCommissions.brokerFee,
         repSplitPct: dealCommissions.repSplitPct,
@@ -56,6 +57,7 @@ export async function GET() {
         leadSourceId: r.lsc.leadSourceId,
         leadSourceName: r.leadSourceName,
         fundedAmount: r.fundedAmount,
+        fundingDate: r.fundingDate,
         grossCommission: r.grossCommission,
         brokerFee: r.brokerFee,
         repSplitPct: r.repSplitPct,
@@ -81,12 +83,16 @@ const upsertSchema = z.object({
   leadSourceId: z.string().uuid(),
   splitPct: z.coerce.number().min(0).max(100).optional().nullable(),
   flatAmount: z.coerce.number().nonnegative().optional().nullable(),
+  grossCommission: z.coerce.number().nonnegative().optional().nullable(),
+  brokerFee: z.coerce.number().nonnegative().optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
 });
 
 /**
  * POST /api/lead-source-commissions
- * Admin. Upsert (by deal + lead source). Computes owed from flat OR split% of gross.
+ * Admin. Upsert (by deal + lead source). Computes owed as:
+ *   - flat amount, OR
+ *   - splitPct × (grossCommission + brokerFee)
  */
 export async function POST(req: NextRequest) {
   try {
@@ -100,16 +106,49 @@ export async function POST(req: NextRequest) {
     const [ls] = await db.select().from(leadSources).where(eq(leadSources.id, body.leadSourceId)).limit(1);
     if (!ls || ls.companyId !== ctx.companyId) return NextResponse.json({ error: 'Lead source not found' }, { status: 404 });
 
-    // Gross comes from the deal's rep commission record (if any) for split math
+    // Find or stub the rep commission row so gross/brokerFee live somewhere persistent.
     const [dc] = await db.select().from(dealCommissions)
       .where(and(eq(dealCommissions.dealId, body.dealId), eq(dealCommissions.companyId, ctx.companyId))).limit(1);
-    const gross = dc ? Number(dc.grossCommission) : 0;
+    const gross = body.grossCommission != null ? body.grossCommission : (dc ? Number(dc.grossCommission) : 0);
+    const brokerFee = body.brokerFee != null ? body.brokerFee : (dc ? Number(dc.brokerFee) : 0);
 
-    const commissionAmount = computeLeadSourceCommission({
-      grossCommission: gross,
-      splitPct: body.splitPct ?? null,
-      flatAmount: body.flatAmount ?? null,
-    });
+    // If caller supplied gross/brokerFee, persist them on the rep commission row
+    // (create one if missing). This keeps both sides of the math consistent.
+    if (body.grossCommission != null || body.brokerFee != null) {
+      if (dc) {
+        const repSplit = Number(dc.repSplitPct) || 0;
+        await db.update(dealCommissions).set({
+          grossCommission: String(gross),
+          brokerFee: String(brokerFee),
+          repCommissionAmount: String(Math.round((gross + brokerFee) * (repSplit / 100) * 100) / 100),
+          syncState: 'pending', updatedAt: new Date(),
+        }).where(eq(dealCommissions.id, dc.id));
+      } else {
+        // No rep row yet — create a stub so the math is recorded. Unassigned rep.
+        await db.insert(dealCommissions).values({
+          companyId: ctx.companyId,
+          dealId: body.dealId,
+          repId: null,
+          fundedAmount: deal.fundedAmount ?? '0',
+          rate: '0',
+          termMonths: '0',
+          termMode: deal.termMode ?? 'weekly',
+          termCount: deal.termCount ?? '0',
+          fees: '0',
+          brokerFee: String(brokerFee),
+          grossCommission: String(gross),
+          repSplitPct: '0',
+          repCommissionAmount: '0',
+          paidAmount: '0',
+          status: 'pending',
+          fundingDate: deal.fundingDate ?? new Date(),
+        });
+      }
+    }
+
+    let commissionAmount = 0;
+    if (body.flatAmount != null && body.flatAmount > 0) commissionAmount = body.flatAmount;
+    else if (body.splitPct != null && body.splitPct > 0) commissionAmount = Math.round((gross + brokerFee) * (body.splitPct / 100) * 100) / 100;
 
     const values = {
       companyId: ctx.companyId,

@@ -77,9 +77,11 @@ interface LeadSource { id: string; name: string; contactEmail: string | null; co
 interface LSCommission {
   id: string; dealId: string; dealName: string; merchantName: string | null;
   leadSourceId: string; leadSourceName: string;
-  grossCommission: string | null; splitPct: string | null; flatAmount: string | null;
+  grossCommission: string | null; brokerFee: string | null;
+  splitPct: string | null; flatAmount: string | null;
   commissionAmount: string; paidAmount: string; owedAmount: number; pendingAmount: number;
   status: 'pending' | 'cleared' | 'clawed_back';
+  fundingDate: string | null;
   earlyPayoffDiscount: string | null;
   notes: string | null;
 }
@@ -704,21 +706,34 @@ function AssignLeadSourceModal({ deals, leadSources, onClose, onSaved }: { deals
   const toast = useToast();
   const [dealMode, setDealMode] = useState<'existing' | 'new'>(deals.length ? 'existing' : 'new');
   const [newDeal, setNewDeal] = useState({ name: '', merchantFirstName: '', merchantLastName: '', merchantPhone: '', merchantEmail: '' });
-  const [f, setF] = useState({ dealId: '', leadSourceId: '', mode: 'split' as 'split' | 'flat', splitPct: '', flatAmount: '', notes: '' });
+  const [f, setF] = useState({
+    dealId: '', leadSourceId: '',
+    mode: 'split' as 'split' | 'flat',
+    splitPct: '', flatAmount: '',
+    grossCommission: '', brokerFee: '',
+    fundingDate: new Date().toISOString().slice(0, 10),
+    notes: '',
+  });
   const [saving, setSaving] = useState(false);
+
+  // Live-computed lead-source owed amount: (gross + brokerFee) × split%
+  const lsOwed = useMemo(() => {
+    if (f.mode === 'flat') return Number(f.flatAmount) || 0;
+    const gross = parseFloat(f.grossCommission) || 0;
+    const brokerFee = parseFloat(f.brokerFee) || 0;
+    const split = parseFloat(f.splitPct) || 0;
+    return Math.round((gross + brokerFee) * (split / 100) * 100) / 100;
+  }, [f.mode, f.grossCommission, f.brokerFee, f.splitPct, f.flatAmount]);
 
   async function save() {
     if (!f.leadSourceId) { toast.error('Pick a lead source.'); return; }
     let dealId = f.dealId;
-    if (dealMode === 'new') {
-      if (!newDeal.name.trim()) { toast.error('Enter a deal name.'); return; }
-    } else if (!dealId) {
-      toast.error('Pick a deal.'); return;
-    }
+    if (dealMode === 'new' && !newDeal.name.trim()) { toast.error('Enter a deal name.'); return; }
+    if (dealMode === 'existing' && !dealId) { toast.error('Pick a deal.'); return; }
 
     setSaving(true);
     try {
-      // Create the deal first if logging a brand-new one.
+      // Create deal first if new.
       if (dealMode === 'new') {
         const dRes = await fetch('/api/deals', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -729,20 +744,30 @@ function AssignLeadSourceModal({ deals, leadSources, onClose, onSaved }: { deals
             merchantPhone: newDeal.merchantPhone || null,
             merchantEmail: newDeal.merchantEmail || null,
             status: 'funded',
+            fundingDate: f.fundingDate || null,
           }),
         });
         const dJson = await dRes.json();
         if (!dRes.ok) { toast.error(dJson.error || 'Could not create deal'); return; }
         dealId = dJson.deal?.id;
         if (!dealId) { toast.error('Deal created but no ID returned'); return; }
+      } else if (f.fundingDate) {
+        // Existing deal — propagate funding date to the deal record.
+        await fetch(`/api/deals/${dealId}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fundingDate: f.fundingDate }),
+        });
       }
 
+      // Create the LS commission with full math.
       const res = await fetch('/api/lead-source-commissions', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           dealId, leadSourceId: f.leadSourceId,
           splitPct: f.mode === 'split' ? (f.splitPct || 0) : null,
           flatAmount: f.mode === 'flat' ? (f.flatAmount || 0) : null,
+          grossCommission: f.grossCommission || null,
+          brokerFee: f.brokerFee || null,
           notes: f.notes || null,
         }),
       });
@@ -790,12 +815,22 @@ function AssignLeadSourceModal({ deals, leadSources, onClose, onSaved }: { deals
             {leadSources.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
         </Field>
-        <Field label="Commission type">
+
+        <Field label="Funded date"><Input type="date" value={f.fundingDate} onChange={(e) => setF({ ...f, fundingDate: e.target.value })} /></Field>
+
+        <Field label="Commission math">
+          <div className="grid grid-cols-2 gap-2">
+            <MoneyField label="Total commission ($)" value={f.grossCommission} onChange={(v) => setF({ ...f, grossCommission: v })} placeholder="10000" />
+            <MoneyField label="Broker fee ($)" value={f.brokerFee} onChange={(v) => setF({ ...f, brokerFee: v })} placeholder="2000" />
+          </div>
+        </Field>
+
+        <Field label="Lead source pays as">
           <div className="grid grid-cols-2 gap-2">
             {(['split', 'flat'] as const).map((m) => (
               <button key={m} type="button" onClick={() => setF({ ...f, mode: m })}
                 className={`px-3 py-2 rounded border-2 text-sm font-medium ${f.mode === m ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground'}`}>
-                {m === 'split' ? 'Split % of gross' : 'Flat amount'}
+                {m === 'split' ? 'Split % of (commission + broker fee)' : 'Flat amount'}
               </button>
             ))}
           </div>
@@ -803,7 +838,14 @@ function AssignLeadSourceModal({ deals, leadSources, onClose, onSaved }: { deals
         {f.mode === 'split'
           ? <Field label="Split %"><Input inputMode="decimal" value={f.splitPct} onChange={(e) => setF({ ...f, splitPct: e.target.value })} placeholder="10" /></Field>
           : <MoneyField label="Flat amount ($)" value={f.flatAmount} onChange={(v) => setF({ ...f, flatAmount: v })} placeholder="500" />}
-        <Field label="Notes"><Input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
+
+        <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm">
+          <span className="text-muted-foreground">Lead source owed: </span>
+          <span className="font-semibold tabular-nums">${lsOwed.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          {f.mode === 'split' && <span className="text-xs text-muted-foreground ml-2">({f.splitPct || 0}% of ${((parseFloat(f.grossCommission) || 0) + (parseFloat(f.brokerFee) || 0)).toLocaleString()})</span>}
+        </div>
+
+        <Field label="Notes"><Input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="Visible to the lead source — payoff terms, etc." /></Field>
       </div>
     </Modal>
   );
@@ -882,6 +924,28 @@ function CommissionDetail({ r, isAdmin, onPatch, onDelete }: {
   const [paid, setPaid] = useState(r.paidAmount);
   const [status, setStatus] = useState(r.status);
   const [notes, setNotes] = useState(r.notes ?? '');
+  // Editable math
+  const [gross, setGross] = useState(r.grossCommission ?? '');
+  const [brokerFee, setBrokerFee] = useState(r.brokerFee ?? '');
+  const [splitPct, setSplitPct] = useState(r.repSplitPct ?? '');
+  const [fundingDate, setFundingDate] = useState(r.fundingDate ? r.fundingDate.slice(0, 10) : '');
+  const [earlyPayoffDiscount, setEarlyPayoffDiscount] = useState(r.earlyPayoffDiscount ?? '');
+
+  // Live preview of recomputed rep commission
+  const computed = useMemo(() => {
+    const g = parseFloat(gross) || 0; const b = parseFloat(brokerFee) || 0; const s = parseFloat(splitPct) || 0;
+    return Math.round((g + b) * (s / 100) * 100) / 100;
+  }, [gross, brokerFee, splitPct]);
+
+  function saveAll() {
+    const body: Record<string, unknown> = { paidAmount: Number(paid), status, notes, earlyPayoffDiscount: earlyPayoffDiscount || null };
+    if (gross !== (r.grossCommission ?? '')) body.grossCommission = Number(gross) || 0;
+    if (brokerFee !== (r.brokerFee ?? '')) body.brokerFee = Number(brokerFee) || 0;
+    if (splitPct !== (r.repSplitPct ?? '')) body.repSplitPct = Number(splitPct) || 0;
+    if (fundingDate && fundingDate !== (r.fundingDate ?? '').slice(0, 10)) body.fundingDate = fundingDate;
+    onPatch(r.id, body);
+  }
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -892,23 +956,38 @@ function CommissionDetail({ r, isAdmin, onPatch, onDelete }: {
         <Detail label="Rate" value={r.rate ?? '—'} />
         <Detail label="Term" value={r.termMode && r.termCount ? `${Number(r.termCount)} ${r.termMode === 'daily' ? 'days' : 'weeks'}` : (r.termMonths ? `${r.termMonths} mo` : '—')} />
         <Detail label="Fees" value={r.fees ? formatCurrency(Number(r.fees)) : '—'} />
-        <Detail label="Broker fee" value={r.brokerFee ? formatCurrency(Number(r.brokerFee)) : '—'} />
         <Detail label="Pending" value={formatCurrency(r.pendingAmount)} />
-        <Detail label="Funding date" value={r.fundingDate ? formatDate(r.fundingDate) : '—'} />
         <Detail label="Cleared date" value={r.clearedDate ? formatDate(r.clearedDate) : '—'} />
-        <Detail label="Early payoff" value={r.earlyPayoffDiscount ?? '—'} />
       </div>
+
       {isAdmin && (
-        <div className="flex flex-wrap items-end gap-3 pt-3 border-t border-border">
-          <Field label="Paid amount" className="w-36"><Input inputMode="decimal" value={paid} onChange={(e) => setPaid(e.target.value)} /></Field>
-          <Field label="Status" className="w-40">
-            <select value={status} onChange={(e) => setStatus(e.target.value as Commission['status'])} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
-              <option value="pending">Pending</option><option value="cleared">Cleared</option><option value="clawed_back">Clawed Back</option>
-            </select>
-          </Field>
-          <Field label="Notes" className="flex-1 min-w-[180px]"><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
-          <Button size="sm" onClick={() => onPatch(r.id, { paidAmount: Number(paid), status, notes })}>Save</Button>
-          <Button size="sm" variant="outline" onClick={() => onDelete(r.id)}>Remove</Button>
+        <div className="space-y-3 pt-3 border-t border-border">
+          {/* Editable commission math */}
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Commission math (editable)</div>
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Total commission ($)" className="w-40"><Input inputMode="decimal" value={gross} onChange={(e) => setGross(e.target.value)} placeholder="10000" /></Field>
+            <Field label="Broker fee ($)" className="w-32"><Input inputMode="decimal" value={brokerFee} onChange={(e) => setBrokerFee(e.target.value)} placeholder="2000" /></Field>
+            <Field label="Rep split %" className="w-28"><Input inputMode="decimal" value={splitPct} onChange={(e) => setSplitPct(e.target.value)} placeholder="50" /></Field>
+            <Field label="Funded date" className="w-40"><Input type="date" value={fundingDate} onChange={(e) => setFundingDate(e.target.value)} /></Field>
+            <div className="px-3 py-2 rounded bg-muted/40 text-xs">
+              <span className="text-muted-foreground">Rep gets: </span>
+              <span className="font-semibold tabular-nums">{formatCurrency(computed)}</span>
+            </div>
+          </div>
+
+          {/* Status / paid / notes / early payoff */}
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Paid amount" className="w-36"><Input inputMode="decimal" value={paid} onChange={(e) => setPaid(e.target.value)} /></Field>
+            <Field label="Status" className="w-40">
+              <select value={status} onChange={(e) => setStatus(e.target.value as Commission['status'])} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
+                <option value="pending">Pending</option><option value="cleared">Cleared</option><option value="clawed_back">Clawed Back</option>
+              </select>
+            </Field>
+            <Field label="Early payoff discount" className="w-44"><Input value={earlyPayoffDiscount} onChange={(e) => setEarlyPayoffDiscount(e.target.value)} placeholder="e.g. 10% or $500" /></Field>
+            <Field label="Notes" className="flex-1 min-w-[180px]"><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+            <Button size="sm" onClick={saveAll}>Save</Button>
+            <Button size="sm" variant="outline" onClick={() => onDelete(r.id)}>Remove</Button>
+          </div>
         </div>
       )}
       {isAdmin && <LogPaymentInline commissionId={r.id} repId={r.repId} onLogged={() => onPatch(r.id, {})} />}
@@ -993,38 +1072,81 @@ function LSCommissionDetail({
   const [status, setStatus] = useState<'pending' | 'cleared' | 'clawed_back'>(r.status);
   const [earlyPayoffDiscount, setEarlyPayoffDiscount] = useState(r.earlyPayoffDiscount ?? '');
   const [notes, setNotes] = useState(r.notes ?? '');
+  // Editable math
+  const [gross, setGross] = useState(r.grossCommission ?? '');
+  const [brokerFee, setBrokerFee] = useState(r.brokerFee ?? '');
+  const [splitPct, setSplitPct] = useState(r.splitPct ?? '');
+  const [flatAmount, setFlatAmount] = useState(r.flatAmount ?? '');
+  const [mode, setMode] = useState<'split' | 'flat'>(r.flatAmount && Number(r.flatAmount) > 0 ? 'flat' : 'split');
+  const [fundingDate, setFundingDate] = useState(r.fundingDate ? r.fundingDate.slice(0, 10) : '');
+
+  // Live-compute owed amount preview.
+  const computed = useMemo(() => {
+    if (mode === 'flat') return parseFloat(flatAmount) || 0;
+    const g = parseFloat(gross) || 0; const b = parseFloat(brokerFee) || 0; const s = parseFloat(splitPct) || 0;
+    return Math.round((g + b) * (s / 100) * 100) / 100;
+  }, [mode, gross, brokerFee, splitPct, flatAmount]);
+
+  function saveAll() {
+    const body: Record<string, unknown> = {
+      paidAmount: Number(paid), status,
+      earlyPayoffDiscount: earlyPayoffDiscount || null, notes,
+    };
+    if (gross !== (r.grossCommission ?? '')) body.grossCommission = Number(gross) || 0;
+    if (brokerFee !== (r.brokerFee ?? '')) body.brokerFee = Number(brokerFee) || 0;
+    if (mode === 'split' && splitPct !== (r.splitPct ?? '')) { body.splitPct = Number(splitPct) || 0; body.flatAmount = null; }
+    if (mode === 'flat' && flatAmount !== (r.flatAmount ?? '')) { body.flatAmount = Number(flatAmount) || 0; body.splitPct = null; }
+    if (fundingDate && fundingDate !== (r.fundingDate ?? '').slice(0, 10)) body.fundingDate = fundingDate;
+    onPatch(r.id, body);
+  }
 
   return (
     <div className="space-y-3">
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
         <Detail label="Lead source" value={r.leadSourceName} />
         <Detail label="Deal" value={r.dealName} />
-        <Detail label="Commission" value={formatCurrency(Number(r.commissionAmount))} />
-        <Detail label="Owed" value={formatCurrency(r.owedAmount)} />
+        <Detail label="Owed (now)" value={formatCurrency(r.owedAmount)} />
+        <Detail label="Funded" value={r.fundingDate ? formatDate(r.fundingDate) : '—'} />
       </div>
 
+      {/* Editable commission math */}
+      <div className="pt-2 border-t border-dashed border-border">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Commission math (editable)</div>
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="Total commission ($)" className="w-40"><Input inputMode="decimal" value={gross} onChange={(e) => setGross(e.target.value)} placeholder="10000" /></Field>
+          <Field label="Broker fee ($)" className="w-32"><Input inputMode="decimal" value={brokerFee} onChange={(e) => setBrokerFee(e.target.value)} placeholder="2000" /></Field>
+          <Field label="Funded date" className="w-40"><Input type="date" value={fundingDate} onChange={(e) => setFundingDate(e.target.value)} /></Field>
+        </div>
+        <div className="flex flex-wrap items-end gap-2 mt-2">
+          <Field label="LS pays as" className="w-44">
+            <select value={mode} onChange={(e) => setMode(e.target.value as 'split' | 'flat')} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
+              <option value="split">Split %</option>
+              <option value="flat">Flat amount</option>
+            </select>
+          </Field>
+          {mode === 'split'
+            ? <Field label="Split %" className="w-28"><Input inputMode="decimal" value={splitPct} onChange={(e) => setSplitPct(e.target.value)} placeholder="10" /></Field>
+            : <Field label="Flat amount" className="w-36"><Input inputMode="decimal" value={flatAmount} onChange={(e) => setFlatAmount(e.target.value)} placeholder="500" /></Field>}
+          <div className="px-3 py-2 rounded bg-muted/40 text-xs">
+            <span className="text-muted-foreground">LS gets: </span>
+            <span className="font-semibold tabular-nums">{formatCurrency(computed)}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Status / paid / early payoff / notes */}
       <div className="flex flex-wrap items-end gap-2 pt-2 border-t border-dashed border-border">
-        <Field label="Paid amount" className="w-32">
-          <Input inputMode="decimal" value={paid} onChange={(e) => setPaid(e.target.value)} />
-        </Field>
+        <Field label="Paid amount" className="w-32"><Input inputMode="decimal" value={paid} onChange={(e) => setPaid(e.target.value)} /></Field>
         <Field label="Status" className="w-36">
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value as 'pending' | 'cleared' | 'clawed_back')}
-            className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm"
-          >
+          <select value={status} onChange={(e) => setStatus(e.target.value as 'pending' | 'cleared' | 'clawed_back')} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
             <option value="pending">Pending</option>
             <option value="cleared">Cleared (Paid)</option>
             <option value="clawed_back">Clawed Back</option>
           </select>
         </Field>
-        <Field label="Early payoff discount" className="w-48">
-          <Input value={earlyPayoffDiscount} onChange={(e) => setEarlyPayoffDiscount(e.target.value)} placeholder="e.g. 10% or $500" />
-        </Field>
-        <Field label="Notes" className="flex-1 min-w-[180px]">
-          <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </Field>
-        <Button size="sm" onClick={() => onPatch(r.id, { paidAmount: Number(paid), status, earlyPayoffDiscount: earlyPayoffDiscount || null, notes })}>Save</Button>
+        <Field label="Early payoff discount" className="w-48"><Input value={earlyPayoffDiscount} onChange={(e) => setEarlyPayoffDiscount(e.target.value)} placeholder="e.g. 10% or $500" /></Field>
+        <Field label="Notes" className="flex-1 min-w-[180px]"><Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Visible to the lead source" /></Field>
+        <Button size="sm" onClick={saveAll}>Save</Button>
         <Button size="sm" variant="outline" onClick={() => onDelete(r.id)}>Remove</Button>
       </div>
 

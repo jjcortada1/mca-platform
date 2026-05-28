@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { leadSourceCommissions, leadSources, commissionPayments } from '@/lib/db/schema';
+import { leadSourceCommissions, leadSources, commissionPayments, deals } from '@/lib/db/schema';
 import { and, eq, desc } from 'drizzle-orm';
 import { requireUser } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
@@ -29,15 +29,22 @@ export async function GET() {
       return NextResponse.json({ error: 'No lead source profile linked to this account.' }, { status: 404 });
     }
 
+    // Select LS commission fields + the parent deal's funding date — but NOT
+    // any merchant or deal identifying data (no name, no merchant, no funder).
     const rows = await db.select({
       id: leadSourceCommissions.id,
       commissionAmount: leadSourceCommissions.commissionAmount,
       paidAmount: leadSourceCommissions.paidAmount,
       status: leadSourceCommissions.status,
+      earlyPayoffDiscount: leadSourceCommissions.earlyPayoffDiscount,
+      notes: leadSourceCommissions.notes,
       updatedAt: leadSourceCommissions.updatedAt,
       isDeleted: leadSourceCommissions.isDeleted,
+      // Join only to fetch funding date — deal name/merchant deliberately omitted.
+      fundingDate: deals.fundingDate,
     })
       .from(leadSourceCommissions)
+      .leftJoin(deals, eq(deals.id, leadSourceCommissions.dealId))
       .where(and(
         eq(leadSourceCommissions.leadSourceId, ls.id),
         eq(leadSourceCommissions.isDeleted, false),
@@ -49,12 +56,18 @@ export async function GET() {
       status: r.status,
     })));
 
-    // Payment history: ONLY amounts + status + date. No deal identifiers.
+    // Payment history per LS commission row — amounts + status + funded date
+    // + notes + early payoff. No deal name / merchant ever.
     const history = rows
       .map((r) => ({
+        id: r.id,
         amountOwed: Number(r.commissionAmount),
         amountPaid: Number(r.paidAmount),
-        status: r.status,
+        status: r.status, // 'pending' | 'cleared' | 'clawed_back'
+        clawedBack: r.status === 'clawed_back',
+        fundingDate: r.fundingDate,
+        earlyPayoffDiscount: r.earlyPayoffDiscount,
+        notes: r.notes,
         updatedAt: r.updatedAt,
       }))
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());

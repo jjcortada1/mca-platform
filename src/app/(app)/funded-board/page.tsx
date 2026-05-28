@@ -46,7 +46,7 @@ export default function FundedBoardPage() {
       fetch('/api/users').then((r) => r.json()).catch(() => ({ data: [] })),
     ]);
     setEntries(eRes.data ?? []);
-    setReps((uRes.data ?? []).filter((u: { role: string }) => u.role !== 'master_admin'));
+    setReps((uRes.data ?? []).filter((u: { role: string }) => u.role === 'rep' || u.role === 'company_admin'));
     setLoading(false);
   }
 

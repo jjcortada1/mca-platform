@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
 import { deals, dealCommissions, commissionDraws, users } from '@/lib/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import { resolveAutoStatus } from '@/lib/commissions/calc';
 import { computePaydown } from '@/lib/deals/paydown';
@@ -73,8 +73,14 @@ export async function GET() {
     // Per-rep breakdown (admin only)
     let reps: any[] = [];
     if (admin) {
+      // Only reps + admins appear in the per-rep breakdown. Lead source
+      // accounts are excluded so they don't show up as empty rows.
       const repUsers = await db.select({ id: users.id, name: users.name, role: users.role })
-        .from(users).where(and(eq(users.companyId, ctx.companyId)));
+        .from(users)
+        .where(and(
+          eq(users.companyId, ctx.companyId),
+          inArray(users.role, ['rep', 'company_admin'] as const),
+        ));
       const repMap = new Map(repUsers.map((u) => [u.id, u.name]));
 
       const byRep = new Map<string, { repId: string; name: string; deals: number; funded: number; commission: number; paid: number; pending: number; draws: number; fundedCount: number; renewals: number; payingDown: number }>();
