@@ -389,12 +389,12 @@ export default function CommissionsPage() {
                     <th className="px-3 py-2 th text-right">Paid</th>
                     <th className="px-3 py-2 th text-right">Owed</th>
                     <th className="px-3 py-2 th">Status</th>
-                    <th className="w-8"></th>
+                    <th className="w-16"></th>
                   </tr></thead>
                   <tbody className="divide-y divide-border/60">
                     {filteredRows.map((r) => (
                       <>
-                        <tr key={r.id} className="hover:bg-muted/20 cursor-pointer" onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
+                        <tr key={r.id} className="hover:bg-muted/20">
                           <td className="px-4 py-2.5 font-medium">{r.dealName}</td>
                           {isAdmin && <td className="px-3 py-2.5 text-muted-foreground">{r.repName ?? '—'}</td>}
                           <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(r.grossCommission))}</td>
@@ -403,7 +403,14 @@ export default function CommissionsPage() {
                           <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">{formatCurrency(Number(r.paidAmount))}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(r.owedAmount)}</td>
                           <td className="px-3 py-2.5"><Badge variant={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge></td>
-                          <td className="px-2 py-2.5 text-muted-foreground text-xs">{expanded === r.id ? '▲' : '▼'}</td>
+                          <td className="px-3 py-2.5 text-right">
+                            <button
+                              onClick={() => setExpanded(expanded === r.id ? null : r.id)}
+                              className="text-xs font-medium text-primary hover:underline"
+                            >
+                              {expanded === r.id ? 'Close' : (isAdmin ? 'Edit' : 'Details')}
+                            </button>
+                          </td>
                         </tr>
                         {expanded === r.id && (
                           <tr className="bg-muted/10"><td colSpan={isAdmin ? 9 : 8} className="px-4 py-3">
@@ -448,12 +455,12 @@ export default function CommissionsPage() {
                     <th className="px-3 py-2 th text-right">Paid</th>
                     <th className="px-3 py-2 th text-right">Owed</th>
                     <th className="px-3 py-2 th">Status</th>
-                    <th className="w-8"></th>
+                    <th className="w-16"></th>
                   </tr></thead>
                   <tbody className="divide-y divide-border/60">
                     {lsRows.map((r) => (
                       <>
-                        <tr key={r.id} className="hover:bg-muted/20 cursor-pointer" onClick={() => setLsExpanded(lsExpanded === r.id ? null : r.id)}>
+                        <tr key={r.id} className="hover:bg-muted/20">
                           <td className="px-4 py-2.5 font-medium">{r.leadSourceName}</td>
                           <td className="px-3 py-2.5 text-muted-foreground">{r.dealName}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums">{r.flatAmount ? formatCurrency(Number(r.flatAmount)) : r.splitPct ? `${Number(r.splitPct)}%` : '—'}</td>
@@ -461,7 +468,14 @@ export default function CommissionsPage() {
                           <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">{formatCurrency(Number(r.paidAmount))}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(r.owedAmount)}</td>
                           <td className="px-3 py-2.5"><Badge variant={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge></td>
-                          <td className="px-2 py-2.5 text-muted-foreground text-xs">{lsExpanded === r.id ? '▲' : '▼'}</td>
+                          <td className="px-3 py-2.5 text-right">
+                            <button
+                              onClick={() => setLsExpanded(lsExpanded === r.id ? null : r.id)}
+                              className="text-xs font-medium text-primary hover:underline"
+                            >
+                              {lsExpanded === r.id ? 'Close' : 'Edit'}
+                            </button>
+                          </td>
                         </tr>
                         {lsExpanded === r.id && (
                           <tr className="bg-muted/10">
