@@ -24,10 +24,14 @@ export async function GET(req: NextRequest) {
     const admin = isAdmin(ctx.user);
     const url = new URL(req.url);
     const repFilter = url.searchParams.get('repId');
+    const dealCommissionId = url.searchParams.get('dealCommissionId');
+    const leadSourceCommissionId = url.searchParams.get('leadSourceCommissionId');
 
-    const conds = [eq(commissionPayments.companyId, ctx.companyId)];
+    const conds = [eq(commissionPayments.companyId, ctx.companyId), eq(commissionPayments.isDeleted, false)];
     if (!admin) conds.push(eq(commissionPayments.repId, ctx.user.id));
     else if (repFilter) conds.push(eq(commissionPayments.repId, repFilter));
+    if (dealCommissionId) conds.push(eq(commissionPayments.dealCommissionId, dealCommissionId));
+    if (leadSourceCommissionId) conds.push(eq(commissionPayments.leadSourceCommissionId, leadSourceCommissionId));
 
     const rows = await db.select({
       p: commissionPayments,

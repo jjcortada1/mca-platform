@@ -1005,6 +1005,16 @@ function LogPaymentInline({ commissionId, repId, onLogged }: { commissionId: str
   const [confirmationNumber, setConfirmationNumber] = useState('');
   const [paidDate, setPaidDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
+  const [payments, setPayments] = useState<Array<{ id: string; amount: string; paidDate: string; method: string | null; confirmationNumber: string | null }>>([]);
+
+  async function loadPayments() {
+    try {
+      const res = await fetch(`/api/commission-payments?dealCommissionId=${commissionId}`);
+      const j = await res.json();
+      setPayments(j.payments ?? []);
+    } catch { /* ignore */ }
+  }
+  useEffect(() => { loadPayments(); }, [commissionId]);
 
   async function log() {
     if (!amount) { toast.error('Enter an amount.'); return; }
@@ -1018,25 +1028,56 @@ function LogPaymentInline({ commissionId, repId, onLogged }: { commissionId: str
       if (!res.ok) { toast.error(j.error || 'Failed'); return; }
       toast.success('Payment logged.');
       setOpen(false); setAmount(''); setConfirmationNumber('');
+      loadPayments();
       onLogged();
     } finally { setSaving(false); }
   }
 
-  if (!open) {
-    return <button onClick={() => setOpen(true)} className="text-xs text-primary hover:underline mt-2">+ Log a payment</button>;
+  async function deletePayment(id: string) {
+    if (!confirm('Delete this payment? The paid amount on this commission will be reversed.')) return;
+    const res = await fetch(`/api/commission-payments/${id}`, { method: 'DELETE' });
+    if (!res.ok) { toast.error('Delete failed'); return; }
+    toast.success('Payment removed.');
+    loadPayments();
+    onLogged();
   }
+
   return (
-    <div className="flex flex-wrap items-end gap-2 mt-2 pt-2 border-t border-dashed border-border">
-      <Field label="Amount" className="w-28"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000" /></Field>
-      <Field label="Method" className="w-28">
-        <select value={method} onChange={(e) => setMethod(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
-          {['ach', 'wire', 'check', 'cash', 'zelle', 'other'].map((m) => <option key={m} value={m}>{m.toUpperCase()}</option>)}
-        </select>
-      </Field>
-      <Field label="Confirmation #" className="w-36"><Input value={confirmationNumber} onChange={(e) => setConfirmationNumber(e.target.value)} /></Field>
-      <Field label="Date" className="w-36"><Input type="date" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} /></Field>
-      <Button size="sm" onClick={log} loading={saving}>Log</Button>
-      <Button size="sm" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+    <div className="mt-2 pt-2 border-t border-dashed border-border">
+      {payments.length > 0 && (
+        <div className="mb-2">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Logged payments</div>
+          <div className="space-y-1">
+            {payments.map((p) => (
+              <div key={p.id} className="flex items-center justify-between text-xs bg-muted/30 rounded px-2 py-1.5">
+                <div className="flex items-center gap-3 tabular-nums">
+                  <span className="text-muted-foreground">{new Date(p.paidDate).toLocaleDateString()}</span>
+                  <span className="font-medium text-emerald-700">{formatCurrency(Number(p.amount))}</span>
+                  {p.method && <span className="uppercase text-[10px] text-muted-foreground">{p.method}</span>}
+                  {p.confirmationNumber && <span className="text-muted-foreground">#{p.confirmationNumber}</span>}
+                </div>
+                <button onClick={() => deletePayment(p.id)} className="text-xs text-rose-600 hover:underline">Delete</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {!open ? (
+        <button onClick={() => setOpen(true)} className="text-xs text-primary hover:underline">+ Log a payment</button>
+      ) : (
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="Amount" className="w-28"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000" /></Field>
+          <Field label="Method" className="w-28">
+            <select value={method} onChange={(e) => setMethod(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
+              {['ach', 'wire', 'check', 'cash', 'zelle', 'other'].map((m) => <option key={m} value={m}>{m.toUpperCase()}</option>)}
+            </select>
+          </Field>
+          <Field label="Confirmation #" className="w-36"><Input value={confirmationNumber} onChange={(e) => setConfirmationNumber(e.target.value)} /></Field>
+          <Field label="Date" className="w-36"><Input type="date" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} /></Field>
+          <Button size="sm" onClick={log} loading={saving}>Log</Button>
+          <Button size="sm" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1164,6 +1205,16 @@ function LogLSPaymentInline({ lsCommissionId, onLogged }: { lsCommissionId: stri
   const [confirmationNumber, setConfirmationNumber] = useState('');
   const [paidDate, setPaidDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
+  const [payments, setPayments] = useState<Array<{ id: string; amount: string; paidDate: string; method: string | null; confirmationNumber: string | null }>>([]);
+
+  async function loadPayments() {
+    try {
+      const res = await fetch(`/api/commission-payments?leadSourceCommissionId=${lsCommissionId}`);
+      const j = await res.json();
+      setPayments(j.payments ?? []);
+    } catch { /* ignore */ }
+  }
+  useEffect(() => { loadPayments(); }, [lsCommissionId]);
 
   async function log() {
     if (!amount) { toast.error('Enter an amount.'); return; }
@@ -1177,25 +1228,56 @@ function LogLSPaymentInline({ lsCommissionId, onLogged }: { lsCommissionId: stri
       if (!res.ok) { toast.error(j.error || 'Failed'); return; }
       toast.success('Payment logged.');
       setOpen(false); setAmount(''); setConfirmationNumber('');
+      loadPayments();
       onLogged();
     } finally { setSaving(false); }
   }
 
-  if (!open) {
-    return <button onClick={() => setOpen(true)} className="text-xs text-primary hover:underline">+ Log a payment</button>;
+  async function deletePayment(id: string) {
+    if (!confirm('Delete this payment? The lead source will no longer see it, and the paid amount will be reversed.')) return;
+    const res = await fetch(`/api/commission-payments/${id}`, { method: 'DELETE' });
+    if (!res.ok) { toast.error('Delete failed'); return; }
+    toast.success('Payment removed.');
+    loadPayments();
+    onLogged();
   }
+
   return (
-    <div className="flex flex-wrap items-end gap-2 pt-2 border-t border-dashed border-border">
-      <Field label="Amount" className="w-28"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000" /></Field>
-      <Field label="Method" className="w-28">
-        <select value={method} onChange={(e) => setMethod(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
-          {['ach', 'wire', 'check', 'cash', 'zelle', 'other'].map((m) => <option key={m} value={m}>{m.toUpperCase()}</option>)}
-        </select>
-      </Field>
-      <Field label="Confirmation #" className="w-36"><Input value={confirmationNumber} onChange={(e) => setConfirmationNumber(e.target.value)} /></Field>
-      <Field label="Date" className="w-36"><Input type="date" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} /></Field>
-      <Button size="sm" onClick={log} loading={saving}>Log</Button>
-      <Button size="sm" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+    <div className="mt-2 pt-2 border-t border-dashed border-border">
+      {payments.length > 0 && (
+        <div className="mb-2">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Logged payments</div>
+          <div className="space-y-1">
+            {payments.map((p) => (
+              <div key={p.id} className="flex items-center justify-between text-xs bg-muted/30 rounded px-2 py-1.5">
+                <div className="flex items-center gap-3 tabular-nums">
+                  <span className="text-muted-foreground">{new Date(p.paidDate).toLocaleDateString()}</span>
+                  <span className="font-medium text-emerald-700">{formatCurrency(Number(p.amount))}</span>
+                  {p.method && <span className="uppercase text-[10px] text-muted-foreground">{p.method}</span>}
+                  {p.confirmationNumber && <span className="text-muted-foreground">#{p.confirmationNumber}</span>}
+                </div>
+                <button onClick={() => deletePayment(p.id)} className="text-xs text-rose-600 hover:underline">Delete</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {!open ? (
+        <button onClick={() => setOpen(true)} className="text-xs text-primary hover:underline">+ Log a payment</button>
+      ) : (
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="Amount" className="w-28"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000" /></Field>
+          <Field label="Method" className="w-28">
+            <select value={method} onChange={(e) => setMethod(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
+              {['ach', 'wire', 'check', 'cash', 'zelle', 'other'].map((m) => <option key={m} value={m}>{m.toUpperCase()}</option>)}
+            </select>
+          </Field>
+          <Field label="Confirmation #" className="w-36"><Input value={confirmationNumber} onChange={(e) => setConfirmationNumber(e.target.value)} /></Field>
+          <Field label="Date" className="w-36"><Input type="date" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} /></Field>
+          <Button size="sm" onClick={log} loading={saving}>Log</Button>
+          <Button size="sm" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+        </div>
+      )}
     </div>
   );
 }

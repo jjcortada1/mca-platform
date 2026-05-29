@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { leadSourceCommissions, dealCommissions, deals } from '@/lib/db/schema';
+import { leadSourceCommissions, dealCommissions, deals, commissionPayments } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import type { SessionUser } from '@/lib/auth/context';
@@ -108,6 +108,13 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     await db.update(leadSourceCommissions)
       .set({ isDeleted: true, syncState: 'pending', updatedAt: new Date() })
       .where(eq(leadSourceCommissions.id, params.id));
+
+    // Cascade: any payments logged against this LS commission are also marked
+    // deleted so they no longer appear in the lead source's portal.
+    await db.update(commissionPayments)
+      .set({ isDeleted: true })
+      .where(eq(commissionPayments.leadSourceCommissionId, params.id));
+
     triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true, softDeleted: true });
   } catch (e) { return apiError(e); }

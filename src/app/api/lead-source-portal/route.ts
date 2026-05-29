@@ -73,13 +73,18 @@ export async function GET() {
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
     // Actual logged payments — amount, date, method only. NO deal/merchant data.
+    // Excludes payments that were soft-deleted (e.g. when admin removed the
+    // parent LS commission).
     const paymentRows = await db.select({
       amount: commissionPayments.amount,
       paidDate: commissionPayments.paidDate,
       method: commissionPayments.method,
     })
       .from(commissionPayments)
-      .where(eq(commissionPayments.leadSourceId, ls.id))
+      .where(and(
+        eq(commissionPayments.leadSourceId, ls.id),
+        eq(commissionPayments.isDeleted, false),
+      ))
       .orderBy(desc(commissionPayments.paidDate));
     const payments = paymentRows.map((p) => ({
       amount: Number(p.amount),

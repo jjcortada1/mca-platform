@@ -580,6 +580,7 @@ export const commissionPayments = pgTable(
     amount: numeric('amount', { precision: 14, scale: 2 }).notNull().default('0'),
     paidDate: timestamp('paid_date', { withTimezone: true }).notNull().defaultNow(),
     method: varchar('method', { length: 20 }), // ach | wire | check | cash | zelle | other
+    isDeleted: boolean('is_deleted').notNull().default(false),
     confirmationNumber: varchar('confirmation_number', { length: 120 }),
     notes: text('notes'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
