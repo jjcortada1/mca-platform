@@ -751,13 +751,9 @@ function AssignLeadSourceModal({ deals, leadSources, onClose, onSaved }: { deals
         if (!dRes.ok) { toast.error(dJson.error || 'Could not create deal'); return; }
         dealId = dJson.deal?.id;
         if (!dealId) { toast.error('Deal created but no ID returned'); return; }
-      } else if (f.fundingDate) {
-        // Existing deal — propagate funding date to the deal record.
-        await fetch(`/api/deals/${dealId}`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fundingDate: f.fundingDate }),
-        });
       }
+      // Note: selecting an EXISTING deal only links by ID. The original deal
+      // record is NEVER modified by logging a commission against it.
 
       // Create the LS commission with full math.
       const res = await fetch('/api/lead-source-commissions', {
@@ -768,6 +764,7 @@ function AssignLeadSourceModal({ deals, leadSources, onClose, onSaved }: { deals
           flatAmount: f.mode === 'flat' ? (f.flatAmount || 0) : null,
           grossCommission: f.grossCommission || null,
           brokerFee: f.brokerFee || null,
+          fundingDate: f.fundingDate || null,
           notes: f.notes || null,
         }),
       });

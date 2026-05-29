@@ -32,6 +32,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     title: 'Commissions',
     items: [
       { href: '/commissions', label: 'Commissions', icon: DollarSign, perm: 'commissions.view' },
+      { href: '/payments', label: 'Payments', icon: DollarSign, perm: 'commissions.manage' },
     ],
   },
   {

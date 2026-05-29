@@ -533,6 +533,11 @@ export const leadSourceCommissions = pgTable(
     // Either splitPct (of gross commission) OR flatAmount is used.
     splitPct: numeric('split_pct', { precision: 6, scale: 3 }),
     flatAmount: numeric('flat_amount', { precision: 14, scale: 2 }),
+    // Self-contained math inputs — NEVER read from or written to the parent
+    // deal/rep commission. Entered when the LS commission is logged.
+    grossCommission: numeric('ls_gross_commission', { precision: 14, scale: 2 }),
+    brokerFee: numeric('ls_broker_fee', { precision: 14, scale: 2 }),
+    fundingDate: timestamp('ls_funding_date', { withTimezone: true }),
     // Resolved commission owed (computed from whichever method, stored for convenience)
     commissionAmount: numeric('commission_amount', { precision: 14, scale: 2 }).notNull().default('0'),
     paidAmount: numeric('paid_amount', { precision: 14, scale: 2 }).notNull().default('0'),

@@ -69,14 +69,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       updates.repCommissionAmount = String(newRepAmount);
     }
 
-    // Funding date — also propagate to the parent deal so the LS portal sees it.
+    // Funding date is stored on the rep commission row itself. The parent
+    // deal is NEVER modified by edits here — that record stays as it was.
     if (body.fundingDate !== undefined) {
-      const fd = body.fundingDate ? new Date(body.fundingDate) : null;
-      updates.fundingDate = fd;
-      if (fd) {
-        await db.update(deals).set({ fundingDate: fd })
-          .where(and(eq(deals.id, row.dealId), eq(deals.companyId, ctx.companyId)));
-      }
+      updates.fundingDate = body.fundingDate ? new Date(body.fundingDate) : null;
     }
 
     await db.update(dealCommissions).set(updates).where(eq(dealCommissions.id, params.id));

@@ -30,17 +30,11 @@ export async function GET() {
         dealName: deals.name,
         merchantFirstName: deals.merchantFirstName,
         merchantLastName: deals.merchantLastName,
-        fundedAmount: dealCommissions.fundedAmount,
-        fundingDate: deals.fundingDate,
-        grossCommission: dealCommissions.grossCommission,
-        brokerFee: dealCommissions.brokerFee,
-        repSplitPct: dealCommissions.repSplitPct,
         leadSourceName: leadSources.name,
       })
       .from(leadSourceCommissions)
       .innerJoin(deals, eq(deals.id, leadSourceCommissions.dealId))
       .innerJoin(leadSources, eq(leadSources.id, leadSourceCommissions.leadSourceId))
-      .leftJoin(dealCommissions, eq(dealCommissions.dealId, leadSourceCommissions.dealId))
       .where(and(eq(leadSourceCommissions.companyId, ctx.companyId), eq(leadSourceCommissions.isDeleted, false)))
       .orderBy(desc(leadSourceCommissions.updatedAt));
 
@@ -48,7 +42,7 @@ export async function GET() {
     const data = rows.map((r) => {
       const amt = Number(r.lsc.commissionAmount);
       const paid = Number(r.lsc.paidAmount);
-      const status = resolveAutoStatus(r.lsc.status, null, now); // lead-source has no funding auto-clear unless desired
+      const status = resolveAutoStatus(r.lsc.status, null, now);
       return {
         id: r.lsc.id,
         dealId: r.lsc.dealId,
@@ -56,11 +50,10 @@ export async function GET() {
         merchantName: [r.merchantFirstName, r.merchantLastName].filter(Boolean).join(' ') || null,
         leadSourceId: r.lsc.leadSourceId,
         leadSourceName: r.leadSourceName,
-        fundedAmount: r.fundedAmount,
-        fundingDate: r.fundingDate,
-        grossCommission: r.grossCommission,
-        brokerFee: r.brokerFee,
-        repSplitPct: r.repSplitPct,
+        // All math values come from the LS commission row itself.
+        fundingDate: r.lsc.fundingDate,
+        grossCommission: r.lsc.grossCommission,
+        brokerFee: r.lsc.brokerFee,
         splitPct: r.lsc.splitPct,
         flatAmount: r.lsc.flatAmount,
         commissionAmount: r.lsc.commissionAmount,
@@ -85,6 +78,7 @@ const upsertSchema = z.object({
   flatAmount: z.coerce.number().nonnegative().optional().nullable(),
   grossCommission: z.coerce.number().nonnegative().optional().nullable(),
   brokerFee: z.coerce.number().nonnegative().optional().nullable(),
+  fundingDate: z.string().optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
 });
 
@@ -106,45 +100,12 @@ export async function POST(req: NextRequest) {
     const [ls] = await db.select().from(leadSources).where(eq(leadSources.id, body.leadSourceId)).limit(1);
     if (!ls || ls.companyId !== ctx.companyId) return NextResponse.json({ error: 'Lead source not found' }, { status: 404 });
 
-    // Find or stub the rep commission row so gross/brokerFee live somewhere persistent.
-    const [dc] = await db.select().from(dealCommissions)
-      .where(and(eq(dealCommissions.dealId, body.dealId), eq(dealCommissions.companyId, ctx.companyId))).limit(1);
-    const gross = body.grossCommission != null ? body.grossCommission : (dc ? Number(dc.grossCommission) : 0);
-    const brokerFee = body.brokerFee != null ? body.brokerFee : (dc ? Number(dc.brokerFee) : 0);
-
-    // If caller supplied gross/brokerFee, persist them on the rep commission row
-    // (create one if missing). This keeps both sides of the math consistent.
-    if (body.grossCommission != null || body.brokerFee != null) {
-      if (dc) {
-        const repSplit = Number(dc.repSplitPct) || 0;
-        await db.update(dealCommissions).set({
-          grossCommission: String(gross),
-          brokerFee: String(brokerFee),
-          repCommissionAmount: String(Math.round((gross + brokerFee) * (repSplit / 100) * 100) / 100),
-          syncState: 'pending', updatedAt: new Date(),
-        }).where(eq(dealCommissions.id, dc.id));
-      } else {
-        // No rep row yet — create a stub so the math is recorded. Unassigned rep.
-        await db.insert(dealCommissions).values({
-          companyId: ctx.companyId,
-          dealId: body.dealId,
-          repId: null,
-          fundedAmount: deal.fundedAmount ?? '0',
-          rate: '0',
-          termMonths: '0',
-          termMode: deal.termMode ?? 'weekly',
-          termCount: deal.termCount ?? '0',
-          fees: '0',
-          brokerFee: String(brokerFee),
-          grossCommission: String(gross),
-          repSplitPct: '0',
-          repCommissionAmount: '0',
-          paidAmount: '0',
-          status: 'pending',
-          fundingDate: deal.fundingDate ?? new Date(),
-        });
-      }
-    }
+    // The LS commission is a self-contained record. Gross / broker fee / funding
+    // date live on the LS row itself — they are NEVER written back to the deal
+    // or to the rep commission record. Selecting an existing deal just links
+    // by ID; the original deal stays exactly as it was.
+    const gross = body.grossCommission != null ? body.grossCommission : 0;
+    const brokerFee = body.brokerFee != null ? body.brokerFee : 0;
 
     let commissionAmount = 0;
     if (body.flatAmount != null && body.flatAmount > 0) commissionAmount = body.flatAmount;
@@ -156,25 +117,19 @@ export async function POST(req: NextRequest) {
       leadSourceId: body.leadSourceId,
       splitPct: body.splitPct != null ? String(body.splitPct) : null,
       flatAmount: body.flatAmount != null ? String(body.flatAmount) : null,
+      grossCommission: body.grossCommission != null ? String(body.grossCommission) : null,
+      brokerFee: body.brokerFee != null ? String(body.brokerFee) : null,
+      fundingDate: body.fundingDate ? new Date(body.fundingDate) : null,
       commissionAmount: String(commissionAmount),
       notes: body.notes ?? null,
       syncState: 'pending' as const,
       updatedAt: new Date(),
     };
 
-    const [existing] = await db.select().from(leadSourceCommissions)
-      .where(and(
-        eq(leadSourceCommissions.dealId, body.dealId),
-        eq(leadSourceCommissions.leadSourceId, body.leadSourceId),
-        eq(leadSourceCommissions.companyId, ctx.companyId),
-      )).limit(1);
-
-    let row;
-    if (existing) {
-      [row] = await db.update(leadSourceCommissions).set(values).where(eq(leadSourceCommissions.id, existing.id)).returning();
-    } else {
-      [row] = await db.insert(leadSourceCommissions).values(values).returning();
-    }
+    // Each logged commission is its own permanent record. Never overwrite an
+    // existing one — that would silently destroy history. Admin must use the
+    // PATCH /api/lead-source-commissions/[id] endpoint to modify one.
+    const [row] = await db.insert(leadSourceCommissions).values(values).returning();
     triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true, commission: row });
   } catch (e) { return apiError(e); }

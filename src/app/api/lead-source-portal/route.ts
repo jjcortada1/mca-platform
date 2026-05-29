@@ -40,11 +40,10 @@ export async function GET() {
       notes: leadSourceCommissions.notes,
       updatedAt: leadSourceCommissions.updatedAt,
       isDeleted: leadSourceCommissions.isDeleted,
-      // Join only to fetch funding date — deal name/merchant deliberately omitted.
-      fundingDate: deals.fundingDate,
+      // Funding date lives on the LS commission itself.
+      fundingDate: leadSourceCommissions.fundingDate,
     })
       .from(leadSourceCommissions)
-      .leftJoin(deals, eq(deals.id, leadSourceCommissions.dealId))
       .where(and(
         eq(leadSourceCommissions.leadSourceId, ls.id),
         eq(leadSourceCommissions.isDeleted, false),

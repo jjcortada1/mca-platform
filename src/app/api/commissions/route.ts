@@ -152,17 +152,9 @@ export async function POST(req: NextRequest) {
       updatedAt: new Date(),
     };
 
-    // Upsert by dealId (unique)
-    const [existing] = await db.select().from(dealCommissions)
-      .where(and(eq(dealCommissions.dealId, body.dealId), eq(dealCommissions.companyId, ctx.companyId))).limit(1);
-
-    let row;
-    if (existing) {
-      [row] = await db.update(dealCommissions).set(values)
-        .where(eq(dealCommissions.id, existing.id)).returning();
-    } else {
-      [row] = await db.insert(dealCommissions).values(values).returning();
-    }
+    // Each logged commission is its own permanent record. Never overwrite an
+    // existing one — admin must use the PATCH /[id] endpoint to modify.
+    const [row] = await db.insert(dealCommissions).values(values).returning();
 
     triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true, commission: row });

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { commissionPayments, users, dealCommissions, leadSourceCommissions } from '@/lib/db/schema';
-import { and, eq, desc } from 'drizzle-orm';
+import { commissionPayments, users, dealCommissions, leadSourceCommissions, leadSources, deals } from '@/lib/db/schema';
+import { and, eq, desc, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import type { SessionUser } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
@@ -33,17 +34,39 @@ export async function GET(req: NextRequest) {
     if (dealCommissionId) conds.push(eq(commissionPayments.dealCommissionId, dealCommissionId));
     if (leadSourceCommissionId) conds.push(eq(commissionPayments.leadSourceCommissionId, leadSourceCommissionId));
 
+    // Two separate aliases for users — one for the payee (rep), one for the
+    // admin who created the payment.
+    const rep = alias(users, 'rep');
+    const creator = alias(users, 'creator');
+
     const rows = await db.select({
       p: commissionPayments,
-      repName: users.name,
+      repName: rep.name,
+      leadSourceName: leadSources.name,
+      dealName: deals.name,
+      createdByName: creator.name,
     })
       .from(commissionPayments)
-      .leftJoin(users, eq(users.id, commissionPayments.repId))
+      .leftJoin(rep, eq(rep.id, commissionPayments.repId))
+      .leftJoin(leadSources, eq(leadSources.id, commissionPayments.leadSourceId))
+      .leftJoin(dealCommissions, eq(dealCommissions.id, commissionPayments.dealCommissionId))
+      .leftJoin(leadSourceCommissions, eq(leadSourceCommissions.id, commissionPayments.leadSourceCommissionId))
+      .leftJoin(deals, eq(deals.id, sql`coalesce(${dealCommissions.dealId}, ${leadSourceCommissions.dealId})`))
+      .leftJoin(creator, eq(creator.id, commissionPayments.createdBy))
       .where(and(...conds))
       .orderBy(desc(commissionPayments.paidDate));
 
     return NextResponse.json({
-      payments: rows.map((r) => ({ ...r.p, repName: r.repName })),
+      payments: rows.map((r) => ({
+        ...r.p,
+        repName: r.repName,
+        leadSourceName: r.leadSourceName,
+        dealName: r.dealName,
+        createdByName: r.createdByName,
+        // Derived payee fields for the admin UI.
+        payeeName: r.leadSourceName ?? r.repName ?? '(unassigned)',
+        payeeType: r.leadSourceName ? 'lead_source' : (r.repName ? 'rep' : 'unknown'),
+      })),
     });
   } catch (e) { return apiError(e); }
 }
@@ -52,6 +75,9 @@ const schema = z.object({
   repId: z.string().uuid().nullable().optional(),
   dealCommissionId: z.string().uuid().nullable().optional(),
   leadSourceCommissionId: z.string().uuid().nullable().optional(),
+  // Direct payee — used when the payment isn't tied to a specific commission
+  // record (e.g. a general payout to a lead source).
+  leadSourceId: z.string().uuid().nullable().optional(),
   amount: z.coerce.number().positive(),
   paidDate: z.string().optional().nullable(),
   method: z.enum(['ach', 'wire', 'check', 'cash', 'zelle', 'other']).optional().nullable(),
@@ -80,6 +106,12 @@ export async function POST(req: NextRequest) {
         .where(and(eq(leadSourceCommissions.id, body.leadSourceCommissionId), eq(leadSourceCommissions.companyId, ctx.companyId))).limit(1);
       if (!lsc) return NextResponse.json({ error: 'Lead source commission not found' }, { status: 404 });
       leadSourceId = lsc.leadSourceId;
+    } else if (body.leadSourceId) {
+      // General payout to a lead source not tied to a specific commission.
+      const [ls] = await db.select().from(leadSources)
+        .where(and(eq(leadSources.id, body.leadSourceId), eq(leadSources.companyId, ctx.companyId))).limit(1);
+      if (!ls) return NextResponse.json({ error: 'Lead source not found' }, { status: 404 });
+      leadSourceId = ls.id;
     }
 
     const [row] = await db.insert(commissionPayments).values({
