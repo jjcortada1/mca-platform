@@ -46,8 +46,11 @@ interface Commission {
   dealId: string;
   dealName: string;
   merchantName: string | null;
+  merchantFirstName: string | null;
+  merchantLastName: string | null;
   merchantPhone: string | null;
   merchantEmail: string | null;
+  assignedRepId: string | null;
   repId: string | null;
   repName: string | null;
   fundedAmount: string | null;
@@ -76,6 +79,9 @@ interface Rep { id: string; name: string; role: string; }
 interface LeadSource { id: string; name: string; contactEmail: string | null; contactPhone: string | null; isActive: boolean; }
 interface LSCommission {
   id: string; dealId: string; dealName: string; merchantName: string | null;
+  merchantFirstName: string | null; merchantLastName: string | null;
+  merchantPhone: string | null; merchantEmail: string | null;
+  assignedRepId: string | null;
   leadSourceId: string; leadSourceName: string;
   grossCommission: string | null; brokerFee: string | null;
   splitPct: string | null; flatAmount: string | null;
@@ -242,6 +248,12 @@ export default function CommissionsPage() {
     const res = await fetch(`/api/commissions/${id}`, { method: 'DELETE' });
     if (!res.ok) { toast.error('Delete failed'); return; }
     toast.success('Removed.'); load();
+  }
+
+  async function dealPatch(dealId: string, body: Record<string, unknown>) {
+    const res = await fetch(`/api/deals/${dealId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!res.ok) { const j = await res.json().catch(() => ({})); toast.error(j.error || 'Deal update failed'); return false; }
+    toast.success('Deal updated.'); load(); return true;
   }
 
   return (
@@ -414,7 +426,7 @@ export default function CommissionsPage() {
                         </tr>
                         {expanded === r.id && (
                           <tr className="bg-muted/10"><td colSpan={isAdmin ? 9 : 8} className="px-4 py-3">
-                            <CommissionDetail r={r} isAdmin={isAdmin} onPatch={patch} onDelete={softDelete} />
+                            <CommissionDetail r={r} isAdmin={isAdmin} reps={reps} onPatch={patch} onDelete={softDelete} onDealPatch={dealPatch} />
                           </td></tr>
                         )}
                       </>
@@ -480,7 +492,7 @@ export default function CommissionsPage() {
                         {lsExpanded === r.id && (
                           <tr className="bg-muted/10">
                             <td colSpan={8} className="px-4 py-3">
-                              <LSCommissionDetail r={r} onPatch={lsPatch} onDelete={lsSoftDelete} />
+                              <LSCommissionDetail r={r} reps={reps} onPatch={lsPatch} onDelete={lsSoftDelete} onDealPatch={dealPatch} />
                             </td>
                           </tr>
                         )}
@@ -927,10 +939,12 @@ function StatusRow({ label, count, tone, amount }: { label: string; count: numbe
   );
 }
 
-function CommissionDetail({ r, isAdmin, onPatch, onDelete }: {
+function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: {
   r: Commission; isAdmin: boolean;
+  reps: Rep[];
   onPatch: (id: string, body: Record<string, unknown>) => void;
   onDelete: (id: string) => void;
+  onDealPatch: (dealId: string, body: Record<string, unknown>) => Promise<boolean>;
 }) {
   const [paid, setPaid] = useState(r.paidAmount);
   const [status, setStatus] = useState(r.status);
@@ -941,6 +955,13 @@ function CommissionDetail({ r, isAdmin, onPatch, onDelete }: {
   const [splitPct, setSplitPct] = useState(r.repSplitPct ?? '');
   const [fundingDate, setFundingDate] = useState(r.fundingDate ? r.fundingDate.slice(0, 10) : '');
   const [earlyPayoffDiscount, setEarlyPayoffDiscount] = useState(r.earlyPayoffDiscount ?? '');
+  // Editable deal fields (admin only — patches the parent deal record)
+  const [dealName, setDealName] = useState(r.dealName);
+  const [merchantFirstName, setMerchantFirstName] = useState(r.merchantFirstName ?? '');
+  const [merchantLastName, setMerchantLastName] = useState(r.merchantLastName ?? '');
+  const [merchantPhone, setMerchantPhone] = useState(r.merchantPhone ?? '');
+  const [merchantEmail, setMerchantEmail] = useState(r.merchantEmail ?? '');
+  const [assignedRepId, setAssignedRepId] = useState(r.assignedRepId ?? '');
 
   // Live preview of recomputed rep commission
   const computed = useMemo(() => {
@@ -948,7 +969,19 @@ function CommissionDetail({ r, isAdmin, onPatch, onDelete }: {
     return Math.round((g + b) * (s / 100) * 100) / 100;
   }, [gross, brokerFee, splitPct]);
 
-  function saveAll() {
+  async function saveDeal() {
+    const body: Record<string, unknown> = {};
+    if (dealName !== r.dealName) body.name = dealName;
+    if (merchantFirstName !== (r.merchantFirstName ?? '')) body.merchantFirstName = merchantFirstName || null;
+    if (merchantLastName !== (r.merchantLastName ?? '')) body.merchantLastName = merchantLastName || null;
+    if (merchantPhone !== (r.merchantPhone ?? '')) body.merchantPhone = merchantPhone || null;
+    if (merchantEmail !== (r.merchantEmail ?? '')) body.merchantEmail = merchantEmail || null;
+    if (assignedRepId !== (r.assignedRepId ?? '')) body.assignedRepId = assignedRepId || null;
+    if (Object.keys(body).length === 0) return;
+    await onDealPatch(r.dealId, body);
+  }
+
+  function saveCommission() {
     const body: Record<string, unknown> = { paidAmount: Number(paid), status, notes, earlyPayoffDiscount: earlyPayoffDiscount || null };
     if (gross !== (r.grossCommission ?? '')) body.grossCommission = Number(gross) || 0;
     if (brokerFee !== (r.brokerFee ?? '')) body.brokerFee = Number(brokerFee) || 0;
@@ -960,9 +993,6 @@ function CommissionDetail({ r, isAdmin, onPatch, onDelete }: {
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-        <Detail label="Merchant" value={r.merchantName ?? '—'} />
-        {isAdmin && <Detail label="Phone" value={r.merchantPhone ?? '—'} />}
-        {isAdmin && <Detail label="Email" value={r.merchantEmail ?? '—'} />}
         <Detail label="Funded amount" value={r.fundedAmount ? formatCurrency(Number(r.fundedAmount)) : '—'} />
         <Detail label="Rate" value={r.rate ?? '—'} />
         <Detail label="Term" value={r.termMode && r.termCount ? `${Number(r.termCount)} ${r.termMode === 'daily' ? 'days' : 'weeks'}` : (r.termMonths ? `${r.termMonths} mo` : '—')} />
@@ -972,34 +1002,55 @@ function CommissionDetail({ r, isAdmin, onPatch, onDelete }: {
       </div>
 
       {isAdmin && (
-        <div className="space-y-3 pt-3 border-t border-border">
-          {/* Editable commission math */}
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Commission math (editable)</div>
-          <div className="flex flex-wrap items-end gap-3">
-            <Field label="Total commission ($)" className="w-40"><Input inputMode="decimal" value={gross} onChange={(e) => setGross(e.target.value)} placeholder="10000" /></Field>
-            <Field label="Broker fee ($)" className="w-32"><Input inputMode="decimal" value={brokerFee} onChange={(e) => setBrokerFee(e.target.value)} placeholder="2000" /></Field>
-            <Field label="Rep split %" className="w-28"><Input inputMode="decimal" value={splitPct} onChange={(e) => setSplitPct(e.target.value)} placeholder="50" /></Field>
-            <Field label="Funded date" className="w-40"><Input type="date" value={fundingDate} onChange={(e) => setFundingDate(e.target.value)} /></Field>
-            <div className="px-3 py-2 rounded bg-muted/40 text-xs">
-              <span className="text-muted-foreground">Rep gets: </span>
-              <span className="font-semibold tabular-nums">{formatCurrency(computed)}</span>
+        <>
+          {/* Editable deal details — patches the underlying deal record */}
+          <div className="space-y-3 pt-3 border-t border-border">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Deal details (editable)</div>
+            <div className="flex flex-wrap items-end gap-3">
+              <Field label="Deal name" className="w-56"><Input value={dealName} onChange={(e) => setDealName(e.target.value)} /></Field>
+              <Field label="Assigned rep" className="w-48">
+                <select value={assignedRepId} onChange={(e) => setAssignedRepId(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
+                  <option value="">— Unassigned —</option>
+                  {reps.map((rep) => <option key={rep.id} value={rep.id}>{rep.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Merchant first name" className="w-44"><Input value={merchantFirstName} onChange={(e) => setMerchantFirstName(e.target.value)} /></Field>
+              <Field label="Merchant last name" className="w-44"><Input value={merchantLastName} onChange={(e) => setMerchantLastName(e.target.value)} /></Field>
+              <Field label="Merchant phone" className="w-40"><Input value={merchantPhone} onChange={(e) => setMerchantPhone(e.target.value)} /></Field>
+              <Field label="Merchant email" className="w-56"><Input value={merchantEmail} onChange={(e) => setMerchantEmail(e.target.value)} /></Field>
+              <Button size="sm" onClick={saveDeal}>Save deal details</Button>
             </div>
           </div>
 
-          {/* Status / paid / notes / early payoff */}
-          <div className="flex flex-wrap items-end gap-3">
-            <Field label="Paid amount" className="w-36"><Input inputMode="decimal" value={paid} onChange={(e) => setPaid(e.target.value)} /></Field>
-            <Field label="Status" className="w-40">
-              <select value={status} onChange={(e) => setStatus(e.target.value as Commission['status'])} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
-                <option value="pending">Pending</option><option value="cleared">Cleared</option><option value="clawed_back">Clawed Back</option>
-              </select>
-            </Field>
-            <Field label="Early payoff discount" className="w-44"><Input value={earlyPayoffDiscount} onChange={(e) => setEarlyPayoffDiscount(e.target.value)} placeholder="e.g. 10% or $500" /></Field>
-            <Field label="Notes" className="flex-1 min-w-[180px]"><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
-            <Button size="sm" onClick={saveAll}>Save</Button>
-            <Button size="sm" variant="outline" onClick={() => onDelete(r.id)}>Remove</Button>
+          {/* Editable commission math */}
+          <div className="space-y-3 pt-3 border-t border-border">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Commission math (editable)</div>
+            <div className="flex flex-wrap items-end gap-3">
+              <Field label="Total commission ($)" className="w-40"><Input inputMode="decimal" value={gross} onChange={(e) => setGross(e.target.value)} placeholder="10000" /></Field>
+              <Field label="Broker fee ($)" className="w-32"><Input inputMode="decimal" value={brokerFee} onChange={(e) => setBrokerFee(e.target.value)} placeholder="2000" /></Field>
+              <Field label="Rep split %" className="w-28"><Input inputMode="decimal" value={splitPct} onChange={(e) => setSplitPct(e.target.value)} placeholder="50" /></Field>
+              <Field label="Funded date" className="w-40"><Input type="date" value={fundingDate} onChange={(e) => setFundingDate(e.target.value)} /></Field>
+              <div className="px-3 py-2 rounded bg-muted/40 text-xs">
+                <span className="text-muted-foreground">Rep gets: </span>
+                <span className="font-semibold tabular-nums">{formatCurrency(computed)}</span>
+              </div>
+            </div>
+
+            {/* Status / paid / notes / early payoff */}
+            <div className="flex flex-wrap items-end gap-3">
+              <Field label="Paid amount" className="w-36"><Input inputMode="decimal" value={paid} onChange={(e) => setPaid(e.target.value)} /></Field>
+              <Field label="Status" className="w-40">
+                <select value={status} onChange={(e) => setStatus(e.target.value as Commission['status'])} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
+                  <option value="pending">Pending</option><option value="cleared">Cleared</option><option value="clawed_back">Clawed Back</option>
+                </select>
+              </Field>
+              <Field label="Early payoff discount" className="w-44"><Input value={earlyPayoffDiscount} onChange={(e) => setEarlyPayoffDiscount(e.target.value)} placeholder="e.g. 10% or $500" /></Field>
+              <Field label="Notes" className="flex-1 min-w-[180px]"><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+              <Button size="sm" onClick={saveCommission}>Save commission</Button>
+              <Button size="sm" variant="outline" onClick={() => onDelete(r.id)}>Remove</Button>
+            </div>
           </div>
-        </div>
+        </>
       )}
       {isAdmin && <LogPaymentInline commissionId={r.id} repId={r.repId} onLogged={() => onPatch(r.id, {})} />}
       {r.notes && !isAdmin && <div className="text-xs text-muted-foreground italic">Note: {r.notes}</div>}
@@ -1113,12 +1164,16 @@ function Tile({ label, value, tone }: { label: string; value: string; tone?: 'em
 /* ---------- Lead source commission detail (expanded row) ---------- */
 function LSCommissionDetail({
   r,
+  reps,
   onPatch,
   onDelete,
+  onDealPatch,
 }: {
   r: LSCommission;
+  reps: Rep[];
   onPatch: (id: string, body: Record<string, unknown>) => void | Promise<void>;
   onDelete: (id: string) => void | Promise<void>;
+  onDealPatch: (dealId: string, body: Record<string, unknown>) => Promise<boolean>;
 }) {
   const [paid, setPaid] = useState(String(r.paidAmount));
   const [status, setStatus] = useState<'pending' | 'cleared' | 'clawed_back'>(r.status);
@@ -1131,6 +1186,25 @@ function LSCommissionDetail({
   const [flatAmount, setFlatAmount] = useState(r.flatAmount ?? '');
   const [mode, setMode] = useState<'split' | 'flat'>(r.flatAmount && Number(r.flatAmount) > 0 ? 'flat' : 'split');
   const [fundingDate, setFundingDate] = useState(r.fundingDate ? r.fundingDate.slice(0, 10) : '');
+  // Editable deal fields (admin patches the parent deal record)
+  const [dealName, setDealName] = useState(r.dealName);
+  const [merchantFirstName, setMerchantFirstName] = useState(r.merchantFirstName ?? '');
+  const [merchantLastName, setMerchantLastName] = useState(r.merchantLastName ?? '');
+  const [merchantPhone, setMerchantPhone] = useState(r.merchantPhone ?? '');
+  const [merchantEmail, setMerchantEmail] = useState(r.merchantEmail ?? '');
+  const [assignedRepId, setAssignedRepId] = useState(r.assignedRepId ?? '');
+
+  async function saveDeal() {
+    const body: Record<string, unknown> = {};
+    if (dealName !== r.dealName) body.name = dealName;
+    if (merchantFirstName !== (r.merchantFirstName ?? '')) body.merchantFirstName = merchantFirstName || null;
+    if (merchantLastName !== (r.merchantLastName ?? '')) body.merchantLastName = merchantLastName || null;
+    if (merchantPhone !== (r.merchantPhone ?? '')) body.merchantPhone = merchantPhone || null;
+    if (merchantEmail !== (r.merchantEmail ?? '')) body.merchantEmail = merchantEmail || null;
+    if (assignedRepId !== (r.assignedRepId ?? '')) body.assignedRepId = assignedRepId || null;
+    if (Object.keys(body).length === 0) return;
+    await onDealPatch(r.dealId, body);
+  }
 
   // Live-compute owed amount preview.
   const computed = useMemo(() => {
@@ -1159,6 +1233,25 @@ function LSCommissionDetail({
         <Detail label="Deal" value={r.dealName} />
         <Detail label="Owed (now)" value={formatCurrency(r.owedAmount)} />
         <Detail label="Funded" value={r.fundingDate ? formatDate(r.fundingDate) : '—'} />
+      </div>
+
+      {/* Editable deal details — patches the underlying deal record */}
+      <div className="pt-2 border-t border-dashed border-border">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Deal details (editable)</div>
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="Deal name" className="w-56"><Input value={dealName} onChange={(e) => setDealName(e.target.value)} /></Field>
+          <Field label="Assigned rep" className="w-48">
+            <select value={assignedRepId} onChange={(e) => setAssignedRepId(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
+              <option value="">— Unassigned —</option>
+              {reps.map((rep) => <option key={rep.id} value={rep.id}>{rep.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Merchant first name" className="w-44"><Input value={merchantFirstName} onChange={(e) => setMerchantFirstName(e.target.value)} /></Field>
+          <Field label="Merchant last name" className="w-44"><Input value={merchantLastName} onChange={(e) => setMerchantLastName(e.target.value)} /></Field>
+          <Field label="Merchant phone" className="w-40"><Input value={merchantPhone} onChange={(e) => setMerchantPhone(e.target.value)} /></Field>
+          <Field label="Merchant email" className="w-56"><Input value={merchantEmail} onChange={(e) => setMerchantEmail(e.target.value)} /></Field>
+          <Button size="sm" onClick={saveDeal}>Save deal details</Button>
+        </div>
       </div>
 
       {/* Editable commission math */}

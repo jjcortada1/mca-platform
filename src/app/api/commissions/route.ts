@@ -36,6 +36,7 @@ export async function GET() {
         merchantLastName: deals.merchantLastName,
         merchantPhone: deals.merchantPhone,
         merchantEmail: deals.merchantEmail,
+        assignedRepId: deals.assignedRepId,
         repName: users.name,
       })
       .from(dealCommissions)
@@ -49,7 +50,7 @@ export async function GET() {
       .orderBy(desc(dealCommissions.updatedAt));
 
     const now = new Date();
-    const data = rows.map(({ c, dealName, merchantFirstName, merchantLastName, merchantPhone, merchantEmail, repName }) => {
+    const data = rows.map(({ c, dealName, merchantFirstName, merchantLastName, merchantPhone, merchantEmail, assignedRepId, repName }) => {
       const effectiveStatus = resolveAutoStatus(c.status, c.fundingDate, now);
       const amount = Number(c.repCommissionAmount);
       const paid = Number(c.paidAmount);
@@ -57,8 +58,11 @@ export async function GET() {
         id: c.id,
         dealId: c.dealId,
         dealName,
+        // Joined deal fields exposed individually so the edit panel can prefill.
+        merchantFirstName, merchantLastName,
         merchantName: [merchantFirstName, merchantLastName].filter(Boolean).join(' ') || null,
         merchantPhone, merchantEmail,
+        assignedRepId,
         repId: c.repId, repName,
         fundedAmount: c.fundedAmount, rate: c.rate, termMonths: c.termMonths,
         termMode: c.termMode, termCount: c.termCount,

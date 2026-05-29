@@ -30,6 +30,9 @@ export async function GET() {
         dealName: deals.name,
         merchantFirstName: deals.merchantFirstName,
         merchantLastName: deals.merchantLastName,
+        merchantPhone: deals.merchantPhone,
+        merchantEmail: deals.merchantEmail,
+        assignedRepId: deals.assignedRepId,
         leadSourceName: leadSources.name,
       })
       .from(leadSourceCommissions)
@@ -47,7 +50,12 @@ export async function GET() {
         id: r.lsc.id,
         dealId: r.lsc.dealId,
         dealName: r.dealName,
+        merchantFirstName: r.merchantFirstName,
+        merchantLastName: r.merchantLastName,
         merchantName: [r.merchantFirstName, r.merchantLastName].filter(Boolean).join(' ') || null,
+        merchantPhone: r.merchantPhone,
+        merchantEmail: r.merchantEmail,
+        assignedRepId: r.assignedRepId,
         leadSourceId: r.lsc.leadSourceId,
         leadSourceName: r.leadSourceName,
         // All math values come from the LS commission row itself.
