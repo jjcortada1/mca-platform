@@ -33,6 +33,8 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     items: [
       { href: '/commissions', label: 'Commissions', icon: DollarSign, perm: 'commissions.view' },
       { href: '/payments', label: 'Payments', icon: DollarSign, perm: 'commissions.manage' },
+      { href: '/accounting', label: 'Accounting', icon: DollarSign, perm: 'commissions.manage' },
+      { href: '/preview', label: 'View as…', icon: Users, perm: 'commissions.manage' },
     ],
   },
   {
@@ -66,10 +68,14 @@ export function Sidebar({ user, branding }: { user: SessionUser; branding: Brand
       >
         {branding.logoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={branding.logoUrl} alt={branding.displayName} className="h-8 w-8 rounded-md object-contain" />
+          <img
+            src={branding.logoUrl}
+            alt={branding.displayName}
+            className="h-8 w-8 rounded-md object-contain bg-muted/40 border border-border/60 p-0.5"
+          />
         ) : (
-          <div className="h-8 w-8 rounded-md bg-primary text-primary-foreground flex items-center justify-center shrink-0">
-            <span className="text-sm font-bold tracking-tight">{initial}</span>
+          <div className="h-8 w-8 rounded-md bg-foreground text-background flex items-center justify-center shrink-0 shadow-sm">
+            <span className="text-sm font-semibold tracking-tight">{initial}</span>
           </div>
         )}
         <div className="min-w-0">

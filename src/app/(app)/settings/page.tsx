@@ -183,25 +183,8 @@ function BrandingSection() {
               />
             </Field>
           </div>
-          <Field label="Logo URL (optional)" hint="HTTPS URL to a square logo. Recommended 64×64 PNG or SVG.">
-            <Input
-              value={logoUrl}
-              onChange={(e) => setLogoUrl(e.target.value)}
-              placeholder="https://example.com/logo.png"
-              type="url"
-            />
-            {logoUrl && (
-              <div className="mt-2 inline-flex items-center gap-2 px-2 py-1.5 rounded-md border border-border bg-muted/40">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={logoUrl}
-                  alt="Preview"
-                  className="h-6 w-6 object-contain"
-                  onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')}
-                />
-                <span className="text-xs text-muted-foreground">Logo preview</span>
-              </div>
-            )}
+          <Field label="Logo" hint="Upload a square image (PNG, JPG, SVG, WebP, up to 1MB) — or paste an https URL.">
+            <LogoInput value={logoUrl} onChange={setLogoUrl} />
           </Field>
         </CardContent>
       </Card>
@@ -1773,5 +1756,91 @@ function LeadSourcesSection() {
         </div>
       )}
     </Card>
+  );
+}
+
+/* ============================================================
+   LOGO INPUT — file upload or URL paste
+   ============================================================ */
+function LogoInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const toast = useToast();
+  const [mode, setMode] = useState<'upload' | 'url'>(value && /^https?:\/\//i.test(value) ? 'url' : 'upload');
+  const [uploading, setUploading] = useState(false);
+
+  async function onFile(file: File) {
+    if (file.size > 1_000_000) {
+      toast.error('File is too large. Maximum 1MB.');
+      return;
+    }
+    const allowed = ['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp', 'image/gif'];
+    if (!allowed.includes(file.type)) {
+      toast.error('Unsupported file type. Use PNG, JPG, SVG, WebP, or GIF.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result));
+        r.onerror = () => reject(new Error('Read failed'));
+        r.readAsDataURL(file);
+      });
+      onChange(dataUrl);
+    } catch {
+      toast.error('Could not read file.');
+    } finally { setUploading(false); }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5 text-xs">
+        {(['upload', 'url'] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => setMode(m)}
+            className={`px-3 py-1 rounded font-medium transition ${mode === m ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            {m === 'upload' ? 'Upload file' : 'Paste URL'}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'upload' ? (
+        <div className="flex items-center gap-3">
+          <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-card hover:bg-muted text-sm font-medium transition">
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }}
+            />
+            {uploading ? 'Reading…' : value ? 'Change image' : 'Choose image'}
+          </label>
+          {value && (
+            <button type="button" onClick={() => onChange('')} className="text-xs text-muted-foreground hover:text-foreground">
+              Remove
+            </button>
+          )}
+        </div>
+      ) : (
+        <Input
+          value={/^data:/.test(value) ? '' : value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="https://example.com/logo.png"
+        />
+      )}
+
+      {value && (
+        <div className="mt-2 flex items-center gap-3 px-3 py-2 rounded-md border border-border bg-muted/30">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={value} alt="Logo preview" className="h-10 w-10 rounded-md object-contain bg-card border border-border" />
+          <div className="text-xs">
+            <div className="font-medium">Preview</div>
+            <div className="text-muted-foreground">{value.startsWith('data:') ? 'Uploaded file' : 'External URL'}</div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

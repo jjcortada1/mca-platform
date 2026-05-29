@@ -2,113 +2,92 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Geist — Linear/Vercel modern SaaS standard, loaded from CDN */
+@import url('https://cdn.jsdelivr.net/npm/geist-font@1.4.0/dist/geist.css');
+@import url('https://cdn.jsdelivr.net/npm/geist-font@1.4.0/dist/geist-mono.css');
+
 @layer base {
   :root {
-    /* Surfaces — soft warm off-white, comfortable for long sessions */
-    --background: 220 18% 97.5%;
-    --foreground: 224 28% 12%;
-
+    --background: 220 20% 98.5%;
+    --foreground: 222 47% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 224 28% 12%;
-
+    --card-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 224 28% 12%;
-
-    /* Primary — overridable per company via tenant branding */
-    --primary: 184 70% 22%;
-    --primary-foreground: 220 20% 98%;
-
-    --secondary: 220 15% 95%;
-    --secondary-foreground: 224 28% 12%;
-
-    --muted: 220 15% 95.5%;
-    --muted-foreground: 220 12% 46%;
-
-    --accent: 184 70% 22%;
-    --accent-foreground: 220 20% 98%;
-
+    --popover-foreground: 222 47% 11%;
+    --primary: 222 47% 17%;
+    --primary-foreground: 220 20% 99%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 220 14% 96.5%;
+    --muted-foreground: 222 13% 45%;
+    --accent: 222 47% 17%;
+    --accent-foreground: 220 20% 99%;
     --destructive: 0 75% 47%;
     --destructive-foreground: 220 20% 98%;
-
     --success: 150 60% 32%;
     --warning: 35 85% 50%;
-
-    --border: 220 14% 90%;
-    --input: 220 14% 88%;
-    --ring: 184 70% 30%;
-
+    --border: 220 13% 91%;
+    --input: 220 13% 89%;
+    --ring: 222 47% 25%;
     --radius: 0.5rem;
+    --shadow-xs: 0 1px 2px 0 hsl(222 47% 11% / 0.04);
+    --shadow-sm: 0 1px 2px 0 hsl(222 47% 11% / 0.04), 0 1px 3px 0 hsl(222 47% 11% / 0.06);
+    --shadow-md: 0 4px 6px -1px hsl(222 47% 11% / 0.06), 0 2px 4px -2px hsl(222 47% 11% / 0.05);
+    --shadow-lg: 0 10px 20px -5px hsl(222 47% 11% / 0.08), 0 4px 8px -4px hsl(222 47% 11% / 0.06);
+    --shadow-xl: 0 20px 40px -10px hsl(222 47% 11% / 0.12), 0 8px 16px -8px hsl(222 47% 11% / 0.08);
   }
-
   .dark {
-    --background: 222 28% 8%;
-    --foreground: 220 16% 95%;
-    --card: 222 24% 11%;
-    --card-foreground: 220 16% 95%;
-    --popover: 222 24% 11%;
-    --popover-foreground: 220 16% 95%;
-    --primary: 184 65% 50%;
-    --primary-foreground: 222 28% 8%;
-    --secondary: 222 18% 16%;
-    --secondary-foreground: 220 16% 95%;
-    --muted: 222 18% 16%;
+    --background: 224 30% 7%;
+    --foreground: 220 16% 96%;
+    --card: 224 26% 10%;
+    --card-foreground: 220 16% 96%;
+    --popover: 224 26% 10%;
+    --popover-foreground: 220 16% 96%;
+    --primary: 220 16% 96%;
+    --primary-foreground: 224 30% 7%;
+    --secondary: 224 20% 15%;
+    --secondary-foreground: 220 16% 96%;
+    --muted: 224 20% 15%;
     --muted-foreground: 220 10% 65%;
-    --accent: 184 65% 50%;
-    --accent-foreground: 222 28% 8%;
+    --accent: 220 16% 96%;
+    --accent-foreground: 224 30% 7%;
     --destructive: 0 65% 55%;
-    --destructive-foreground: 220 16% 95%;
-    --border: 222 18% 18%;
-    --input: 222 18% 20%;
-    --ring: 184 65% 50%;
+    --destructive-foreground: 220 16% 96%;
+    --border: 224 20% 17%;
+    --input: 224 20% 19%;
+    --ring: 220 16% 60%;
   }
-
-  * {
-    @apply border-border;
-  }
-
+  * { @apply border-border; }
   html {
     @apply antialiased;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-
   body {
     @apply bg-background text-foreground;
-    /* Apple system font stack — renders as San Francisco on Apple devices,
-       identical to native macOS/iOS apps. Clean fallbacks elsewhere. */
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display',
-      'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
-    font-feature-settings: normal;
+    font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
+    font-feature-settings: 'ss01', 'cv11';
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
   }
-
   h1, h2, h3, h4, h5, h6 {
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text',
-      'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
-    letter-spacing: -0.021em;
-    @apply font-semibold;
+    font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
+    letter-spacing: -0.022em;
+    @apply font-semibold text-foreground;
   }
-  h1 { letter-spacing: -0.026em; }
-  h2 { letter-spacing: -0.023em; }
-
-  /* Code-like content — Apple's SF Mono first */
+  h1 { letter-spacing: -0.03em; font-weight: 600; }
+  h2 { letter-spacing: -0.025em; }
   .font-mono {
-    font-family: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-family: 'Geist Mono', 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
-
   .tabular-nums { font-variant-numeric: tabular-nums; }
-
-  /* Selection color */
   ::selection {
-    background: hsl(var(--primary) / 0.18);
+    background: hsl(var(--primary) / 0.15);
     color: hsl(var(--foreground));
   }
-
-  /* Refined scrollbars */
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
@@ -119,8 +98,6 @@
   ::-webkit-scrollbar-thumb:hover {
     background: hsl(var(--muted-foreground) / 0.4);
   }
-
-  /* Remove default focus ring on autofill in webkit */
   input:-webkit-autofill,
   input:-webkit-autofill:hover,
   input:-webkit-autofill:focus {
@@ -128,59 +105,71 @@
     -webkit-box-shadow: 0 0 0px 1000px hsl(var(--card)) inset;
     transition: background-color 5000s ease-in-out 0s;
   }
+  *:focus-visible {
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 }
 
 @layer components {
-  /* Data table baseline */
-  .data-grid {
-    @apply w-full border-collapse text-sm;
+  .card-refined {
+    @apply rounded-xl border border-border bg-card;
+    box-shadow: var(--shadow-xs);
   }
+  .card-refined:hover {
+    box-shadow: var(--shadow-sm);
+  }
+  .data-grid { @apply w-full border-collapse text-sm; }
   .data-grid th {
     @apply text-left font-medium text-muted-foreground uppercase tracking-wider text-[11px] py-2.5 px-3 border-b border-border bg-muted/30;
   }
   .data-grid td {
     @apply py-3 px-3 border-b border-border/60 align-middle;
   }
-  .data-grid tr:hover td {
-    @apply bg-muted/50;
-  }
-  .data-grid tr:last-child td {
-    @apply border-b-0;
-  }
-
+  .data-grid tr:hover td { @apply bg-muted/50; }
+  .data-grid tr:last-child td { @apply border-b-0; }
   .badge-status {
     @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium;
   }
-
-  /* KPI tile — used on dashboard */
   .kpi-tile {
-    @apply rounded-lg border bg-card p-5 transition-all hover:shadow-sm hover:border-foreground/10;
+    @apply rounded-xl border border-border bg-card p-5 transition-all;
+    box-shadow: var(--shadow-xs);
   }
-
-  /* Sidebar nav item — consistent feel */
+  .kpi-tile:hover {
+    box-shadow: var(--shadow-sm);
+    @apply border-foreground/15;
+  }
   .nav-item {
     @apply flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-all duration-150;
   }
-  .nav-item-active {
-    @apply bg-primary/10 text-primary;
+  .nav-item-active { @apply bg-foreground/[0.06] text-foreground; }
+  .nav-item-inactive { @apply text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground; }
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.5) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.5) 1px, transparent 1px);
+    background-size: 48px 48px;
   }
-  .nav-item-inactive {
-    @apply text-muted-foreground hover:bg-muted hover:text-foreground;
+  .bg-halo {
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -20%, hsl(var(--primary) / 0.08), transparent),
+      radial-gradient(ellipse 60% 50% at 80% 100%, hsl(var(--primary) / 0.05), transparent);
   }
 }
 
-/* Loading skeleton shimmer */
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
 .shimmer {
-  background: linear-gradient(
-    90deg,
-    hsl(var(--muted)) 0%,
-    hsl(var(--muted-foreground) / 0.08) 50%,
-    hsl(var(--muted)) 100%
-  );
+  background: linear-gradient(90deg, hsl(var(--muted)) 0%, hsl(var(--muted-foreground) / 0.08) 50%, hsl(var(--muted)) 100%);
   background-size: 200% 100%;
   animation: shimmer 1.8s ease-in-out infinite;
 }
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up { animation: fade-up 0.4s ease-out both; }

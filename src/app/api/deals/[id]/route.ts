@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { deals, users } from '@/lib/db/schema';
+import { deals, users, dealCommissions } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { requireTenantContext, requirePermission } from '@/lib/auth/context';
 import { upsertDealSchema } from '@/lib/validation/schemas';
@@ -42,6 +42,15 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     await db.update(deals).set(updates)
       .where(and(eq(deals.id, params.id), eq(deals.companyId, ctx.companyId)));
+
+    // If the assigned rep changed, propagate to all commission records for this
+    // deal so the rep's commission view, leaderboard, and "funded by" all match.
+    if (body.assignedRepId !== undefined) {
+      await db.update(dealCommissions)
+        .set({ repId: body.assignedRepId || null, syncState: 'pending', updatedAt: new Date() })
+        .where(and(eq(dealCommissions.dealId, params.id), eq(dealCommissions.companyId, ctx.companyId)));
+    }
+
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }

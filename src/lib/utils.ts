@@ -10,6 +10,9 @@ export function formatCurrency(n: number | string | null | undefined, opts?: { c
   const num = typeof n === 'string' ? parseFloat(n) : n;
   if (Number.isNaN(num)) return '$0';
   if (opts?.compact && Math.abs(num) >= 1000) {
+    if (Math.abs(num) >= 1_000_000) {
+      return `$${(num / 1_000_000).toLocaleString('en-US', { maximumFractionDigits: 2 })}M`;
+    }
     return `$${(num / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 })}K`;
   }
   return num.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });

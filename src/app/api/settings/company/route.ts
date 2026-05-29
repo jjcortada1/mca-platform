@@ -34,7 +34,13 @@ const patchSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   productName: z.string().max(100).optional().nullable(),
   displayName: z.string().max(200).optional().nullable(),
-  logoUrl: z.string().url().max(2048).optional().nullable().or(z.literal('')),
+  // Accepts either an https URL OR a base64 data URI (image/png|jpeg|svg|webp).
+  // Capped at ~1MB after base64 encoding (~750KB raw) so the DB row stays small.
+  logoUrl: z.string().max(1_400_000).refine((v) => {
+    if (!v) return true;
+    if (/^https?:\/\//i.test(v)) return v.length <= 2048;
+    return /^data:image\/(png|jpe?g|svg\+xml|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v);
+  }, { message: 'Logo must be an https URL or an uploaded image file (PNG/JPG/SVG/WebP, max ~1MB).' }).optional().nullable().or(z.literal('')),
   // HSL string format: "hue saturation% lightness%" e.g. "184 70% 22%"
   primaryColor: z
     .string()

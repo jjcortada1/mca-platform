@@ -101,6 +101,8 @@ export default function CommissionsPage() {
   const toast = useToast();
   const [tab, setTab] = useState<Tab>('rep');
   const [isAdmin, setIsAdmin] = useState(false);
+  const [myUserId, setMyUserId] = useState<string | null>(null);
+  const [adminViewAs, setAdminViewAs] = useState<'all' | 'mine'>('all');
 
   const [rows, setRows] = useState<Commission[]>([]);
   const [lsRows, setLsRows] = useState<LSCommission[]>([]);
@@ -127,6 +129,7 @@ export default function CommissionsPage() {
         const role = me?.user?.role;
         admin = role === 'company_admin' || role === 'master_admin';
         setIsAdmin(admin);
+        setMyUserId(me?.user?.id ?? null);
       }
       const cRes = await fetch('/api/commissions');
       setRows((await cRes.json()).commissions ?? []);
@@ -197,8 +200,13 @@ export default function CommissionsPage() {
   // is 50%+ paid in (renewal-eligible). "Active" = funded + paying down but not
   // yet refi-eligible.
   const filteredRows = useMemo(() => {
-    if (filter === 'all') return rows;
-    return rows.filter((r) => {
+    let base = rows;
+    // Admin "My commissions" filter — show only commissions for deals JJ is assigned to.
+    if (isAdmin && adminViewAs === 'mine' && myUserId) {
+      base = base.filter((r) => r.repId === myUserId || r.assignedRepId === myUserId);
+    }
+    if (filter === 'all') return base;
+    return base.filter((r) => {
       const pd = computePaydown({
         fundedAmount: r.fundedAmount, factorRate: r.rate, termMode: r.termMode,
         termCount: r.termCount, fundingDate: r.fundingDate, amountCollected: null,
@@ -213,7 +221,7 @@ export default function CommissionsPage() {
         default: return true;
       }
     });
-  }, [rows, filter]);
+  }, [rows, filter, isAdmin, adminViewAs, myUserId]);
 
   // Lead source commission totals (mirrors rep stats).
   const lsStats = useMemo(() => {
@@ -377,7 +385,18 @@ export default function CommissionsPage() {
           ) : (
             <>
             {/* Filter bar — sort between active, refis, etc. */}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 items-center">
+              {isAdmin && (
+                <div className="flex rounded-full border border-border bg-card p-1 mr-2">
+                  {(['all', 'mine'] as const).map((v) => (
+                    <button key={v} onClick={() => setAdminViewAs(v)}
+                      className={cn('px-3 py-1 rounded-full text-xs font-medium transition',
+                        adminViewAs === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                      {v === 'all' ? 'All commissions' : 'My commissions'}
+                    </button>
+                  ))}
+                </div>
+              )}
               {([
                 ['all', 'All'], ['active', 'Active'], ['refi', 'Refi eligible'],
                 ['pending', 'Pending'], ['paid', 'Paid'],

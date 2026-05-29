@@ -570,6 +570,35 @@ export const leadSourceCommissions = pgTable(
  * Logged commission payments — a payout actually sent to a rep (or recorded
  * against a specific deal commission). Builds the payment history.
  */
+/**
+ * Accounting ledger — admin records actual money in/out per deal. Separate
+ * from commission tracking. Two types of entries:
+ *   - 'received': money received from the funder for a funded deal
+ *   - 'sent_back': money refunded/returned (clawback, refund)
+ */
+export const accountingEntries = pgTable(
+  'accounting_entries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    dealId: uuid('deal_id').references(() => deals.id, { onDelete: 'set null' }),
+    entryType: varchar('entry_type', { length: 20 }).notNull(),  // received | sent_back
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull().default('0'),
+    entryDate: timestamp('entry_date', { withTimezone: true }).notNull().defaultNow(),
+    method: varchar('method', { length: 20 }),  // ach | wire | check | cash | zelle | other
+    referenceNumber: varchar('reference_number', { length: 120 }),
+    notes: text('notes'),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    companyIdx: index('accounting_entries_company_idx').on(t.companyId),
+    dealIdx: index('accounting_entries_deal_idx').on(t.dealId),
+  })
+);
+
 export const commissionPayments = pgTable(
   'commission_payments',
   {
@@ -789,4 +818,5 @@ export type DealCommissionRow = typeof dealCommissions.$inferSelect;
 export type LeadSourceCommissionRow = typeof leadSourceCommissions.$inferSelect;
 export type SheetSyncConfigRow = typeof sheetSyncConfig.$inferSelect;
 export type CommissionPaymentRow = typeof commissionPayments.$inferSelect;
+export type AccountingEntryRow = typeof accountingEntries.$inferSelect;
 export type CommissionDrawRow = typeof commissionDraws.$inferSelect;
