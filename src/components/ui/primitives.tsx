@@ -10,21 +10,21 @@ import { cn } from '@/lib/utils';
    ============================================================ */
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]',
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium ring-offset-background transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]',
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow',
+        default: 'bg-foreground text-background shadow-[inset_0_-1px_0_0_hsl(0_0%_0%/0.12),_0_1px_2px_0_hsl(222_47%_11%/0.08)] hover:bg-foreground/90',
         destructive: 'bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90',
-        outline: 'border border-input bg-card shadow-sm hover:bg-muted hover:border-foreground/20',
+        outline: 'border border-border bg-card text-foreground shadow-[0_1px_2px_0_hsl(222_47%_11%/0.04)] hover:bg-muted/50 hover:border-foreground/20',
         secondary: 'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80',
         ghost: 'hover:bg-muted hover:text-foreground',
-        link: 'text-primary underline-offset-4 hover:underline',
+        link: 'text-foreground underline-offset-4 hover:underline',
       },
       size: {
         default: 'h-9 px-4',
         sm: 'h-8 rounded-md px-3 text-xs',
-        lg: 'h-11 rounded-md px-8',
+        lg: 'h-11 rounded-lg px-8 text-[15px]',
         icon: 'h-9 w-9',
       },
     },
@@ -67,10 +67,11 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
       type={type}
       ref={ref}
       className={cn(
-        'flex h-10 w-full rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm transition-colors',
+        'flex h-10 w-full rounded-lg border border-input bg-card px-3 py-1 text-sm transition-all',
+        'shadow-[0_1px_2px_0_hsl(222_47%_11%/0.04)]',
         'file:border-0 file:bg-transparent file:text-sm file:font-medium',
-        'placeholder:text-muted-foreground',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-transparent',
+        'placeholder:text-muted-foreground/60',
+        'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 focus-visible:border-foreground/30',
         'disabled:cursor-not-allowed disabled:opacity-50 tabular-nums',
         className
       )}
@@ -213,7 +214,9 @@ export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElemen
   return (
     <div
       className={cn(
-        'rounded-lg border bg-card text-card-foreground shadow-sm transition-shadow',
+        'rounded-xl border border-border bg-card text-card-foreground transition-shadow',
+        'shadow-[0_1px_2px_0_hsl(222_47%_11%/0.04)]',
+        'hover:shadow-[0_1px_3px_0_hsl(222_47%_11%/0.06),_0_4px_8px_-2px_hsl(222_47%_11%/0.06)]',
         className
       )}
       {...props}
@@ -221,19 +224,19 @@ export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElemen
   );
 }
 export function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('flex flex-col gap-1 p-5 border-b border-border', className)} {...props} />;
+  return <div className={cn('flex flex-col gap-1 p-6 border-b border-border', className)} {...props} />;
 }
 export function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <h3 className={cn('text-base font-medium leading-none tracking-tight', className)} {...props} />;
+  return <h3 className={cn('text-base font-semibold leading-none tracking-tight', className)} {...props} />;
 }
 export function CardDescription({ className, ...props }: React.HTMLAttributes<HTMLParagraphElement>) {
-  return <p className={cn('text-sm text-muted-foreground', className)} {...props} />;
+  return <p className={cn('text-sm text-muted-foreground leading-relaxed', className)} {...props} />;
 }
 export function CardContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('p-5', className)} {...props} />;
+  return <div className={cn('p-6', className)} {...props} />;
 }
 export function CardFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('flex items-center p-5 pt-0', className)} {...props} />;
+  return <div className={cn('flex items-center p-6 pt-0', className)} {...props} />;
 }
 
 /* ============================================================
@@ -307,16 +310,23 @@ export function PageHeader({
   title,
   description,
   actions,
+  eyebrow,
 }: {
   title: string;
   description?: string;
   actions?: React.ReactNode;
+  eyebrow?: string;
 }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 pb-6 border-b border-border">
       <div className="min-w-0">
-        <h1 className="text-2xl font-semibold tracking-tight truncate">{title}</h1>
-        {description && <p className="text-sm text-muted-foreground mt-1.5">{description}</p>}
+        {eyebrow && (
+          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-1.5">
+            {eyebrow}
+          </div>
+        )}
+        <h1 className="text-[26px] leading-[1.15] font-semibold tracking-tight truncate">{title}</h1>
+        {description && <p className="text-[15px] text-muted-foreground mt-2 leading-relaxed max-w-2xl">{description}</p>}
       </div>
       {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
     </div>

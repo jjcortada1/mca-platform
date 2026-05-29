@@ -60,27 +60,27 @@ export function Sidebar({ user, branding }: { user: SessionUser; branding: Brand
   const userInitial = (user.name || user.email || 'U').charAt(0).toUpperCase();
 
   return (
-    <aside className="w-60 border-r border-border bg-card flex flex-col shrink-0 h-screen sticky top-0">
+    <aside className="w-60 border-r border-border bg-muted/30 flex flex-col shrink-0 h-screen sticky top-0">
       {/* Brand header */}
       <Link
         href="/dashboard"
-        className="flex items-center gap-2.5 px-4 py-4 border-b border-border hover:bg-muted/40 transition-colors"
+        className="flex items-center gap-2.5 px-4 py-3.5 border-b border-border hover:bg-card transition-colors"
       >
         {branding.logoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={branding.logoUrl}
             alt={branding.displayName}
-            className="h-8 w-8 rounded-md object-contain bg-muted/40 border border-border/60 p-0.5"
+            className="h-9 w-9 rounded-lg object-contain bg-card border border-border p-1 shadow-[0_1px_2px_0_hsl(222_47%_11%/0.04)]"
           />
         ) : (
-          <div className="h-8 w-8 rounded-md bg-foreground text-background flex items-center justify-center shrink-0 shadow-sm">
+          <div className="h-9 w-9 rounded-lg bg-foreground text-background flex items-center justify-center shrink-0 shadow-[0_1px_2px_0_hsl(222_47%_11%/0.08)]">
             <span className="text-sm font-semibold tracking-tight">{initial}</span>
           </div>
         )}
         <div className="min-w-0">
-          <div className="text-sm font-semibold tracking-tight truncate">{branding.productName}</div>
-          <div className="text-[11px] text-muted-foreground truncate">{branding.displayName}</div>
+          <div className="text-sm font-semibold tracking-tight truncate leading-tight">{branding.productName}</div>
+          <div className="text-[10.5px] text-muted-foreground truncate mt-0.5">{branding.displayName}</div>
         </div>
       </Link>
 
@@ -146,14 +146,14 @@ export function Sidebar({ user, branding }: { user: SessionUser; branding: Brand
       </nav>
 
       {/* User footer */}
-      <div className="border-t border-border p-3">
-        <div className="flex items-center gap-2.5 px-2 py-2 mb-1">
-          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 ring-1 ring-border">
-            <span className="text-xs font-semibold text-foreground/70">{userInitial}</span>
+      <div className="border-t border-border p-2.5">
+        <div className="flex items-center gap-2.5 px-2 py-1.5 mb-1">
+          <div className="h-8 w-8 rounded-lg bg-foreground text-background flex items-center justify-center shrink-0">
+            <span className="text-xs font-semibold">{userInitial}</span>
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium truncate">{user.name}</div>
-            <div className="text-[11px] text-muted-foreground truncate">{user.email}</div>
+            <div className="text-sm font-medium truncate leading-tight">{user.name}</div>
+            <div className="text-[10.5px] text-muted-foreground truncate mt-0.5">{user.email}</div>
           </div>
         </div>
         <button
