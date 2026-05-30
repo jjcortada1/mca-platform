@@ -709,8 +709,10 @@ function BulkImportModal({
 
   function onFileChosen(f: File | null) {
     if (!f) return;
-    if (!f.name.toLowerCase().endsWith('.csv')) {
-      alert('File must be a .csv file.');
+    const lower = f.name.toLowerCase();
+    const ok = lower.endsWith('.csv') || lower.endsWith('.xlsx') || lower.endsWith('.xls');
+    if (!ok) {
+      alert('File must be .csv, .xlsx, or .xls');
       return;
     }
     setFile(f);
@@ -745,7 +747,7 @@ function BulkImportModal({
         <div className="px-6 py-4 border-b border-border flex items-center justify-between">
           <div>
             <h2 className="text-base font-semibold">Add funders</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Type them in directly, or upload a CSV.</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Type them in directly, or upload a CSV or Excel file.</p>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1.5 rounded">
             <X className="h-4 w-4" />
@@ -755,7 +757,7 @@ function BulkImportModal({
         {/* Mode tabs */}
         <div className="px-6 pt-4">
           <div className="inline-flex bg-muted rounded-lg p-1">
-            {([['manual', 'Type them in'], ['csv', 'Upload CSV']] as const).map(([m, label]) => (
+            {([['manual', 'Type them in'], ['csv', 'Upload file']] as const).map(([m, label]) => (
               <button
                 key={m}
                 onClick={() => setMode(m)}
@@ -830,8 +832,14 @@ function BulkImportModal({
               </div>
               {/* Step 2 upload */}
               <div className="rounded-lg border border-border bg-muted/30 p-4">
-                <div className="text-sm font-medium mb-2">2. Upload your filled CSV</div>
-                <input type="file" ref={fileInputRef} accept=".csv,text/csv" onChange={(e) => onFileChosen(e.target.files?.[0] ?? null)} className="hidden" />
+                <div className="text-sm font-medium mb-2">2. Upload your filled file</div>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                  onChange={(e) => onFileChosen(e.target.files?.[0] ?? null)}
+                  className="hidden"
+                />
                 <div
                   onClick={() => fileInputRef.current?.click()}
                   onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -847,7 +855,8 @@ function BulkImportModal({
                   ) : (
                     <div className="text-sm text-muted-foreground">
                       <Upload className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground/70" />
-                      Click to pick a file, or drag &amp; drop a CSV here
+                      Click to pick a file, or drag &amp; drop here
+                      <div className="text-[11px] text-muted-foreground/70 mt-1">.csv, .xlsx, or .xls</div>
                     </div>
                   )}
                 </div>

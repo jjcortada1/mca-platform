@@ -8,6 +8,11 @@ import { eq, and, inArray, sql } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
 import { z } from 'zod';
+import * as XLSX from 'xlsx';
+
+// Node runtime so large file uploads work (xlsx parsing is CPU-bound, not edge).
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 /**
  * Bulk-import funders from CSV.
@@ -146,7 +151,30 @@ export async function POST(req: NextRequest) {
     const file = formData.get('file') as File | null;
     if (!file) return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
 
-    const text = await file.text();
+    // Accept .csv, .xlsx, .xls. Convert spreadsheets to CSV in-memory so the
+    // existing parser handles them uniformly.
+    const filename = (file.name || '').toLowerCase();
+    let text: string;
+    if (filename.endsWith('.xlsx') || filename.endsWith('.xls') ||
+        file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+        file.type === 'application/vnd.ms-excel') {
+      try {
+        const buf = Buffer.from(await file.arrayBuffer());
+        const wb = XLSX.read(buf, { type: 'buffer' });
+        const sheetName = wb.SheetNames[0];
+        if (!sheetName) return NextResponse.json({ error: 'Spreadsheet has no sheets' }, { status: 400 });
+        const sheet = wb.Sheets[sheetName];
+        text = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+      } catch (err) {
+        return NextResponse.json({
+          error: 'Could not read spreadsheet. Make sure it is a valid .xlsx or .xls file.',
+        }, { status: 400 });
+      }
+    } else {
+      // CSV / plain text path
+      text = await file.text();
+    }
+
     const { headers, rows, errors: parseErrors } = parseCSV(text);
 
     if (parseErrors.length) {
