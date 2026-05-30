@@ -14,8 +14,8 @@ interface PublicBranding {
 }
 
 const FALLBACK: PublicBranding = {
-  productName: 'MCA Platform',
-  displayName: 'MCA Platform',
+  productName: 'Cortada',
+  displayName: 'Cortada Capital Group',
   logoUrl: null,
   primaryColor: '222 47% 17%',
 };
@@ -76,23 +76,14 @@ function LoginInner() {
       <div aria-hidden className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-background to-transparent pointer-events-none" />
 
       <div className="relative w-full max-w-[400px] animate-fade-up">
-        {/* Brand mark */}
-        <div className="flex flex-col items-center mb-10">
-          {branding.logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={branding.logoUrl}
-              alt={branding.displayName}
-              className="h-14 w-14 rounded-xl object-contain bg-card border border-border p-1.5 shadow-sm"
-            />
-          ) : (
-            <div className="h-14 w-14 rounded-xl bg-foreground text-background flex items-center justify-center shadow-sm">
-              <span className="text-xl font-semibold tracking-tight">
-                {branding.productName.charAt(0).toUpperCase()}
-              </span>
-            </div>
-          )}
-          <h1 className="mt-4 text-[22px] font-semibold tracking-tight">{branding.productName}</h1>
+        {/* Brand mark — full Cortada logo with text */}
+        <div className="flex flex-col items-center mb-8">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={branding.logoUrl || '/brand/cortada-full.png'}
+            alt={branding.displayName}
+            className="h-16 sm:h-20 w-auto object-contain"
+          />
         </div>
 
         {/* Card */}

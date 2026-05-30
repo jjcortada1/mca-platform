@@ -40,16 +40,16 @@ export default async function DashboardPage() {
   ];
 
   return (
-    <div className="space-y-10 animate-fade-up">
+    <div className="space-y-7 sm:space-y-10 animate-fade-up">
       {/* Hero greeting */}
       <div>
         <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
           Welcome back
         </div>
-        <h1 className="text-[32px] leading-[1.15] font-semibold tracking-tight mt-1.5">
+        <h1 className="text-[24px] sm:text-[32px] leading-[1.15] font-semibold tracking-tight mt-1.5">
           {firstName}.
         </h1>
-        <p className="text-[15px] text-muted-foreground mt-2">
+        <p className="text-sm sm:text-[15px] text-muted-foreground mt-2">
           Here's what's happening across your brokerage in {monthLabel}.
         </p>
       </div>

@@ -11,10 +11,10 @@ export interface Branding {
 }
 
 export const DEFAULT_BRANDING: Branding = {
-  productName: 'MCA Platform',
-  displayName: 'MCA Platform',
+  productName: 'Cortada',
+  displayName: 'Cortada Capital Group',
   logoUrl: null,
-  primaryColor: '184 70% 22%',
+  primaryColor: '222 47% 17%',
   emailSignature: null,
 };
 
