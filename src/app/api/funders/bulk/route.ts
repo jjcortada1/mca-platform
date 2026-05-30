@@ -30,14 +30,19 @@ export const dynamic = 'force-dynamic';
 const CREDIT_TIERS = ['unknown', 'under_550', '550_599', '600_649', '650_plus'] as const;
 const SUBMISSION_METHODS = ['email', 'portal'] as const;
 
+// Lowercase helper for forgiving enum matching.
+const toLower = (s: unknown) => (typeof s === 'string' ? s.toLowerCase().trim() : s);
+
 const rowSchema = z.object({
   // REQUIRED
   name: z.string().min(1, 'name is required'),
   tiers: z.string().optional(),
-  submission_method: z.enum(SUBMISSION_METHODS).optional(),
-  // NEW simplified — accept either submission_email or contact_email_1
+  // Forgiving — accepts "Email", "EMAIL", "email", " email " etc.
+  submission_method: z.preprocess(toLower, z.enum(SUBMISSION_METHODS).optional()),
+  // submission_email = where deals are SHOPPED to. Supports multiple values
+  // separated by ; , or |.
   submission_email: z.string().optional(),
-  // NEW simplified single-contact fields
+  // contact_* = a human contact for the funder. NEVER used for shopping deals.
   contact_name: z.string().optional(),
   contact_phone: z.string().optional(),
   contact_email: z.string().optional(),
@@ -46,14 +51,21 @@ const rowSchema = z.object({
   // OPTIONAL ADVANCED
   supports_reverse_consolidation: z.string().optional(),
   min_revenue: z.string().optional(),
-  // Accept either snake_case or generic 'credit' label
-  min_credit_tier: z.enum(CREDIT_TIERS).optional(),
+  // Forgiving — accepts "650_plus", "650 plus", "650+", etc.
+  min_credit_tier: z.preprocess(
+    (s) => {
+      if (typeof s !== 'string') return s;
+      const v = s.toLowerCase().trim().replace(/\s+/g, '_').replace(/\+/g, '_plus');
+      return v || undefined;
+    },
+    z.enum(CREDIT_TIERS).optional()
+  ),
   credit: z.string().optional(),
   max_positions: z.string().optional(),
   restricted_states: z.string().optional(),
   restricted_industries: z.string().optional(),
   additional_rules: z.string().optional(),
-  // Multiple funder-level emails / phones (pipe- or comma-separated)
+  // Multiple funder-level emails / phones (pipe- semi- or comma-separated)
   emails: z.string().optional(),
   phones: z.string().optional(),
   // Named role contacts
@@ -241,8 +253,16 @@ export async function POST(req: NextRequest) {
           .filter(Boolean)
           .join('\n');
 
-        // Multiple emails / phones (pipe- or comma-separated columns)
-        const emails = parseList(parsed.emails || '').filter(Boolean);
+        // funders.emails = where deals are SHOPPED to. Pulled from submission_email
+        // (preferred — clearer intent) OR the legacy `emails` column if used.
+        // Multiple values separated by ; , or |.
+        const shoppingEmails = [
+          ...parseList(parsed.submission_email || ''),
+          ...parseList(parsed.emails || ''),
+        ]
+          .map((e) => e.trim().toLowerCase())
+          .filter((e) => e && e.includes('@'));
+        const dedupedShoppingEmails = Array.from(new Set(shoppingEmails));
         const phones = parseList(parsed.phones || '').filter(Boolean);
 
         // Insert funder
@@ -254,7 +274,7 @@ export async function POST(req: NextRequest) {
           minRevenue,
           maxPositions,
           minCreditTier,
-          emails: emails.length ? emails : null,
+          emails: dedupedShoppingEmails.length ? dedupedShoppingEmails : null,
           phones: phones.length ? phones : null,
           notes: combinedNotes || null,
           isActive: true,
@@ -267,13 +287,13 @@ export async function POST(req: NextRequest) {
           ).onConflictDoNothing();
         }
 
-        // Contacts — accept simplified single-contact OR legacy 1-3 form
-        // Priority: simplified contact_name/phone/email + submission_email become contact 1
+        // Contacts — humans tied to this funder. NEVER used for shopping (that's
+        // what funders.emails is for). Stored so JJ has someone to call.
         const contactsToInsert: { funderId: string; name: string; role: string | null; email: string | null; phone: string | null; isPrimary: boolean; sortOrder: number }[] = [];
 
         const simpleName = parsed.contact_name?.trim();
         const simplePhone = parsed.contact_phone?.trim();
-        const simpleEmail = parsed.contact_email?.trim() || parsed.submission_email?.trim();
+        const simpleEmail = parsed.contact_email?.trim();
         if (simpleName || simplePhone || simpleEmail) {
           contactsToInsert.push({
             funderId: funder.id,
@@ -400,7 +420,7 @@ export async function GET() {
     'Acme Funding',                    // name
     'A-Paper',                         // tiers
     'email',                           // submission_method
-    'submissions@acmefunding.com',     // submission_email
+    'submissions@acmefunding.com',     // submission_email (one)
     '',                                // contact_name (optional)
     '',                                // contact_phone
     '',                                // contact_email
@@ -409,23 +429,23 @@ export async function GET() {
     '', '', '', '', '', '', '',
   ];
 
-  // Sample 2: full example with restrictions
+  // Sample 2: multiple submission emails + multiple tiers
   const fullRow = [
-    'Velocity Capital',                              // name
-    'A-Paper;Subprime',                              // tiers (semicolon-separated)
-    'email',                                         // submission_method
-    'submissions@velocitycap.com',                   // submission_email
-    'Sarah Lee',                                     // contact_name
-    '555-123-4567',                                  // contact_phone
-    'sarah@velocitycap.com',                         // contact_email
-    'Fast funder, decisions same-day',               // notes
-    '25000',                                         // min_revenue
-    '600_649',                                       // min_credit_tier
-    '3',                                             // max_positions
-    'CA;NY',                                         // restricted_states
-    'Cannabis;Adult Entertainment',                  // restricted_industries
-    'true',                                          // supports_reverse_consolidation
-    'No 1099 contractors; min 6 months in business', // additional_rules
+    'Velocity Capital',                                                // name
+    'A-Paper;Subprime',                                                // tiers — multiple separated by ;
+    'email',                                                           // submission_method
+    'submissions@velocitycap.com;intake@velocitycap.com',              // submission_email — multiple
+    'Sarah Lee',                                                       // contact_name (separate; NOT used to shop deals)
+    '555-123-4567',                                                    // contact_phone
+    'sarah@velocitycap.com',                                           // contact_email
+    'Fast funder, decisions same-day',                                 // notes
+    '25000',                                                           // min_revenue (plain number)
+    '600_649',                                                         // min_credit_tier
+    '3',                                                               // max_positions
+    'CA;NY',                                                           // restricted_states
+    'Cannabis;Adult Entertainment',                                    // restricted_industries
+    'TRUE',                                                            // supports_reverse_consolidation (TRUE/FALSE/yes/no/1/0)
+    'No 1099 contractors; min 6 months in business',                   // additional_rules
   ];
 
   function csvRow(row: string[]) {
@@ -437,23 +457,30 @@ export async function GET() {
     csvRow(minimalRow),
     csvRow(fullRow),
     '',
-    '# REQUIRED columns (first 8): name, tiers, submission_method, submission_email,',
-    '#                              contact_name, contact_phone, contact_email, notes',
-    '# - Only "name" must be filled per row. The rest are encouraged but allowed empty.',
-    '# - "tiers" is a list separated by ; or |  (e.g. "A-Paper;Subprime")',
-    '# - "submission_method" must be: email or portal',
+    '# REQUIRED columns: only "name" must be filled.',
+    '# All others are optional but encouraged.',
     '#',
-    '# OPTIONAL ADVANCED columns:',
-    '# - "min_revenue" is a plain number (no $ or commas). Leave empty = no minimum.',
-    '# - "min_credit_tier" must be one of: unknown, under_550, 550_599, 600_649, 650_plus',
-    '# - "max_positions" — leave empty for no max (defaults to 99)',
-    '# - "restricted_states" — 2-letter codes separated by ; or |  (e.g. "CA;NY")',
-    '# - "restricted_industries" — names separated by ; or | (free text, matches industries set in Settings → Match options)',
-    '# - "supports_reverse_consolidation" accepts true/false/yes/no/1/0',
-    '# - "additional_rules" — free text, appended to notes',
+    '# IMPORTANT — how emails work:',
+    '# - "submission_email" = where deals are sent when you shop them. You can list MULTIPLE',
+    '#   addresses separated by ; or | (e.g. "submissions@x.com;intake@x.com"). Every',
+    '#   address gets the email when you submit a deal.',
+    '# - "contact_email" = a human contact (e.g. your ISO rep there). NEVER used for shopping.',
     '#',
-    '# Tiers that don\'t exist will be created automatically.',
-    '# Empty optional fields are treated as no restriction.',
+    '# MULTIPLE TIERS:',
+    '# - "tiers" supports multiple values separated by ; or | (e.g. "A-Paper;Subprime").',
+    '# - A funder will appear in every tier listed.',
+    '# - Tiers that don\'t exist yet are created automatically.',
+    '#',
+    '# Other notes:',
+    '# - "submission_method" accepts: email, portal (case-insensitive).',
+    '# - "min_revenue" is a plain number (no $ or commas). Empty = no minimum.',
+    '# - "min_credit_tier" must be one of: unknown, under_550, 550_599, 600_649, 650_plus.',
+    '# - "max_positions" — empty = no max (defaults to 99).',
+    '# - "restricted_states" — 2-letter codes separated by ; or | (e.g. "CA;NY").',
+    '# - "restricted_industries" — names separated by ; or | (free text).',
+    '# - "supports_reverse_consolidation" accepts TRUE/FALSE/yes/no/1/0.',
+    '# - "additional_rules" — free text, appended to notes.',
+    '# - You can upload .csv, .xlsx, or .xls. First sheet only for spreadsheets.',
   ].join('\n') + '\n';
 
   return new NextResponse(csv, {

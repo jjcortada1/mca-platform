@@ -13,6 +13,7 @@ interface FunderDetail {
   id: string;
   name: string;
   tiers?: { id: string; name: string }[];
+  emails?: string[] | null;
   contacts?: { name: string; email?: string | null; phone?: string | null }[];
   restrictedStates?: string[];
   restrictedIndustries?: string[];
@@ -419,7 +420,10 @@ export default function DealShopPage() {
                           <tbody className="divide-y divide-border/60">
                             {g.matched.map((m) => {
                               const f = funderMap.get(m.funderId);
+                              const shoppingEmails: string[] = (f?.emails ?? []).filter(Boolean);
                               const primary = f?.contacts?.find((c) => c.email);
+                              const displayEmail = shoppingEmails[0] ?? primary?.email ?? null;
+                              const extraCount = shoppingEmails.length > 1 ? shoppingEmails.length - 1 : 0;
                               const isExpanded = expanded.has(m.funderId);
                               const isSelected = selectedFunders.has(m.funderId);
                               return (
@@ -443,8 +447,13 @@ export default function DealShopPage() {
                                     <td className="px-3 py-2.5 cursor-pointer" onClick={() => toggleExpand(m.funderId)}>
                                       <Badge variant="outline" className="text-[10px]">{f?.submissionMethod ?? 'email'}</Badge>
                                     </td>
-                                    <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground truncate max-w-[200px] cursor-pointer" onClick={() => toggleExpand(m.funderId)}>
-                                      {primary?.email ?? '—'}
+                                    <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground truncate max-w-[220px] cursor-pointer" onClick={() => toggleExpand(m.funderId)}>
+                                      {displayEmail ?? '—'}
+                                      {extraCount > 0 && (
+                                        <span className="ml-1.5 text-[10px] not-italic font-sans px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                                          +{extraCount}
+                                        </span>
+                                      )}
                                     </td>
                                     <td className="px-2 py-2.5 text-muted-foreground cursor-pointer" onClick={() => toggleExpand(m.funderId)}>
                                       {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -511,29 +520,31 @@ function Select({ value, onChange, options }: { value: string; onChange: (v: str
 }
 
 function FunderDetailRow({ funder }: { funder: FunderDetail }) {
-  const emails = (funder.contacts ?? []).filter((c) => c.email);
-  const phones = (funder.contacts ?? []).filter((c) => c.phone);
+  const submissionEmails = (funder.emails ?? []).filter((e) => e && e.includes('@'));
+  const contacts = funder.contacts ?? [];
+  const phoneContacts = contacts.filter((c) => c.phone || c.name);
   return (
     <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
-      {emails.length > 0 && (
+      {submissionEmails.length > 0 && (
         <div>
           <div className="font-semibold uppercase tracking-wider text-[9px] text-muted-foreground mb-1.5 flex items-center gap-1">
-            <Mail className="h-3 w-3" /> Submission emails
+            <Mail className="h-3 w-3" /> Submission emails ({submissionEmails.length})
           </div>
           <div className="space-y-0.5">
-            {emails.map((c, i) => <div key={i} className="font-mono text-foreground">{c.email}</div>)}
+            {submissionEmails.map((e, i) => <div key={i} className="font-mono text-foreground">{e}</div>)}
           </div>
         </div>
       )}
-      {phones.length > 0 && (
+      {phoneContacts.length > 0 && (
         <div>
           <div className="font-semibold uppercase tracking-wider text-[9px] text-muted-foreground mb-1.5 flex items-center gap-1">
-            <Phone className="h-3 w-3" /> Contacts
+            <Phone className="h-3 w-3" /> Contact
           </div>
           <div className="space-y-0.5">
-            {phones.map((c, i) => (
+            {phoneContacts.map((c, i) => (
               <div key={i}>
-                <span className="font-medium">{c.name}</span> <span className="text-muted-foreground">{c.phone}</span>
+                <span className="font-medium">{c.name}</span>{' '}
+                {c.phone && <span className="text-muted-foreground">{c.phone}</span>}
               </div>
             ))}
           </div>

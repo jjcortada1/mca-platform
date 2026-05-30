@@ -11,6 +11,8 @@ import { cn } from '@/lib/utils';
 interface FunderRow {
   id: string;
   name: string;
+  // funders.emails — the shopping/submission emails (multiple). Used first.
+  emails?: string[] | null;
   contacts: { id: string; name: string; email: string | null; isPrimary: boolean }[];
   tiers?: { id: string; name: string }[];
 }
@@ -167,23 +169,34 @@ function SubmitDealInner() {
     ];
     fd.append('ccEmails', JSON.stringify(ccList));
 
-    // Build funders array — directory selections + custom rows
-    const funderTargets = [
-      ...Array.from(selectedFunderIds).map((id) => {
-        const f = allFunders.find((x) => x.id === id);
-        const primary = f?.contacts.find((c) => c.isPrimary && c.email) ?? f?.contacts.find((c) => c.email);
-        return {
-          funderId: id,
-          toEmail: primary?.email ?? '',
-          funderName: f?.name ?? 'Unknown',
-        };
-      }).filter((t) => t.toEmail),
-      ...validCustom.map((c) => ({
-        manualFunderName: c.name || c.email,
-        toEmail: c.email.trim(),
-        funderName: c.name || c.email,
-      })),
-    ];
+    // Build funders array — directory selections + custom rows.
+    // For each selected funder we use funders.emails (the submission/shopping
+    // emails). If that list has multiple addresses we fan out — one row per
+    // email — so the deal lands in every inbox the funder gave us. We fall
+    // back to the primary contact's email only if no shopping emails exist
+    // (legacy data).
+    const funderTargets: { funderId?: string; manualFunderName?: string; toEmail: string; funderName: string }[] = [];
+    for (const id of Array.from(selectedFunderIds)) {
+      const f = allFunders.find((x) => x.id === id);
+      if (!f) continue;
+      const submissionEmails = (f.emails ?? [])
+        .map((e) => (e || '').trim())
+        .filter((e) => e && e.includes('@'));
+      if (submissionEmails.length) {
+        for (const em of submissionEmails) {
+          funderTargets.push({ funderId: id, toEmail: em, funderName: f.name });
+        }
+      } else {
+        // Fallback: pick primary contact's email (legacy behavior).
+        const primary = f.contacts.find((c) => c.isPrimary && c.email) ?? f.contacts.find((c) => c.email);
+        if (primary?.email) {
+          funderTargets.push({ funderId: id, toEmail: primary.email, funderName: f.name });
+        }
+      }
+    }
+    for (const c of validCustom) {
+      funderTargets.push({ manualFunderName: c.name || c.email, toEmail: c.email.trim(), funderName: c.name || c.email });
+    }
 
     if (funderTargets.length === 0) {
       setError('No valid recipients. Make sure selected funders have email addresses.');
