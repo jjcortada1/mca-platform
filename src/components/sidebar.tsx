@@ -148,6 +148,12 @@ function MobileTopBar({
             src={branding.logoUrl || '/brand/cortada-icon.png'}
             alt={branding.displayName}
             className="h-8 w-8 rounded-md object-contain bg-card border border-border p-0.5"
+            onError={(e) => {
+              const el = e.currentTarget;
+              if (!el.src.endsWith('/brand/cortada-icon.png')) {
+                el.src = '/brand/cortada-icon.png';
+              }
+            }}
           />
           <div className="text-sm font-semibold tracking-tight truncate max-w-[140px]">
             {branding.productName}
@@ -206,6 +212,12 @@ function SidebarBody({
             src={branding.logoUrl || '/brand/cortada-icon.png'}
             alt={branding.displayName}
             className="h-9 w-9 rounded-lg object-contain bg-card border border-border p-1 shadow-[0_1px_2px_0_hsl(222_47%_11%/0.04)] shrink-0"
+            onError={(e) => {
+              const el = e.currentTarget;
+              if (!el.src.endsWith('/brand/cortada-icon.png')) {
+                el.src = '/brand/cortada-icon.png';
+              }
+            }}
           />
           <div className="min-w-0">
             <div className="text-sm font-semibold tracking-tight truncate leading-tight">{branding.productName}</div>

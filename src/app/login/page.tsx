@@ -83,6 +83,15 @@ function LoginInner() {
             src={branding.logoUrl || '/brand/cortada-full.png'}
             alt={branding.displayName}
             className="h-16 sm:h-20 w-auto object-contain"
+            onError={(e) => {
+              // If the stored logo URL is broken, fall back to the bundled file.
+              const el = e.currentTarget;
+              if (el.src.endsWith('/brand/cortada-full.png')) {
+                el.style.display = 'none';
+              } else {
+                el.src = '/brand/cortada-full.png';
+              }
+            }}
           />
         </div>
 

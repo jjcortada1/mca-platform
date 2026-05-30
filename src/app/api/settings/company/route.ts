@@ -6,6 +6,10 @@ import { requireCompanyAdmin, requireTenantContext } from '@/lib/auth/context';
 import { z } from 'zod';
 import { apiError } from '@/lib/api/errors';
 
+// Node runtime + dynamic so we can accept multi-megabyte logo data URLs.
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     const ctx = await requireTenantContext();

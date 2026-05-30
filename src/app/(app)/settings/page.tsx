@@ -1834,10 +1834,21 @@ function LogoInput({ value, onChange }: { value: string; onChange: (v: string) =
       {value && (
         <div className="mt-2 flex items-center gap-3 px-3 py-2 rounded-md border border-border bg-muted/30">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={value} alt="Logo preview" className="h-10 w-10 rounded-md object-contain bg-card border border-border" />
+          <img
+            src={value}
+            alt="Logo preview"
+            className="h-10 w-10 rounded-md object-contain bg-card border border-border"
+            onError={(e) => {
+              const el = e.currentTarget;
+              el.style.opacity = '0.3';
+              el.title = 'Image failed to load';
+            }}
+          />
           <div className="text-xs">
             <div className="font-medium">Preview</div>
-            <div className="text-muted-foreground">{value.startsWith('data:') ? 'Uploaded file' : 'External URL'}</div>
+            <div className="text-muted-foreground">
+              {value.startsWith('data:') ? `Uploaded file (${Math.round(value.length / 1024)}KB encoded)` : 'External URL'}
+            </div>
           </div>
         </div>
       )}
