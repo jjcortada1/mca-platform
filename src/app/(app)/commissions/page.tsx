@@ -6,6 +6,8 @@ import { useToast } from '@/components/toast';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { computePaydown } from '@/lib/deals/paydown';
+import { exportCSV } from '@/lib/csv-export';
+import { Download } from 'lucide-react';
 
 /* ---------- comma formatting helpers ---------- */
 // Display a numeric string with thousands separators while typing (keeps a
@@ -272,10 +274,52 @@ export default function CommissionsPage() {
         actions={isAdmin ? (
           tab === 'rep'
             ? <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => exportCSV('rep-commissions', filteredRows, [
+                    { key: 'dealName', label: 'Deal Name' },
+                    { key: 'repName', label: 'Rep' },
+                    { key: 'grossCommission', label: 'Gross Commission', format: (v) => (v ? Number(v) : 0) },
+                    { key: 'brokerFee', label: 'Broker Fee', format: (v) => (v ? Number(v) : 0) },
+                    { key: 'repSplitPct', label: 'Rep Split %', format: (v) => (v ? Number(v) : 0) },
+                    { key: 'repCommissionAmount', label: 'Rep Commission', format: (v) => (v ? Number(v) : 0) },
+                    { key: 'paidAmount', label: 'Paid', format: (v) => (v ? Number(v) : 0) },
+                    { key: 'owedAmount', label: 'Owed', format: (v) => (v != null ? Number(v) : 0) },
+                    { key: 'status', label: 'Status' },
+                    { key: 'fundingDate', label: 'Funded Date', format: (v) => (v ? new Date(v as string).toISOString().slice(0, 10) : '') },
+                    { key: 'earlyPayoffDiscount', label: 'Early Payoff Discount' },
+                    { key: 'notes', label: 'Notes' },
+                  ])}
+                  disabled={filteredRows.length === 0}
+                  className="gap-1.5"
+                >
+                  <Download className="h-4 w-4" /> Export CSV
+                </Button>
                 <Button variant="outline" onClick={() => setShowDraw(true)}>+ Log draw</Button>
                 <Button onClick={() => setShowAdd(true)}>+ Add commission</Button>
               </div>
             : <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => exportCSV('lead-source-commissions', lsRows, [
+                    { key: 'leadSourceName', label: 'Lead Source' },
+                    { key: 'dealName', label: 'Deal Name' },
+                    { key: 'grossCommission', label: 'Gross', format: (v) => (v ? Number(v) : '') },
+                    { key: 'brokerFee', label: 'Broker Fee', format: (v) => (v ? Number(v) : '') },
+                    { key: 'splitPct', label: 'Split %', format: (v) => (v ? Number(v) : '') },
+                    { key: 'flatAmount', label: 'Flat Amount', format: (v) => (v ? Number(v) : '') },
+                    { key: 'commissionAmount', label: 'Owed Total', format: (v) => (v ? Number(v) : 0) },
+                    { key: 'paidAmount', label: 'Paid', format: (v) => (v ? Number(v) : 0) },
+                    { key: 'owedAmount', label: 'Still Owed', format: (v) => (v != null ? Number(v) : 0) },
+                    { key: 'status', label: 'Status' },
+                    { key: 'fundingDate', label: 'Funded Date', format: (v) => (v ? new Date(v as string).toISOString().slice(0, 10) : '') },
+                    { key: 'notes', label: 'Notes' },
+                  ])}
+                  disabled={lsRows.length === 0}
+                  className="gap-1.5"
+                >
+                  <Download className="h-4 w-4" /> Export CSV
+                </Button>
                 <Button variant="outline" onClick={() => setShowNewLS(true)}>+ New lead source</Button>
                 <Button onClick={() => setShowLSAdd(true)}>+ Assign to deal</Button>
               </div>

@@ -9,6 +9,7 @@ import { useToast } from '@/components/toast';
 import { US_STATES, COMMON_INDUSTRIES, CREDIT_TIER_OPTIONS } from '@/lib/constants';
 import { formatCurrency, cn } from '@/lib/utils';
 import { Upload, Plus, Search, X, Download, FileText, AlertCircle, CheckCircle2, Trash2, Eye, Phone, Mail } from 'lucide-react';
+import { exportCSV } from '@/lib/csv-export';
 
 interface Contact {
   id?: string;
@@ -136,6 +137,32 @@ export default function FundersPage() {
         description="Your funder directory. Used by the deal-shopping engine to match merchants."
         actions={
           <>
+            <Button
+              variant="outline"
+              onClick={() => exportCSV('funders', filtered, [
+                { key: 'name', label: 'Name' },
+                { key: 'tiers', label: 'Tiers', format: (v) => (v as { name: string }[] | undefined)?.map((t) => t.name).join('; ') ?? '' },
+                { key: 'submissionMethod', label: 'Submission Method' },
+                { key: 'emails', label: 'Submission Emails', format: (v) => (Array.isArray(v) ? (v as string[]).join('; ') : '') },
+                { key: 'phones', label: 'Phones', format: (v) => (Array.isArray(v) ? (v as string[]).join('; ') : '') },
+                { key: 'contacts', label: 'Contact', format: (v) => {
+                  const c = (v as { name: string; email: string | null; phone: string | null }[] | undefined)?.[0];
+                  return c ? `${c.name}${c.email ? ' · ' + c.email : ''}${c.phone ? ' · ' + c.phone : ''}` : '';
+                } },
+                { key: 'minRevenue', label: 'Min Revenue', format: (v) => (v ? Number(v) : '') },
+                { key: 'minCreditTier', label: 'Min Credit Tier' },
+                { key: 'maxPositions', label: 'Max Positions' },
+                { key: 'supportsReverseConsolidation', label: 'Supports Reverse' },
+                { key: 'restrictedStates', label: 'Restricted States', format: (v) => (Array.isArray(v) ? (v as string[]).join('; ') : '') },
+                { key: 'restrictedIndustries', label: 'Restricted Industries', format: (v) => (Array.isArray(v) ? (v as string[]).join('; ') : '') },
+                { key: 'notes', label: 'Notes' },
+                { key: 'isActive', label: 'Active' },
+              ])}
+              className="gap-1.5"
+              disabled={filtered.length === 0}
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
             <Button variant="outline" onClick={() => setBulkOpen(true)} className="gap-1.5">
               <Upload className="h-4 w-4" /> Bulk import
             </Button>

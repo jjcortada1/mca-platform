@@ -2,9 +2,10 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, Button, Input, Textarea, Badge, PageHeader, EmptyState } from '@/components/ui/primitives';
+import { exportCSV } from '@/lib/csv-export';
 import { useToast } from '@/components/toast';
 import { formatDate, formatCurrency } from '@/lib/utils';
-import { Plus, Trash2, Briefcase, Search, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Trash2, Briefcase, Search, X, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { computePaydown, buildPaymentSchedule, DEAL_STATUS_META, DEAL_STATUS_OPTIONS } from '@/lib/deals/paydown';
 
@@ -228,9 +229,36 @@ export default function ActiveDealsPage() {
         title="Active Deals"
         description="Edit deal details, statuses, and assignments inline. Click a row to expand."
         actions={
-          <Button onClick={() => setCreating(blankDeal())} className="gap-1.5">
-            <Plus className="h-4 w-4" /> New deal
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => exportCSV('active-deals', filtered, [
+                { key: 'name', label: 'Deal Name' },
+                { key: 'merchantFirstName', label: 'Merchant First' },
+                { key: 'merchantLastName', label: 'Merchant Last' },
+                { key: 'merchantPhone', label: 'Phone' },
+                { key: 'merchantEmail', label: 'Email' },
+                { key: 'status', label: 'Status' },
+                { key: 'fundedWith', label: 'Funded With' },
+                { key: 'fundedAmount', label: 'Funded Amount', format: (v) => (v ? Number(v) : '') },
+                { key: 'factorRate', label: 'Factor Rate' },
+                { key: 'termMode', label: 'Term Mode' },
+                { key: 'termCount', label: 'Term Count' },
+                { key: 'feePct', label: 'Fee %' },
+                { key: 'amountCollected', label: 'Amount Collected', format: (v) => (v ? Number(v) : '') },
+                { key: 'fundingDate', label: 'Funding Date', format: (v) => (v ? new Date(v as string).toISOString().slice(0, 10) : '') },
+                { key: 'assignedRepName', label: 'Assigned Rep' },
+                { key: 'notes', label: 'Notes' },
+              ])}
+              className="gap-1.5"
+              disabled={filtered.length === 0}
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
+            <Button onClick={() => setCreating(blankDeal())} className="gap-1.5">
+              <Plus className="h-4 w-4" /> New deal
+            </Button>
+          </div>
         }
       />
 

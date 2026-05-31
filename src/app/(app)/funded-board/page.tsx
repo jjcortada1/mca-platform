@@ -7,7 +7,8 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
-import { Plus, X, Trash2, TrendingUp, Trophy } from 'lucide-react';
+import { Plus, X, Trash2, TrendingUp, Trophy, Download } from 'lucide-react';
+import { exportCSV } from '@/lib/csv-export';
 
 interface FundedEntry {
   id: string;
@@ -140,9 +141,27 @@ export default function FundedBoardPage() {
         title="Funded Board"
         description="Production board — funded deals organized by rep."
         actions={
-          <Button onClick={() => setShowForm(true)} className="gap-1.5">
-            <Plus className="h-4 w-4" /> Log funded
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => exportCSV('funded-board', filteredEntries, [
+                { key: 'dealName', label: 'Deal Name' },
+                { key: 'repName', label: 'Rep' },
+                { key: 'fundedWith', label: 'Funded With' },
+                { key: 'amountFunded', label: 'Amount Funded', format: (v) => (v ? Number(v) : '') },
+                { key: 'commission', label: 'Commission', format: (v) => (v ? Number(v) : '') },
+                { key: 'fundedDate', label: 'Funded Date', format: (v) => (v ? new Date(v as string).toISOString().slice(0, 10) : '') },
+                { key: 'notes', label: 'Notes' },
+              ])}
+              className="gap-1.5"
+              disabled={filteredEntries.length === 0}
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
+            <Button onClick={() => setShowForm(true)} className="gap-1.5">
+              <Plus className="h-4 w-4" /> Log funded
+            </Button>
+          </div>
         }
       />
 

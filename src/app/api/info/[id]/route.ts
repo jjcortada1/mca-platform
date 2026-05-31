@@ -19,6 +19,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   } catch (e) { return apiError(e); }
 }
 
+// Some clients (and our older UI) send PUT — accept both for resilience.
+export const PUT = PATCH;
+
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const ctx = await requireTenantContext();

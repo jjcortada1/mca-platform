@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, Button, Input, Field, Badge, PageHeader } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { formatCurrency } from '@/lib/utils';
-import { Search } from 'lucide-react';
+import { Search, Download } from 'lucide-react';
+import { exportCSV } from '@/lib/csv-export';
 
 interface Payment {
   id: string;
@@ -84,7 +85,31 @@ export default function PaymentsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Payments" description="Every payment logged to any rep or lead source. Edit or delete any record here." />
+      <PageHeader
+        title="Payments"
+        description="Every payment logged to any rep or lead source. Edit or delete any record here."
+        actions={
+          <Button
+            variant="outline"
+            onClick={() => exportCSV('payments', filtered, [
+              { key: 'paidDate', label: 'Date', format: (v) => (v ? new Date(v as string).toISOString().slice(0, 10) : '') },
+              { key: 'payeeName', label: 'Payee' },
+              { key: 'payeeType', label: 'Type' },
+              { key: 'amount', label: 'Amount', format: (v) => (v ? Number(v) : 0) },
+              { key: 'method', label: 'Method' },
+              { key: 'confirmationNumber', label: 'Confirmation #' },
+              { key: 'dealName', label: 'Related Deal' },
+              { key: 'notes', label: 'Notes' },
+              { key: 'createdByName', label: 'Created By' },
+              { key: 'createdAt', label: 'Created At', format: (v) => (v ? new Date(v as string).toISOString().slice(0, 10) : '') },
+            ])}
+            disabled={filtered.length === 0}
+            className="gap-1.5"
+          >
+            <Download className="h-4 w-4" /> Export CSV
+          </Button>
+        }
+      />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Tile label="Total payments" value={String(totals.count)} />

@@ -19,10 +19,13 @@ export const DEFAULT_BRANDING: Branding = {
 };
 
 function fromCompany(c: typeof companies.$inferSelect): Branding {
+  // Normalize logoUrl: treat empty / whitespace-only as null so consumers can
+  // confidently use `branding.logoUrl || fallback`.
+  const rawLogo = typeof c.logoUrl === 'string' ? c.logoUrl.trim() : c.logoUrl;
   return {
     productName: c.productName ?? DEFAULT_BRANDING.productName,
     displayName: c.displayName ?? c.name ?? DEFAULT_BRANDING.displayName,
-    logoUrl: c.logoUrl ?? null,
+    logoUrl: rawLogo || null,
     primaryColor: c.primaryColor ?? DEFAULT_BRANDING.primaryColor,
     emailSignature: c.emailSignature ?? null,
   };

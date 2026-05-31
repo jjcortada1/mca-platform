@@ -7,6 +7,8 @@ import {
   Button, Badge, Textarea,
 } from '@/components/ui/primitives';
 import { formatDate, cn } from '@/lib/utils';
+import { Download } from 'lucide-react';
+import { exportCSV } from '@/lib/csv-export';
 
 interface SubmissionFunder {
   id: string;
@@ -157,6 +159,38 @@ export default function SubmissionsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              // One row per (deal, funder) pair so spreadsheets can pivot/filter easily.
+              const flat = rows.flatMap((r) =>
+                r.funders.map((f) => ({
+                  dealName: r.dealName,
+                  merchantName: r.merchantName,
+                  dealStatus: r.dealStatus,
+                  assignedRepName: r.assignedRepName ?? '',
+                  funderName: f.funderName,
+                  funderStatus: f.status === 'no_response' ? 'pending' : f.status,
+                  submittedAt: f.submittedAt,
+                  notes: f.notes ?? '',
+                }))
+              );
+              exportCSV('submissions', flat, [
+                { key: 'submittedAt', label: 'Submitted', format: (v) => (v ? new Date(v as string).toISOString().slice(0, 10) : '') },
+                { key: 'dealName', label: 'Deal' },
+                { key: 'merchantName', label: 'Merchant' },
+                { key: 'dealStatus', label: 'Deal Status' },
+                { key: 'assignedRepName', label: 'Rep' },
+                { key: 'funderName', label: 'Funder' },
+                { key: 'funderStatus', label: 'Funder Status' },
+                { key: 'notes', label: 'Notes / Offer' },
+              ]);
+            }}
+            disabled={rows.length === 0}
+            className="gap-1.5"
+          >
+            <Download className="h-4 w-4" /> Export CSV
+          </Button>
           <Button variant="outline" onClick={() => setShowManualAdd(true)}>+ Add manual</Button>
           <Link href="/deal-shop">
             <Button>Shop a deal</Button>

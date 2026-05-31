@@ -44,6 +44,7 @@ export default function InfoPage() {
   const [entries, setEntries] = useState<InfoEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<InfoEntry | null>(null);
+  const [viewing, setViewing] = useState<InfoEntry | null>(null);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
 
@@ -200,12 +201,12 @@ export default function InfoPage() {
                   <span className="text-xs text-muted-foreground">{items.length} {items.length === 1 ? 'entry' : 'entries'}</span>
                 </div>
               </div>
-              <Grid items={items} onOpen={setEditing} />
+              <Grid items={items} onOpen={setViewing} />
             </section>
           ))}
         </div>
       ) : (
-        <Grid items={filtered} onOpen={setEditing} />
+        <Grid items={filtered} onOpen={setViewing} />
       )}
 
       {editing && (
@@ -216,6 +217,15 @@ export default function InfoPage() {
           onSave={save}
           onDelete={editing.id ? () => del(editing.id) : undefined}
           existingCategories={categories}
+        />
+      )}
+
+      {viewing && (
+        <QuickView
+          entry={viewing}
+          onClose={() => setViewing(null)}
+          onEdit={() => { setEditing(viewing); setViewing(null); }}
+          onDelete={() => { del(viewing.id); setViewing(null); }}
         />
       )}
     </div>
@@ -326,4 +336,122 @@ function EditorDrawer({
       </div>
     </div>
   );
+}
+
+/* ============================================================
+   QUICK VIEW — read-only centered modal. Renders URLs as clickable links.
+   ============================================================ */
+function QuickView({
+  entry,
+  onClose,
+  onEdit,
+  onDelete,
+}: {
+  entry: InfoEntry;
+  onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  // Close on Esc
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const palette = colorFor(entry.category);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-foreground/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-2xl max-h-[85vh] bg-card border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-4 border-b border-border flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            {entry.category && (
+              <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium ring-1 mb-2', palette.badge)}>
+                <Hash className="h-2.5 w-2.5" />
+                {entry.category}
+              </span>
+            )}
+            <h2 className="text-lg font-semibold leading-tight">{entry.title || '(untitled)'}</h2>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1 rounded shrink-0">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          <RichBody text={entry.body} />
+        </div>
+
+        <div className="border-t border-border px-6 py-3 flex items-center justify-between bg-muted/30">
+          <div className="text-[11px] text-muted-foreground">Updated {formatDate(entry.updatedAt)}</div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={onDelete} className="gap-1.5 text-muted-foreground hover:text-destructive">
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
+            </Button>
+            <Button size="sm" onClick={onEdit}>Edit</Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   RICH BODY — preserve newlines + auto-link URLs and emails.
+   ============================================================ */
+function RichBody({ text }: { text: string }) {
+  if (!text) return <div className="text-sm italic text-muted-foreground">empty</div>;
+  return (
+    <div className="text-[15px] leading-relaxed whitespace-pre-wrap break-words">
+      {text.split('\n').map((line, i) => (
+        <div key={i}>{linkify(line)}</div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Convert a string into an array of React nodes where any URL or email
+ * becomes a clickable <a>. Non-URL text is left as plain strings.
+ */
+function linkify(line: string): React.ReactNode[] {
+  if (!line) return [<br key="br" />];
+  // URL regex: https?, www., or bare domain.tld + paths; also raw emails.
+  const re = /\b((https?:\/\/[^\s<>]+|www\.[^\s<>]+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}))/g;
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > last) out.push(line.slice(last, m.index));
+    const match = m[0];
+    if (match.includes('@') && !match.startsWith('http')) {
+      out.push(
+        <a key={`a${key++}`} href={`mailto:${match}`} className="text-foreground font-medium underline decoration-foreground/30 hover:decoration-foreground transition-colors">
+          {match}
+        </a>
+      );
+    } else {
+      const href = match.startsWith('http') ? match : `https://${match}`;
+      out.push(
+        <a
+          key={`a${key++}`}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-foreground font-medium underline decoration-foreground/30 hover:decoration-foreground transition-colors break-all"
+        >
+          {match}
+        </a>
+      );
+    }
+    last = m.index + match.length;
+  }
+  if (last < line.length) out.push(line.slice(last));
+  return out;
 }

@@ -1819,7 +1819,7 @@ function LogoInput({ value, onChange }: { value: string; onChange: (v: string) =
       </div>
 
       {mode === 'upload' ? (
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-card hover:bg-muted text-sm font-medium transition">
             <input
               type="file"
@@ -1834,6 +1834,13 @@ function LogoInput({ value, onChange }: { value: string; onChange: (v: string) =
               Remove
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => onChange('/brand/cortada-icon.png')}
+            className="text-xs text-muted-foreground hover:text-foreground underline"
+          >
+            Use bundled Cortada logo
+          </button>
         </div>
       ) : (
         <Input
@@ -1841,6 +1848,21 @@ function LogoInput({ value, onChange }: { value: string; onChange: (v: string) =
           onChange={(e) => onChange(e.target.value)}
           placeholder="https://example.com/logo.png"
         />
+      )}
+
+      {!value && (
+        <div className="mt-2 flex items-center gap-3 px-3 py-2 rounded-md border border-dashed border-border bg-muted/20">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/cortada-icon.png"
+            alt="Default Cortada logo"
+            className="h-10 w-10 rounded-md object-contain bg-card border border-border"
+          />
+          <div className="text-xs text-muted-foreground">
+            <div className="font-medium text-foreground">No custom logo</div>
+            <div>Using the bundled Cortada logo by default.</div>
+          </div>
+        </div>
       )}
 
       {value && (

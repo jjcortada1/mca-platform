@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, Button, Input, Field, Badge, PageHeader } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { formatCurrency } from '@/lib/utils';
-import { Search } from 'lucide-react';
+import { Search, Download } from 'lucide-react';
+import { exportCSV } from '@/lib/csv-export';
 
 interface Entry {
   id: string;
@@ -83,7 +84,29 @@ export default function AccountingPage() {
       <PageHeader
         title="Accounting"
         description="Track money received from funders and money sent back (clawbacks/refunds). Each entry can be tied to a specific deal."
-        actions={<Button onClick={() => setCreating(true)}>+ New entry</Button>}
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => exportCSV('accounting', filtered, [
+                { key: 'entryDate', label: 'Date', format: (v) => (v ? new Date(v as string).toISOString().slice(0, 10) : '') },
+                { key: 'entryType', label: 'Type' },
+                { key: 'amount', label: 'Amount', format: (v) => (v ? Number(v) : 0) },
+                { key: 'dealName', label: 'Deal' },
+                { key: 'method', label: 'Method' },
+                { key: 'referenceNumber', label: 'Reference #' },
+                { key: 'notes', label: 'Notes' },
+                { key: 'createdByName', label: 'Created By' },
+                { key: 'createdAt', label: 'Created At', format: (v) => (v ? new Date(v as string).toISOString().slice(0, 10) : '') },
+              ])}
+              disabled={filtered.length === 0}
+              className="gap-1.5"
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
+            <Button onClick={() => setCreating(true)}>+ New entry</Button>
+          </div>
+        }
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
