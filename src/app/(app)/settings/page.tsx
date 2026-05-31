@@ -375,11 +375,19 @@ function SmtpSection() {
     const res = await fetch('/api/settings/smtp/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ host, port: parseInt(port), user, pass, from }),
+      body: JSON.stringify({ host, port: parseInt(port), user, pass, from, persistOnSuccess: true }),
     });
     const j = await res.json();
     setVerifying(false);
-    setVerifyMsg(j.success ? '✓ Connection verified' : `✗ ${j.error || 'Verification failed'}`);
+    if (j.success) {
+      setVerifyMsg(j.saved ? '✓ Connection verified and saved. You can now send deals.' : '✓ Connection verified.');
+      if (j.saved) {
+        setPass('');
+        setHasConfig(true);
+      }
+    } else {
+      setVerifyMsg(`✗ ${j.error || 'Verification failed'}`);
+    }
   }
 
   async function save() {
@@ -444,17 +452,21 @@ function SmtpSection() {
         )}
 
         <div className="flex gap-2 pt-2">
-          <Button variant="outline" onClick={verify} disabled={verifying || !host || !user || !pass}>
-            {verifying ? 'Verifying…' : 'Verify connection'}
+          <Button onClick={verify} disabled={verifying || !host || !user || !pass}>
+            {verifying ? 'Verifying & saving…' : 'Verify & save'}
           </Button>
-          <Button onClick={save} disabled={!host || !user || (!hasConfig && !pass)}>
-            Save credentials
-          </Button>
+          {hasConfig && (
+            <Button variant="outline" onClick={save} disabled={!host || !user}>
+              Save without verifying
+            </Button>
+          )}
         </div>
 
         <p className="text-xs text-muted-foreground mt-3">
-          For Gmail/Workspace, use an <a className="underline" href="https://support.google.com/accounts/answer/185833" target="_blank">App Password</a>, not your real password.
-          Outlook 365 and most providers also require app passwords with 2FA enabled.
+          <strong>Click <em>Verify &amp; save</em> once.</strong> That single click both checks Gmail accepts the credentials AND stores them — you don&apos;t need to click anything else after.
+        </p>
+        <p className="text-xs text-muted-foreground mt-2">
+          For Gmail/Workspace, use a 16-character <a className="underline" href="https://myaccount.google.com/apppasswords" target="_blank">App Password</a> (NOT your regular password). 2-Step Verification must be on first.
         </p>
       </CardContent>
     </Card>

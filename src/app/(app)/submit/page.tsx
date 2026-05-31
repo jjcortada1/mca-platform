@@ -72,8 +72,10 @@ function SubmitDealInner() {
       setCompanyInfo({ globalCcEmails: co?.globalCcEmails ?? [] });
       setEmailMode((co?.emailMode as 'shared' | 'per_rep') ?? 'shared');
 
-      setSmtpConfigured(!!smtpJson.configured);
-      setFromEmail(smtpJson.from ?? smtpJson.user ?? null);
+      // SMTP API returns { data: { hasConfig, host, port, user, from, mode } }
+      const smtpData = smtpJson?.data ?? smtpJson;
+      setSmtpConfigured(!!smtpData?.hasConfig);
+      setFromEmail(smtpData?.from ?? smtpData?.user ?? null);
 
       // If we came from Shop with funders selected, pre-select them here.
       if (fromShop) {
