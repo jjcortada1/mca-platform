@@ -39,9 +39,13 @@ function SubmitDealInner() {
   const [emailMode, setEmailMode] = useState<'shared' | 'per_rep'>('shared');
   const [smtpConfigured, setSmtpConfigured] = useState<boolean | null>(null);
   const [fromEmail, setFromEmail] = useState<string | null>(null);
+  const [reps, setReps] = useState<{ id: string; name: string; role: string }[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [myUserId, setMyUserId] = useState<string | null>(null);
 
   // Form fields
   const [dealName, setDealName] = useState('');
+  const [assignedRepId, setAssignedRepId] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [extraCC, setExtraCC] = useState('');
@@ -62,11 +66,23 @@ function SubmitDealInner() {
       fetch('/api/funders').then((r) => r.json()),
       fetch('/api/settings/company').then((r) => r.json()).catch(() => ({})),
       fetch('/api/settings/smtp').then((r) => r.json()).catch(() => ({})),
-    ]).then(([fundersJson, companyJson, smtpJson]) => {
+      fetch('/api/auth/me').then((r) => r.json()).catch(() => ({})),
+      fetch('/api/users').then((r) => r.json()).catch(() => ({})),
+    ]).then(([fundersJson, companyJson, smtpJson, meJson, usersJson]) => {
       const list = fundersJson.data ?? fundersJson.funders ?? [];
       setAllFunders(list);
       const tiers = collectAllTiers(list);
       if (tiers.length) setActiveTier(tiers[0]);
+
+      const me = meJson?.user;
+      const admin = me?.role === 'company_admin' || me?.role === 'master_admin';
+      setIsAdmin(admin);
+      setMyUserId(me?.id ?? null);
+      setAssignedRepId(me?.id ?? '');
+
+      // Filter rep options — exclude lead source users
+      const userList = (usersJson?.data ?? usersJson?.users ?? []) as { id: string; name: string; role: string }[];
+      setReps(userList.filter((u) => u.role === 'rep' || u.role === 'company_admin' || u.role === 'master_admin'));
 
       const co = companyJson.data ?? companyJson;
       setCompanyInfo({ globalCcEmails: co?.globalCcEmails ?? [] });
@@ -163,6 +179,7 @@ function SubmitDealInner() {
     // Build payload
     const fd = new FormData();
     fd.append('dealName', dealName.trim());
+    if (assignedRepId) fd.append('assignedRepId', assignedRepId);
     fd.append('notes', notes);
 
     const ccList = [
@@ -273,16 +290,33 @@ function SubmitDealInner() {
         </div>
       )}
 
-      {/* Deal name */}
+      {/* Deal name + Assigned rep */}
       <Card>
-        <CardContent className="p-4">
-          <Field label="Business / Deal Name" required>
-            <Input
-              placeholder="e.g. John Smith — Riverside Auto Repair"
-              value={dealName}
-              onChange={(e) => setDealName(e.target.value)}
-            />
-          </Field>
+        <CardContent className="p-4 space-y-3">
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Field label="Business / Deal Name" required>
+              <Input
+                placeholder="e.g. John Smith — Riverside Auto Repair"
+                value={dealName}
+                onChange={(e) => setDealName(e.target.value)}
+              />
+            </Field>
+            {isAdmin && reps.length > 0 && (
+              <Field label="Assign to rep" hint="Who owns this deal">
+                <select
+                  value={assignedRepId}
+                  onChange={(e) => setAssignedRepId(e.target.value)}
+                  className="h-10 w-full rounded-lg border border-input bg-card px-3 text-sm"
+                >
+                  {reps.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}{r.id === myUserId ? ' (me)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+          </div>
         </CardContent>
       </Card>
 

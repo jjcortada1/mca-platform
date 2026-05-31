@@ -67,8 +67,13 @@ function buildBody(notes: string, fields: StructuredField[]): string {
   return lines.join('\n');
 }
 
-function buildSubject(dealName: string): string {
-  return `NEW DEAL | ${dealName}`;
+function buildSubject(dealName: string, recipientLabel?: string): string {
+  // Format: "New Deal - {dealName}" with optional " - {funder/ref}" suffix.
+  // The suffix is added per recipient when sending a batch so that Gmail
+  // (which threads by exact subject match) treats each funder's email as a
+  // separate conversation, not one giant thread.
+  const base = `New Deal - ${dealName}`;
+  return recipientLabel ? `${base} - ${recipientLabel}` : base;
 }
 
 function makeTransport(smtp: SmtpConfig): Transporter {
@@ -149,6 +154,13 @@ export interface BatchRecipient {
   toEmail: string;
   /** Opaque tag the caller uses to correlate results (e.g. funderId or name). */
   ref: string;
+  /**
+   * Optional label appended to the subject for this recipient so each email
+   * ends up in its own conversation thread on the sender's side (Gmail
+   * threads by exact subject match). Typically the funder name. If omitted,
+   * we fall back to the local-part of the recipient address.
+   */
+  label?: string;
 }
 
 export interface BatchSendResult {
@@ -197,19 +209,28 @@ export async function sendDealEmailBatch(
             .filter((e) => e.toLowerCase() !== toEmail.toLowerCase())
         )
       );
+      // Subject suffix: per-recipient so Gmail/Outlook don't collapse all the
+      // funder emails into one giant thread on the sender's side. Prefer the
+      // explicit label (funder name); fall back to the local-part of the
+      // recipient address.
+      const recipientLabel = (r.label?.trim() || toEmail.split('@')[0]).slice(0, 80);
       try {
         const info = await transporter.sendMail({
           from: base.smtp.from,
           to: toEmail,
           cc: ccEmails.length ? ccEmails : undefined,
           replyTo: base.replyTo,
-          subject: buildSubject(base.dealName),
+          subject: buildSubject(base.dealName, recipientLabel),
           text: buildBody(base.bodyNotes, base.structuredFields),
           attachments: base.attachments.map((a) => ({
             filename: a.filename,
             content: a.content,
             contentType: a.contentType,
           })),
+          // Defensively make sure no reply/reference header sneaks in from
+          // pooled transport state. Each message stands on its own.
+          inReplyTo: undefined,
+          references: undefined,
         });
         out.push({ ref: r.ref, toEmail, success: true, messageId: info.messageId, response: info.response });
       } catch (err) {

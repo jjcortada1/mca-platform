@@ -6,7 +6,7 @@ import {
   Card, CardContent,
   Button, Badge, Textarea,
 } from '@/components/ui/primitives';
-import { formatDate } from '@/lib/utils';
+import { formatDate, cn } from '@/lib/utils';
 
 interface SubmissionFunder {
   id: string;
@@ -106,6 +106,18 @@ export default function SubmissionsPage() {
 
   useEffect(() => { load(); loadFunders(); }, []);
 
+  // Track per-row notes locally (controlled inputs) — autosaved on blur.
+  const [localNotes, setLocalNotes] = useState<Record<string, string>>({});
+
+  async function updateFunder(sfId: string, patch: { status?: string; notes?: string }) {
+    await fetch(`/api/submission-funders/${sfId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    load();
+  }
+
   async function saveFunder(sfId: string) {
     const e = editing[sfId];
     if (!e) return;
@@ -202,60 +214,47 @@ export default function SubmissionsPage() {
                   <CardContent className="border-t border-border">
                     <div className="space-y-2 mt-4">
                       {row.funders.map((sf) => {
-                        const ed = editing[sf.id];
+                        const notesValue = localNotes[sf.id] ?? sf.notes ?? '';
                         return (
                           <div key={sf.id} className="rounded border border-border p-3">
-                            <div className="flex items-center justify-between mb-2">
-                              <div>
+                            <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
+                              <div className="min-w-0">
                                 <div className="font-medium text-sm">{sf.funderName}</div>
                                 <div className="text-xs text-muted-foreground">
                                   Submitted {formatDate(sf.submittedAt)}
                                 </div>
                               </div>
                               <div className="flex items-center gap-2">
-                                {ed ? (
-                                  <>
-                                    <select
-                                      value={ed.status}
-                                      onChange={(e) =>
-                                        setEditing((p) => ({ ...p, [sf.id]: { ...ed, status: e.target.value } }))
-                                      }
-                                      className="rounded border border-input bg-background px-2 py-1 text-xs"
-                                    >
-                                      <option value="no_response">No response</option>
-                                      <option value="approved">Approved</option>
-                                      <option value="declined">Declined</option>
-                                    </select>
-                                    <Button size="sm" onClick={() => saveFunder(sf.id)}>Save</Button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Badge
-                                      variant={
-                                        sf.status === 'approved' ? 'success' :
-                                        sf.status === 'declined' ? 'destructive' : 'outline'
-                                      }
-                                    >
-                                      {sf.status === 'no_response' ? 'pending' : sf.status}
-                                    </Badge>
-                                    <Button size="sm" variant="outline" onClick={() => startEdit(sf)}>Edit</Button>
-                                    <Button size="sm" variant="ghost" onClick={() => removeFunder(sf.id)}>Remove</Button>
-                                  </>
-                                )}
+                                <select
+                                  value={sf.status}
+                                  onChange={(e) => updateFunder(sf.id, { status: e.target.value })}
+                                  className={cn(
+                                    'rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors',
+                                    sf.status === 'approved' && 'bg-emerald-50 border-emerald-300 text-emerald-700',
+                                    sf.status === 'declined' && 'bg-rose-50 border-rose-300 text-rose-700',
+                                    sf.status === 'no_response' && 'bg-card border-border text-foreground',
+                                  )}
+                                >
+                                  <option value="no_response">Pending</option>
+                                  <option value="approved">Approved</option>
+                                  <option value="declined">Declined</option>
+                                </select>
+                                <Button size="sm" variant="ghost" onClick={() => removeFunder(sf.id)}>Remove</Button>
                               </div>
                             </div>
-                            {ed ? (
-                              <Textarea
-                                value={ed.notes}
-                                onChange={(e) =>
-                                  setEditing((p) => ({ ...p, [sf.id]: { ...ed, notes: e.target.value } }))
+                            <Textarea
+                              value={notesValue}
+                              onChange={(e) => setLocalNotes((p) => ({ ...p, [sf.id]: e.target.value }))}
+                              onBlur={() => {
+                                const current = localNotes[sf.id];
+                                if (current !== undefined && current !== (sf.notes ?? '')) {
+                                  updateFunder(sf.id, { notes: current });
                                 }
-                                placeholder="Notes (offer terms, response details, etc.)"
-                                rows={2}
-                              />
-                            ) : sf.notes ? (
-                              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{sf.notes}</p>
-                            ) : null}
+                              }}
+                              placeholder="Offer terms, response details, etc."
+                              rows={2}
+                              className="text-sm"
+                            />
                           </div>
                         );
                       })}

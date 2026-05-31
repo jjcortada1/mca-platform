@@ -39,6 +39,9 @@ export async function POST(req: NextRequest) {
     let dealId = (formData.get('dealId') as string) || (formData.get('deal_id') as string) || '';
     const dealName = ((formData.get('dealName') as string) || (formData.get('deal_name') as string) || '').trim();
     const bodyNotes = ((formData.get('notes') as string) || (formData.get('bodyNotes') as string) || '');
+    // Optional: assign the deal to a specific rep. Falls back to the sender.
+    const assignedRepIdRaw = (formData.get('assignedRepId') as string) || (formData.get('assigned_rep_id') as string) || '';
+    const assignedRepId = assignedRepIdRaw.trim() || ctx.user.id;
 
     // Safe JSON parsing — malformed payloads return a clean 400, not a 500.
     let ccEmails: string[];
@@ -63,6 +66,19 @@ export async function POST(req: NextRequest) {
     }
 
     // Resolve or create the deal
+    // Validate that the chosen rep belongs to this company (admins can assign
+    // anyone; non-admins are silently forced to themselves).
+    let resolvedRepId = ctx.user.id;
+    const isAdmin = ctx.user.role === 'company_admin' || ctx.user.role === 'master_admin';
+    if (isAdmin && assignedRepId) {
+      const [rep] = await db.select({ id: users.id, role: users.role })
+        .from(users)
+        .where(and(eq(users.id, assignedRepId), eq(users.companyId, ctx.companyId)))
+        .limit(1);
+      // Lead source users can't own deals — fall back to sender if someone tries.
+      if (rep && rep.role !== 'lead_source') resolvedRepId = rep.id;
+    }
+
     let deal;
     if (dealId) {
       const [found] = await db
@@ -72,6 +88,13 @@ export async function POST(req: NextRequest) {
         .limit(1);
       if (!found) return NextResponse.json({ error: 'Deal not found' }, { status: 404 });
       deal = found;
+      // If the admin explicitly picked a different rep for this submission,
+      // propagate that to the deal record.
+      if (isAdmin && assignedRepIdRaw && resolvedRepId !== found.assignedRepId) {
+        await db.update(deals).set({ assignedRepId: resolvedRepId, updatedAt: new Date() })
+          .where(eq(deals.id, found.id));
+        deal = { ...found, assignedRepId: resolvedRepId };
+      }
     } else {
       // Auto-create a minimal deal from dealName
       const [created] = await db
@@ -80,7 +103,7 @@ export async function POST(req: NextRequest) {
           companyId: ctx.companyId,
           name: dealName,
           status: 'shopping',
-          assignedRepId: ctx.user.id,
+          assignedRepId: resolvedRepId,
           createdBy: ctx.user.id,
         })
         .returning();
@@ -198,7 +221,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Send all as isolated messages over a single pooled connection.
-    // Each funder gets its OWN email — no funder is ever in another's To/CC.
+    // Each funder gets its OWN email with its own subject suffix so each one
+    // lands in a separate conversation thread on the sender's side.
     const sendResults = toSend.length
       ? await sendDealEmailBatch(
           {
@@ -209,7 +233,7 @@ export async function POST(req: NextRequest) {
             structuredFields: structuredFieldsInput,
             attachments,
           },
-          toSend.map((t) => ({ toEmail: t.fi.toEmail, ref: t.ref }))
+          toSend.map((t) => ({ toEmail: t.fi.toEmail, ref: t.ref, label: t.fName }))
         )
       : [];
     const byRef = new Map(sendResults.map((r) => [r.ref, r]));
@@ -228,11 +252,13 @@ export async function POST(req: NextRequest) {
         })
         .returning();
 
+      // Mirror the per-recipient subject we used on the actual send.
+      const recipientLabel = (t.fName?.trim() || t.fi.toEmail.split('@')[0]).slice(0, 80);
       await db.insert(submissionEmails).values({
         submissionFunderId: sf.id,
         toEmail: t.fi.toEmail,
         ccEmails: allCc,
-        subject: `NEW DEAL | ${deal.name}`,
+        subject: `New Deal - ${deal.name} - ${recipientLabel}`,
         body: bodyNotes,
         attachmentMeta: attachments.map((a) => ({ name: a.filename, size: a.content.length })),
         smtpMessageId: sr?.messageId,
