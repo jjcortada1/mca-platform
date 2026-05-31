@@ -7,7 +7,7 @@ import {
   Button, Badge, Textarea,
 } from '@/components/ui/primitives';
 import { formatDate, cn } from '@/lib/utils';
-import { Download } from 'lucide-react';
+import { Download, Send, PlusCircle } from 'lucide-react';
 import { exportCSV } from '@/lib/csv-export';
 
 interface SubmissionFunder {
@@ -39,12 +39,26 @@ export default function SubmissionsPage() {
   const [funderList, setFunderList] = useState<{ id: string; name: string }[]>([]);
   const [manualForm, setManualForm] = useState({
     dealName: '',
+    dealId: '',         // when set, attach to this existing deal instead of name-matching
     funderId: '',
     manualFunderName: '',
     status: 'no_response' as 'no_response' | 'approved' | 'declined',
     notes: '',
   });
   const [manualSaving, setManualSaving] = useState(false);
+
+  /** Open the manual-add modal pre-filled for a specific existing deal. */
+  function openManualForDeal(dealId: string, dealName: string) {
+    setManualForm({
+      dealName,
+      dealId,
+      funderId: '',
+      manualFunderName: '',
+      status: 'no_response',
+      notes: '',
+    });
+    setShowManualAdd(true);
+  }
 
   async function load() {
     setLoading(true);
@@ -77,16 +91,19 @@ export default function SubmissionsPage() {
   }
 
   async function submitManual() {
-    if (!manualForm.dealName.trim()) { alert('Deal name is required.'); return; }
+    if (!manualForm.dealId && !manualForm.dealName.trim()) { alert('Deal name is required.'); return; }
     if (!manualForm.funderId && !manualForm.manualFunderName.trim()) {
       alert('Pick a funder OR type a funder name.'); return;
     }
     setManualSaving(true);
     try {
       const body: Record<string, unknown> = {
-        dealName: manualForm.dealName.trim(),
         status: manualForm.status,
       };
+      // When attaching to an existing deal, send dealId so the server reuses
+      // the deal (and existing submission row); otherwise send dealName.
+      if (manualForm.dealId) body.dealId = manualForm.dealId;
+      else body.dealName = manualForm.dealName.trim();
       if (manualForm.funderId) body.funderId = manualForm.funderId;
       else body.manualFunderName = manualForm.manualFunderName.trim();
       if (manualForm.notes.trim()) body.notes = manualForm.notes.trim();
@@ -99,7 +116,7 @@ export default function SubmissionsPage() {
       const j = await res.json();
       if (!res.ok) { alert(j.error || 'Failed.'); return; }
       setShowManualAdd(false);
-      setManualForm({ dealName: '', funderId: '', manualFunderName: '', status: 'no_response', notes: '' });
+      setManualForm({ dealName: '', dealId: '', funderId: '', manualFunderName: '', status: 'no_response', notes: '' });
       load();
     } finally {
       setManualSaving(false);
@@ -294,10 +311,30 @@ export default function SubmissionsPage() {
                       })}
                     </div>
 
-                    <div className="mt-4 flex gap-2">
-                      <Link href={`/deal-shop/submit?dealId=${row.dealId}`}>
-                        <Button variant="outline" size="sm">Add more funders</Button>
-                      </Link>
+                    <div className="mt-4 pt-3 border-t border-border">
+                      <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-2">
+                        Add another funder to this deal
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Link href={`/submit?dealId=${row.dealId}`}>
+                          <Button variant="outline" size="sm" className="gap-1.5">
+                            <Send className="h-3.5 w-3.5" />
+                            Submit to more funders
+                          </Button>
+                        </Link>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openManualForDeal(row.dealId, row.dealName)}
+                          className="gap-1.5"
+                        >
+                          <PlusCircle className="h-3.5 w-3.5" />
+                          Log funder manually
+                        </Button>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground mt-2 leading-relaxed">
+                        <span className="font-medium">Submit to more</span> sends a real email through your SMTP and tracks the response. <span className="font-medium">Log manually</span> just records a funder you shopped outside the system — no email sent.
+                      </p>
                     </div>
                   </CardContent>
                 )}
@@ -324,8 +361,17 @@ export default function SubmissionsPage() {
                   value={manualForm.dealName}
                   onChange={(e) => setManualForm({ ...manualForm, dealName: e.target.value })}
                   placeholder="ABC Plumbing"
-                  className="mt-1 w-full h-10 px-3 rounded-md border border-input bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  readOnly={!!manualForm.dealId}
+                  className={cn(
+                    'mt-1 w-full h-10 px-3 rounded-md border border-input bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring',
+                    manualForm.dealId && 'bg-muted/40 cursor-not-allowed'
+                  )}
                 />
+                {manualForm.dealId && (
+                  <span className="text-[11px] text-muted-foreground mt-1 block">
+                    Logging an outside-system funder against this existing deal.
+                  </span>
+                )}
               </label>
               <label className="block">
                 <span className="text-xs font-medium text-muted-foreground">Funder (pick one)</span>

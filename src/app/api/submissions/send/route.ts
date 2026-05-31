@@ -253,12 +253,11 @@ export async function POST(req: NextRequest) {
         .returning();
 
       // Mirror the per-recipient subject we used on the actual send.
-      const recipientLabel = (t.fName?.trim() || t.fi.toEmail.split('@')[0]).slice(0, 80);
       await db.insert(submissionEmails).values({
         submissionFunderId: sf.id,
         toEmail: t.fi.toEmail,
         ccEmails: allCc,
-        subject: `New Deal - ${deal.name} - ${recipientLabel}`,
+        subject: `New Deal - ${deal.name}`,
         body: bodyNotes,
         attachmentMeta: attachments.map((a) => ({ name: a.filename, size: a.content.length })),
         smtpMessageId: sr?.messageId,

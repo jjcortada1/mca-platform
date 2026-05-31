@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
 import { submissions, submissionFunders, deals, funders, users } from '@/lib/db/schema';
-import { eq, desc, inArray } from 'drizzle-orm';
+import { eq, desc, inArray, and } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
 
@@ -141,15 +141,26 @@ export async function POST(req: Request) {
       }
     }
 
-    // Create the submission shell
-    const [sub] = await db.insert(submissions).values({
-      companyId: ctx.companyId,
-      dealId,
-    }).returning();
+    // Reuse existing submission for this deal if one exists, so the new funder
+    // attaches to the same submission row instead of creating a duplicate.
+    let submissionId: string;
+    const [existing] = await db.select().from(submissions)
+      .where(and(eq(submissions.dealId, dealId), eq(submissions.companyId, ctx.companyId)))
+      .orderBy(submissions.createdAt)
+      .limit(1);
+    if (existing) {
+      submissionId = existing.id;
+    } else {
+      const [sub] = await db.insert(submissions).values({
+        companyId: ctx.companyId,
+        dealId,
+      }).returning();
+      submissionId = sub.id;
+    }
 
     // Attach the funder (no email sent — manual entry only)
     await db.insert(submissionFunders).values({
-      submissionId: sub.id,
+      submissionId,
       funderId: body.funderId ?? null,
       manualFunderName: body.funderId ? null : (body.manualFunderName ?? null),
       submittedBy: ctx.user.id,
@@ -157,6 +168,6 @@ export async function POST(req: Request) {
       notes: body.notes ?? null,
     });
 
-    return NextResponse.json({ ok: true, submissionId: sub.id });
+    return NextResponse.json({ ok: true, submissionId });
   } catch (e) { return apiError(e); }
 }

@@ -67,13 +67,39 @@ function buildBody(notes: string, fields: StructuredField[]): string {
   return lines.join('\n');
 }
 
-function buildSubject(dealName: string, recipientLabel?: string): string {
-  // Format: "New Deal - {dealName}" with optional " - {funder/ref}" suffix.
-  // The suffix is added per recipient when sending a batch so that Gmail
-  // (which threads by exact subject match) treats each funder's email as a
-  // separate conversation, not one giant thread.
-  const base = `New Deal - ${dealName}`;
-  return recipientLabel ? `${base} - ${recipientLabel}` : base;
+function buildSubject(dealName: string): string {
+  // Plain "New Deal - {dealName}". Per-recipient thread-breaking is handled
+  // with an invisible disambiguator appended at send time, not visible text.
+  return `New Deal - ${dealName}`;
+}
+
+/**
+ * Gmail (and Outlook's "Conversation View") collapse messages whose subjects
+ * match exactly into a single thread on the sender's side. We don't want that
+ * for shopping emails — each funder should appear as its own conversation.
+ *
+ * Solution: append zero-width characters that are invisible to the human eye
+ * but make each subject technically unique, defeating exact-subject grouping
+ * without uglifying the subject the recipient sees.
+ *
+ * `seed` should be unique per recipient (e.g. the funderId or the recipient
+ * email). We encode it as a deterministic sequence of zero-width joiner /
+ * non-joiner characters appended to the subject.
+ */
+function applyThreadBreaker(subject: string, seed: string): string {
+  // Two invisible chars: zero-width-non-joiner (U+200C) and zero-width-joiner (U+200D).
+  // Encode a hash of the seed as binary across these two characters.
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  // 16 invisible chars carry enough entropy to make each recipient unique.
+  let suffix = '';
+  for (let i = 0; i < 16; i++) {
+    suffix += ((hash >> i) & 1) ? '\u200D' : '\u200C';
+    if ((i & 7) === 7) hash = (hash * 131 + 7) >>> 0;
+  }
+  return subject + suffix;
 }
 
 function makeTransport(smtp: SmtpConfig): Transporter {
@@ -209,18 +235,17 @@ export async function sendDealEmailBatch(
             .filter((e) => e.toLowerCase() !== toEmail.toLowerCase())
         )
       );
-      // Subject suffix: per-recipient so Gmail/Outlook don't collapse all the
-      // funder emails into one giant thread on the sender's side. Prefer the
-      // explicit label (funder name); fall back to the local-part of the
-      // recipient address.
-      const recipientLabel = (r.label?.trim() || toEmail.split('@')[0]).slice(0, 80);
+      // Clean subject. Invisible per-recipient disambiguator appended to defeat
+      // Gmail's same-subject conversation grouping without uglifying the subject.
+      const cleanSubject = buildSubject(base.dealName);
+      const subjectForSend = applyThreadBreaker(cleanSubject, `${r.ref}|${toEmail}`);
       try {
         const info = await transporter.sendMail({
           from: base.smtp.from,
           to: toEmail,
           cc: ccEmails.length ? ccEmails : undefined,
           replyTo: base.replyTo,
-          subject: buildSubject(base.dealName, recipientLabel),
+          subject: subjectForSend,
           text: buildBody(base.bodyNotes, base.structuredFields),
           attachments: base.attachments.map((a) => ({
             filename: a.filename,

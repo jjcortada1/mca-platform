@@ -33,6 +33,10 @@ function SubmitDealInner() {
 
   // From shop tab — these are pre-fill hints, not required
   const fromShop = searchParams.get('shop') === '1';
+  // When linked from Submissions ("Submit to more funders"), the existing
+  // deal's ID is passed so the send route attaches to it instead of creating
+  // a duplicate deal.
+  const prefillDealId = searchParams.get('dealId') || '';
 
   const [allFunders, setAllFunders] = useState<FunderRow[]>([]);
   const [companyInfo, setCompanyInfo] = useState<{ globalCcEmails?: string[] }>({});
@@ -45,6 +49,9 @@ function SubmitDealInner() {
 
   // Form fields
   const [dealName, setDealName] = useState('');
+  // When set, the send route reuses this existing deal instead of auto-creating one.
+  const [dealId, setDealId] = useState<string>(prefillDealId);
+  const [dealLocked, setDealLocked] = useState<boolean>(false);
   const [assignedRepId, setAssignedRepId] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [files, setFiles] = useState<File[]>([]);
@@ -92,6 +99,23 @@ function SubmitDealInner() {
       const smtpData = smtpJson?.data ?? smtpJson;
       setSmtpConfigured(!!smtpData?.hasConfig);
       setFromEmail(smtpData?.from ?? smtpData?.user ?? null);
+
+      // If we were linked here with a specific dealId ("Submit to more funders"),
+      // pull the deal's current info and pre-fill (and lock) the name field so
+      // the user can't rename a deal by accident.
+      if (prefillDealId) {
+        fetch(`/api/deals/${prefillDealId}`)
+          .then((r) => r.json())
+          .then((j) => {
+            const d = j?.data ?? j?.deal ?? j;
+            if (d?.name) {
+              setDealName(d.name);
+              setDealLocked(true);
+            }
+            if (d?.assignedRepId) setAssignedRepId(d.assignedRepId);
+          })
+          .catch(() => {});
+      }
 
       // If we came from Shop with funders selected, pre-select them here.
       if (fromShop) {
@@ -179,6 +203,7 @@ function SubmitDealInner() {
     // Build payload
     const fd = new FormData();
     fd.append('dealName', dealName.trim());
+    if (dealId) fd.append('dealId', dealId);
     if (assignedRepId) fd.append('assignedRepId', assignedRepId);
     fd.append('notes', notes);
 
@@ -293,12 +318,19 @@ function SubmitDealInner() {
       {/* Deal name + Assigned rep */}
       <Card>
         <CardContent className="p-4 space-y-3">
+          {dealLocked && (
+            <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-foreground">
+              <span className="font-semibold">Adding more funders</span> to this existing deal. The deal name is locked so you don't accidentally create a duplicate.
+            </div>
+          )}
           <div className="grid sm:grid-cols-2 gap-3">
             <Field label="Business / Deal Name" required>
               <Input
                 placeholder="e.g. John Smith — Riverside Auto Repair"
                 value={dealName}
                 onChange={(e) => setDealName(e.target.value)}
+                readOnly={dealLocked}
+                className={dealLocked ? 'bg-muted/40 cursor-not-allowed' : ''}
               />
             </Field>
             {isAdmin && reps.length > 0 && (
