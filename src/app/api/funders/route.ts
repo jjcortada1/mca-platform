@@ -10,6 +10,10 @@ import { upsertFunderSchema } from '@/lib/validation/schemas';
 import { validateTierIds } from '@/lib/funders/repository';
 import { apiError } from '@/lib/api/errors';
 
+// Force dynamic: funder edits must reflect immediately on submit/deal-shop pages.
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   try {
     const ctx = await requireTenantContext();

@@ -70,7 +70,7 @@ function SubmitDealInner() {
   // Initial load
   useEffect(() => {
     Promise.all([
-      fetch('/api/funders').then((r) => r.json()),
+      fetch('/api/funders', { cache: 'no-store' }).then((r) => r.json()),
       fetch('/api/settings/company').then((r) => r.json()).catch(() => ({})),
       fetch('/api/settings/smtp').then((r) => r.json()).catch(() => ({})),
       fetch('/api/auth/me').then((r) => r.json()).catch(() => ({})),
@@ -465,8 +465,14 @@ function SubmitDealInner() {
               <div className="space-y-1.5">
                 {fundersByTier.map((f) => {
                   const selected = selectedFunderIds.has(f.id);
+                  // funders.emails (submission emails) is the source of truth for shopping.
+                  // Fall back to a contact's email only if no submission emails exist
+                  // (legacy data). Disable the pill if NEITHER exists.
+                  const shoppingEmails = (f.emails ?? []).filter((e) => e && e.includes('@'));
                   const primary = f.contacts.find((c) => c.isPrimary && c.email) ?? f.contacts.find((c) => c.email);
-                  const hasEmail = !!primary?.email;
+                  const displayEmail = shoppingEmails[0] ?? primary?.email ?? null;
+                  const extraCount = shoppingEmails.length > 1 ? shoppingEmails.length - 1 : 0;
+                  const hasEmail = !!displayEmail;
                   return (
                     <button
                       key={f.id}
@@ -482,10 +488,17 @@ function SubmitDealInner() {
                     >
                       <div className="min-w-0">
                         <div className="text-sm font-medium truncate">{f.name}</div>
-                        {primary?.email ? (
-                          <div className="text-xs text-muted-foreground font-mono truncate">{primary.email}</div>
+                        {displayEmail ? (
+                          <div className="text-xs text-muted-foreground font-mono truncate">
+                            {displayEmail}
+                            {extraCount > 0 && (
+                              <span className="ml-1.5 text-[10px] font-sans px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                                +{extraCount}
+                              </span>
+                            )}
+                          </div>
                         ) : (
-                          <div className="text-xs text-amber-600">No email — add a contact first</div>
+                          <div className="text-xs text-amber-600">No submission email — add one to this funder</div>
                         )}
                       </div>
                       <div className={cn(

@@ -70,7 +70,7 @@ export default function DealShopPage() {
       })
       .catch(() => {});
 
-    fetch('/api/funders')
+    fetch('/api/funders', { cache: 'no-store' })
       .then((r) => r.json())
       .then((j) => {
         const list: FunderDetail[] = j.data ?? j.funders ?? [];
