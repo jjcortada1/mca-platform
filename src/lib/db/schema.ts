@@ -184,6 +184,13 @@ export const funderTierAssignments = pgTable(
   {
     funderId: uuid('funder_id').notNull().references(() => funders.id, { onDelete: 'cascade' }),
     tierId: uuid('tier_id').notNull().references(() => funderTiers.id, { onDelete: 'cascade' }),
+    // Per-tier overrides. NULL = inherit from funder's base value. Allows a
+    // funder to appear in multiple tiers with different constraints, so
+    // e.g. a 3-position deal can match the same funder via "Subprime" (max 4)
+    // even when it's excluded from "A-Paper" (max 2) on the same funder.
+    maxPositions: integer('max_positions'),
+    minRevenue: numeric('min_revenue', { precision: 14, scale: 2 }),
+    minCreditTier: varchar('min_credit_tier', { length: 32 }),
   },
   (t) => ({ pk: primaryKey({ columns: [t.funderId, t.tierId] }) })
 );

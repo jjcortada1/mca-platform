@@ -172,26 +172,27 @@ export default function DealShopPage() {
     setSelectedFunders(new Set());
   }
 
-  // Group results by tier
+  // Group results by tier. Each result is already a (funder, tier) pair —
+  // matched independently per tier — so a funder can show up under both
+  // "A-Paper" (with one verdict) and "Subprime" (with a different verdict).
   const tierGroups = useMemo(() => {
     if (!results) return [];
     const map = new Map<string, { matched: MatchResult[]; excluded: MatchResult[] }>();
-    function tierFor(funderId: string): string {
-      const f = funderMap.get(funderId);
-      return f?.tiers && f.tiers.length > 0 ? f.tiers[0].name : 'Untiered';
+    function tierFor(r: MatchResult): string {
+      return r.tierName ?? 'Untiered';
     }
     for (const m of results.matched) {
-      const t = tierFor(m.funderId);
+      const t = tierFor(m);
       if (!map.has(t)) map.set(t, { matched: [], excluded: [] });
       map.get(t)!.matched.push(m);
     }
     for (const e of results.excluded) {
-      const t = tierFor(e.funderId);
+      const t = tierFor(e);
       if (!map.has(t)) map.set(t, { matched: [], excluded: [] });
       map.get(t)!.excluded.push(e);
     }
     return Array.from(map.entries()).map(([tier, v]) => ({ tier, ...v })).sort((a, b) => a.tier.localeCompare(b.tier));
-  }, [results, funderMap]);
+  }, [results]);
 
   const filteredGroups = activeTier === 'all' ? tierGroups : tierGroups.filter((g) => g.tier === activeTier);
   const totalMatched = results?.matched.length ?? 0;

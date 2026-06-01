@@ -29,9 +29,19 @@ export async function GET() {
       contacts: contacts.filter((c) => c.funderId === f.id),
       tiers: assignments
         .filter((a) => a.funderId === f.id)
-        .map((a) => tierMap.get(a.tierId))
-        .filter(Boolean)
-        .map((t) => ({ id: t!.id, name: t!.name })),
+        .map((a) => {
+          const t = tierMap.get(a.tierId);
+          if (!t) return null;
+          return {
+            id: t.id,
+            name: t.name,
+            // Per-tier overrides; null means inherit from base funder values.
+            maxPositions: a.maxPositions,
+            minRevenue: a.minRevenue,
+            minCreditTier: a.minCreditTier,
+          };
+        })
+        .filter(Boolean) as { id: string; name: string; maxPositions: number | null; minRevenue: string | null; minCreditTier: string | null }[],
       restrictedStates: states.filter((s) => s.funderId === f.id).map((s) => s.stateCode),
       restrictedIndustries: inds.filter((i) => i.funderId === f.id).map((i) => i.industry),
     }));
@@ -54,6 +64,7 @@ export async function POST(req: NextRequest) {
       minRevenue: String(body.minRevenue),
       maxPositions: body.maxPositions,
       minCreditTier: body.minCreditTier,
+      emails: body.emails && body.emails.length ? body.emails : null,
       notes: body.notes ?? null,
       isActive: body.isActive,
     }).returning();
@@ -63,11 +74,29 @@ export async function POST(req: NextRequest) {
         funderId: f.id, name: c.name, phone: c.phone || null, email: c.email || null, isPrimary: c.isPrimary,
       })));
     }
-    const validTierIds = await validateTierIds(ctx.companyId, body.tierIds);
-    if (validTierIds.length) {
-      await db.insert(funderTierAssignments).values(
-        validTierIds.map((tid) => ({ funderId: f.id, tierId: tid }))
-      );
+
+    // Tier assignments: prefer the richer tierAssignments shape (with
+    // per-tier overrides). Fall back to legacy tierIds (no overrides).
+    if (body.tierAssignments && body.tierAssignments.length) {
+      const validTierIds = await validateTierIds(ctx.companyId, body.tierAssignments.map((a) => a.tierId));
+      const validSet = new Set(validTierIds);
+      const rows = body.tierAssignments
+        .filter((a) => validSet.has(a.tierId))
+        .map((a) => ({
+          funderId: f.id,
+          tierId: a.tierId,
+          maxPositions: a.maxPositions ?? null,
+          minRevenue: a.minRevenue != null ? String(a.minRevenue) : null,
+          minCreditTier: a.minCreditTier ?? null,
+        }));
+      if (rows.length) await db.insert(funderTierAssignments).values(rows);
+    } else {
+      const validTierIds = await validateTierIds(ctx.companyId, body.tierIds);
+      if (validTierIds.length) {
+        await db.insert(funderTierAssignments).values(
+          validTierIds.map((tid) => ({ funderId: f.id, tierId: tid }))
+        );
+      }
     }
     if (body.restrictedStates.length) {
       await db.insert(funderRestrictedStates).values(body.restrictedStates.map((s) => ({ funderId: f.id, stateCode: s })));

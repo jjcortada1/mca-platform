@@ -64,7 +64,22 @@ export const upsertFunderSchema = z.object({
   minCreditTier: creditTier.default('unknown'),
   notes: z.string().max(5000).optional().nullable(),
   isActive: z.boolean().default(true),
+  // funders.emails — submission emails used when shopping a deal. Multiple OK.
+  emails: z.array(z.string().email()).default([]).optional(),
+  // Legacy: array of tier UUIDs (no overrides). Still accepted.
   tierIds: z.array(z.string().uuid()).default([]),
+  // Preferred: array of tier assignments with per-tier override fields.
+  // Each null override = inherit from base funder value.
+  tierAssignments: z
+    .array(
+      z.object({
+        tierId: z.string().uuid(),
+        maxPositions: z.coerce.number().int().nonnegative().nullable().optional(),
+        minRevenue: z.coerce.number().nonnegative().nullable().optional(),
+        minCreditTier: creditTier.nullable().optional(),
+      })
+    )
+    .optional(),
   contacts: z
     .array(
       z.object({

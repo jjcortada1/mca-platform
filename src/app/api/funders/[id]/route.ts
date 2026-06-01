@@ -25,6 +25,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       minRevenue: String(body.minRevenue),
       maxPositions: body.maxPositions,
       minCreditTier: body.minCreditTier,
+      emails: body.emails && body.emails.length ? body.emails : null,
       notes: body.notes ?? null,
       isActive: body.isActive,
       updatedAt: new Date(),
@@ -41,11 +42,27 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
         funderId: params.id, name: c.name, phone: c.phone || null, email: c.email || null, isPrimary: c.isPrimary,
       })));
     }
-    const validTierIds = await validateTierIds(ctx.companyId, body.tierIds);
-    if (validTierIds.length) {
-      await db.insert(funderTierAssignments).values(
-        validTierIds.map((tid) => ({ funderId: params.id, tierId: tid }))
-      );
+
+    if (body.tierAssignments && body.tierAssignments.length) {
+      const validTierIds = await validateTierIds(ctx.companyId, body.tierAssignments.map((a) => a.tierId));
+      const validSet = new Set(validTierIds);
+      const rows = body.tierAssignments
+        .filter((a) => validSet.has(a.tierId))
+        .map((a) => ({
+          funderId: params.id,
+          tierId: a.tierId,
+          maxPositions: a.maxPositions ?? null,
+          minRevenue: a.minRevenue != null ? String(a.minRevenue) : null,
+          minCreditTier: a.minCreditTier ?? null,
+        }));
+      if (rows.length) await db.insert(funderTierAssignments).values(rows);
+    } else {
+      const validTierIds = await validateTierIds(ctx.companyId, body.tierIds);
+      if (validTierIds.length) {
+        await db.insert(funderTierAssignments).values(
+          validTierIds.map((tid) => ({ funderId: params.id, tierId: tid }))
+        );
+      }
     }
     if (body.restrictedStates.length) {
       await db.insert(funderRestrictedStates).values(body.restrictedStates.map((s) => ({ funderId: params.id, stateCode: s })));

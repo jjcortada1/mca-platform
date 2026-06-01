@@ -29,8 +29,19 @@ interface Funder {
   minCreditTier: 'unknown' | 'under_550' | '550_599' | '600_649' | '650_plus';
   notes: string | null;
   isActive: boolean;
+  // Multi-value submission emails — used when shopping deals to this funder.
+  emails?: string[] | null;
+  // Multi-value phones (display-only).
+  phones?: string[] | null;
   contacts: Contact[];
-  tiers: { id: string; name: string }[];
+  tiers: {
+    id: string;
+    name: string;
+    // Per-tier overrides — null = inherit funder base.
+    maxPositions?: number | null;
+    minRevenue?: string | null;
+    minCreditTier?: 'unknown' | 'under_550' | '550_599' | '600_649' | '650_plus' | null;
+  }[];
   restrictedStates: string[];
   restrictedIndustries: string[];
 }
@@ -50,6 +61,8 @@ const blankFunder = (): Funder => ({
   minCreditTier: 'unknown',
   notes: '',
   isActive: true,
+  emails: [],
+  phones: [],
   contacts: [{ name: '', phone: '', email: '', isPrimary: true }],
   tiers: [],
   restrictedStates: [],
@@ -91,8 +104,17 @@ export default function FundersPage() {
       minCreditTier: editing.minCreditTier,
       notes: editing.notes,
       isActive: editing.isActive,
+      // Submission emails (used for shopping)
+      emails: (editing.emails ?? []).map((e) => e.trim()).filter(Boolean),
       contacts: editing.contacts.filter((c) => c.name.trim() || c.email?.trim()),
-      tierIds: editing.tiers.map((t) => t.id),
+      // Send tierAssignments (with per-tier overrides) — backend prefers this
+      // shape over the legacy tierIds array.
+      tierAssignments: editing.tiers.map((t) => ({
+        tierId: t.id,
+        maxPositions: t.maxPositions ?? null,
+        minRevenue: t.minRevenue != null && t.minRevenue !== '' ? Number(t.minRevenue) : null,
+        minCreditTier: t.minCreditTier ?? null,
+      })),
       restrictedStates: editing.restrictedStates,
       restrictedIndustries: editing.restrictedIndustries,
     };
@@ -537,31 +559,130 @@ function FunderDrawer({
           </section>
 
           <section className="space-y-2">
+            <h3 className="font-medium text-sm uppercase tracking-wide text-muted-foreground">Submission emails</h3>
+            <p className="text-[11px] text-muted-foreground -mt-1">
+              Where deals are sent when you shop this funder. Multiple addresses OK — every one gets the email.
+            </p>
+            <div className="space-y-2">
+              {(funder.emails ?? []).map((em, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Input
+                    placeholder="submissions@funder.com"
+                    value={em}
+                    onChange={(e) => {
+                      const next = [...(funder.emails ?? [])];
+                      next[i] = e.target.value;
+                      update('emails', next);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => update('emails', (funder.emails ?? []).filter((_, idx) => idx !== i))}
+                    className="text-xs text-muted-foreground hover:text-destructive px-2"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" onClick={() => update('emails', [...(funder.emails ?? []), ''])}>
+                + Add submission email
+              </Button>
+            </div>
+          </section>
+
+          <section className="space-y-2">
             <h3 className="font-medium text-sm uppercase tracking-wide text-muted-foreground">Tiers</h3>
+            <p className="text-[11px] text-muted-foreground -mt-1">
+              A funder can belong to multiple tiers. Each tier can have its own max positions / min revenue / min credit — overrides the funder defaults above. Leave blank to inherit.
+            </p>
             {tiers.length === 0 ? (
               <p className="text-xs text-muted-foreground">No tiers defined yet. Create them in Settings.</p>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                {tiers.map((t) => {
-                  const selected = funder.tiers.some((ft) => ft.id === t.id);
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => {
-                        const next = selected
-                          ? funder.tiers.filter((ft) => ft.id !== t.id)
-                          : [...funder.tiers, t];
-                        update('tiers', next);
-                      }}
-                      className={`px-3 py-1 rounded text-xs ${
-                        selected ? 'bg-primary text-primary-foreground' : 'bg-muted'
-                      }`}
-                    >
-                      {t.name}
-                    </button>
-                  );
-                })}
-              </div>
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {tiers.map((t) => {
+                    const selected = funder.tiers.some((ft) => ft.id === t.id);
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => {
+                          const next = selected
+                            ? funder.tiers.filter((ft) => ft.id !== t.id)
+                            : [...funder.tiers, { id: t.id, name: t.name, maxPositions: null, minRevenue: null, minCreditTier: null }];
+                          update('tiers', next);
+                        }}
+                        className={`px-3 py-1 rounded text-xs ${
+                          selected ? 'bg-primary text-primary-foreground' : 'bg-muted'
+                        }`}
+                      >
+                        {t.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                {funder.tiers.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {funder.tiers.map((ft, ti) => (
+                      <div key={ft.id} className="rounded border border-border p-2.5 bg-muted/20">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-semibold">{ft.name}</span>
+                          <span className="text-[10px] text-muted-foreground">overrides (blank = inherit)</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="text-[10px] text-muted-foreground uppercase tracking-wide">Max positions</label>
+                            <Input
+                              type="number"
+                              min={0}
+                              placeholder={String(funder.maxPositions)}
+                              value={ft.maxPositions == null ? '' : String(ft.maxPositions)}
+                              onChange={(e) => {
+                                const next = [...funder.tiers];
+                                next[ti] = { ...ft, maxPositions: e.target.value === '' ? null : parseInt(e.target.value, 10) };
+                                update('tiers', next);
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-muted-foreground uppercase tracking-wide">Min revenue</label>
+                            <Input
+                              type="number"
+                              min={0}
+                              placeholder={funder.minRevenue}
+                              value={ft.minRevenue == null ? '' : String(ft.minRevenue)}
+                              onChange={(e) => {
+                                const next = [...funder.tiers];
+                                next[ti] = { ...ft, minRevenue: e.target.value === '' ? null : e.target.value };
+                                update('tiers', next);
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-muted-foreground uppercase tracking-wide">Min credit</label>
+                            <select
+                              value={ft.minCreditTier ?? ''}
+                              onChange={(e) => {
+                                const next = [...funder.tiers];
+                                next[ti] = { ...ft, minCreditTier: e.target.value === '' ? null : e.target.value as Funder['minCreditTier'] };
+                                update('tiers', next);
+                              }}
+                              className="h-9 w-full rounded-md border border-input bg-card px-2 text-xs"
+                            >
+                              <option value="">inherit</option>
+                              <option value="unknown">Unknown</option>
+                              <option value="under_550">Under 550</option>
+                              <option value="550_599">550–599</option>
+                              <option value="600_649">600–649</option>
+                              <option value="650_plus">650+</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </section>
 
@@ -731,7 +852,7 @@ function BulkImportModal({
   const [dragOver, setDragOver] = useState(false);
   const [result, setResult] = useState<{
     ok: number; failed: number; total: number;
-    errors: { row: number; message: string }[]; created: string[];
+    errors: { row: number; message: string }[]; created: string[]; updated?: string[];
   } | null>(null);
 
   function onFileChosen(f: File | null) {
@@ -755,7 +876,7 @@ function BulkImportModal({
     const json = await res.json();
     setUploading(false);
     if (!res.ok) {
-      setResult({ ok: 0, failed: 0, total: 0, errors: [{ row: 0, message: json.error || 'Upload failed' }], created: [] });
+      setResult({ ok: 0, failed: 0, total: 0, errors: [{ row: 0, message: json.error || 'Upload failed' }], created: [], updated: [] });
       return;
     }
     setResult(json);
@@ -891,10 +1012,14 @@ function BulkImportModal({
 
               {result && (
                 <div className="space-y-2">
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-4 gap-2">
                     <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-center">
-                      <div className="text-2xl font-semibold text-emerald-700 tabular-nums">{result.ok}</div>
-                      <div className="text-[10px] uppercase tracking-wider text-emerald-700/80 mt-0.5">Imported</div>
+                      <div className="text-2xl font-semibold text-emerald-700 tabular-nums">{result.created?.length ?? 0}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-emerald-700/80 mt-0.5">New</div>
+                    </div>
+                    <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-center">
+                      <div className="text-2xl font-semibold text-sky-700 tabular-nums">{result.updated?.length ?? 0}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-sky-700/80 mt-0.5">Updated</div>
                     </div>
                     <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-center">
                       <div className="text-2xl font-semibold text-rose-700 tabular-nums">{result.failed}</div>

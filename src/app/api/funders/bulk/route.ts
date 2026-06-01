@@ -204,6 +204,7 @@ export async function POST(req: NextRequest) {
     const tierByName = new Map(existingTiers.map((t) => [t.name.toLowerCase(), t]));
 
     const created: string[] = [];
+    const updated: string[] = [];
     const rowErrors: { row: number; message: string }[] = [];
     let okCount = 0;
 
@@ -237,17 +238,6 @@ export async function POST(req: NextRequest) {
         const maxPositions = parseInt(parsed.max_positions || '99') || 99;
         const supportsRev = parseBool(parsed.supports_reverse_consolidation);
 
-        // Duplicate detection — skip if a funder with this name already exists
-        // for the company (case-insensitive).
-        const dupName = parsed.name.trim().toLowerCase();
-        const [dupe] = await db.select({ id: funders.id }).from(funders)
-          .where(and(eq(funders.companyId, ctx.companyId), sql`lower(${funders.name}) = ${dupName}`))
-          .limit(1);
-        if (dupe) {
-          rowErrors.push({ row: rowNum, message: `Skipped — funder "${parsed.name.trim()}" already exists` });
-          continue;
-        }
-
         // Combine `notes` and `additional_rules` if both present
         const combinedNotes = [parsed.notes?.trim(), parsed.additional_rules?.trim()]
           .filter(Boolean)
@@ -265,44 +255,127 @@ export async function POST(req: NextRequest) {
         const dedupedShoppingEmails = Array.from(new Set(shoppingEmails));
         const phones = parseList(parsed.phones || '').filter(Boolean);
 
-        // Insert funder
-        const [funder] = await db.insert(funders).values({
-          companyId: ctx.companyId,
-          name: parsed.name.trim(),
-          submissionMethod,
-          supportsReverseConsolidation: supportsRev,
-          minRevenue,
-          maxPositions,
-          minCreditTier,
-          emails: dedupedShoppingEmails.length ? dedupedShoppingEmails : null,
-          phones: phones.length ? phones : null,
-          notes: combinedNotes || null,
-          isActive: true,
-        }).returning();
+        // UPSERT: if a funder with this name exists, UPDATE it in place.
+        // Otherwise INSERT new. Re-uploading the same CSV with corrections is
+        // the primary use case — we never want to "skip" a funder silently.
+        const dupName = parsed.name.trim().toLowerCase();
+        const [dupe] = await db.select().from(funders)
+          .where(and(eq(funders.companyId, ctx.companyId), sql`lower(${funders.name}) = ${dupName}`))
+          .limit(1);
 
-        // Tier assignments
+        let funder: typeof funders.$inferSelect;
+        const isUpdate = !!dupe;
+
+        if (dupe) {
+          // UPDATE — replace base fields. For arrays (emails/phones) we MERGE
+          // (existing + new, deduped) so a partial re-upload never wipes data.
+          const mergedEmails = Array.from(new Set([
+            ...((dupe.emails as string[] | null) ?? []),
+            ...dedupedShoppingEmails,
+          ]));
+          const mergedPhones = Array.from(new Set([
+            ...((dupe.phones as string[] | null) ?? []),
+            ...phones,
+          ]));
+          const [updated] = await db.update(funders).set({
+            submissionMethod,
+            supportsReverseConsolidation: supportsRev,
+            minRevenue,
+            maxPositions,
+            minCreditTier,
+            emails: mergedEmails.length ? mergedEmails : null,
+            phones: mergedPhones.length ? mergedPhones : null,
+            // Append new notes if any; don't overwrite existing notes.
+            notes: combinedNotes
+              ? (dupe.notes ? `${dupe.notes}\n${combinedNotes}` : combinedNotes)
+              : dupe.notes,
+            updatedAt: new Date(),
+          }).where(eq(funders.id, dupe.id)).returning();
+          funder = updated;
+        } else {
+          // INSERT new funder
+          const [created] = await db.insert(funders).values({
+            companyId: ctx.companyId,
+            name: parsed.name.trim(),
+            submissionMethod,
+            supportsReverseConsolidation: supportsRev,
+            minRevenue,
+            maxPositions,
+            minCreditTier,
+            emails: dedupedShoppingEmails.length ? dedupedShoppingEmails : null,
+            phones: phones.length ? phones : null,
+            notes: combinedNotes || null,
+            isActive: true,
+          }).returning();
+          funder = created;
+        }
+
+        // Tier assignments. Each tier can carry its own max_positions override
+        // (per-tier "max_positions_TIERNAME" column). NULL = inherit from base.
+        // onConflictDoUpdate so re-upload refreshes the per-tier overrides.
         if (tierIds.length) {
-          await db.insert(funderTierAssignments).values(
-            tierIds.map((tid) => ({ funderId: funder.id, tierId: tid }))
-          ).onConflictDoNothing();
+          // tierNames and tierIds align by index (we built tierIds in the same
+          // order earlier). For each tier we look up a per-tier override column
+          // with naming pattern `max_positions_<tiername>` (lowercased,
+          // spaces → underscores). If absent, override = NULL.
+          for (let ti = 0; ti < tierIds.length; ti++) {
+            const tierId = tierIds[ti];
+            const tierName = tierNames[ti];
+            const overrideKey = `max_positions_${tierName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+            const overrideRaw = (rawRow as Record<string, string | undefined>)[overrideKey];
+            const tierMaxPos = overrideRaw && overrideRaw.trim()
+              ? parseInt(overrideRaw, 10) || null
+              : null;
+            await db.insert(funderTierAssignments).values({
+              funderId: funder.id,
+              tierId,
+              maxPositions: tierMaxPos,
+              minRevenue: null,
+              minCreditTier: null,
+            }).onConflictDoUpdate({
+              target: [funderTierAssignments.funderId, funderTierAssignments.tierId],
+              set: { maxPositions: tierMaxPos },
+            });
+          }
         }
 
         // Contacts — humans tied to this funder. NEVER used for shopping (that's
         // what funders.emails is for). Stored so JJ has someone to call.
+        // On UPDATE we leave existing contacts in place and only ADD new ones
+        // that aren't already there (dedupe by name+email).
+        const existingContacts = isUpdate
+          ? await db.select().from(funderContacts).where(eq(funderContacts.funderId, funder.id))
+          : [];
+        const contactKey = (n: string | null, e: string | null) =>
+          `${(n || '').toLowerCase().trim()}|${(e || '').toLowerCase().trim()}`;
+        const existingContactKeys = new Set(existingContacts.map((c) => contactKey(c.name, c.email)));
+
         const contactsToInsert: { funderId: string; name: string; role: string | null; email: string | null; phone: string | null; isPrimary: boolean; sortOrder: number }[] = [];
+
+        function addContactIfNew(contact: { name: string; role: string | null; email: string | null; phone: string | null }) {
+          const key = contactKey(contact.name, contact.email);
+          if (existingContactKeys.has(key)) return;
+          existingContactKeys.add(key);
+          contactsToInsert.push({
+            funderId: funder.id,
+            name: contact.name,
+            role: contact.role,
+            email: contact.email,
+            phone: contact.phone,
+            isPrimary: existingContacts.length === 0 && contactsToInsert.length === 0,
+            sortOrder: existingContacts.length + contactsToInsert.length,
+          });
+        }
 
         const simpleName = parsed.contact_name?.trim();
         const simplePhone = parsed.contact_phone?.trim();
         const simpleEmail = parsed.contact_email?.trim();
         if (simpleName || simplePhone || simpleEmail) {
-          contactsToInsert.push({
-            funderId: funder.id,
+          addContactIfNew({
             name: simpleName || simpleEmail || 'Primary contact',
             role: null,
             email: simpleEmail || null,
             phone: simplePhone || null,
-            isPrimary: true,
-            sortOrder: 0,
           });
         }
 
@@ -313,39 +386,49 @@ export async function POST(req: NextRequest) {
           { role: 'funding_manager', nameKey: 'funding_manager', emailKey: 'funding_manager_email', phoneKey: 'funding_manager_phone' },
         ];
         for (const rd of roleDefs) {
-          const name = (parsed as any)[rd.nameKey]?.trim();
-          const email = (parsed as any)[rd.emailKey]?.trim();
-          const phone = (parsed as any)[rd.phoneKey]?.trim();
+          const name = (parsed as Record<string, string | undefined>)[rd.nameKey]?.trim();
+          const email = (parsed as Record<string, string | undefined>)[rd.emailKey]?.trim();
+          const phone = (parsed as Record<string, string | undefined>)[rd.phoneKey]?.trim();
           if (name || email || phone) {
-            contactsToInsert.push({
-              funderId: funder.id,
+            addContactIfNew({
               name: name || email || rd.role.replace('_', ' '),
               role: rd.role,
               email: email || null,
               phone: phone || null,
-              isPrimary: contactsToInsert.length === 0,
-              sortOrder: contactsToInsert.length,
             });
           }
         }
 
-        // Also pick up legacy contact_name_N columns
+        // Also pick up legacy contact_name_N columns (still supported for back-compat)
         for (let cn = 1; cn <= 3; cn++) {
-          const name = (parsed as any)[`contact_name_${cn}`]?.trim();
-          const email = (parsed as any)[`contact_email_${cn}`]?.trim();
-          const phone = (parsed as any)[`contact_phone_${cn}`]?.trim();
+          const name = (parsed as Record<string, string | undefined>)[`contact_name_${cn}`]?.trim();
+          const email = (parsed as Record<string, string | undefined>)[`contact_email_${cn}`]?.trim();
+          const phone = (parsed as Record<string, string | undefined>)[`contact_phone_${cn}`]?.trim();
           if (name || email || phone) {
-            contactsToInsert.push({
-              funderId: funder.id,
+            addContactIfNew({
               name: name || email || `Contact ${cn}`,
               role: null,
               email: email || null,
               phone: phone || null,
-              isPrimary: contactsToInsert.length === 0,
-              sortOrder: contactsToInsert.length,
             });
           }
         }
+
+        // FALLBACK: if no human contact was provided (in the upload AND in
+        // existing contacts), use each submission email as a default
+        // "Primary contact". This satisfies the rule: "if there is no
+        // contact information, the default contact should just be the email."
+        if (existingContacts.length === 0 && contactsToInsert.length === 0 && dedupedShoppingEmails.length) {
+          for (const em of dedupedShoppingEmails) {
+            addContactIfNew({
+              name: em,
+              role: null,
+              email: em,
+              phone: null,
+            });
+          }
+        }
+
         if (contactsToInsert.length) {
           await db.insert(funderContacts).values(contactsToInsert);
         }
@@ -366,7 +449,8 @@ export async function POST(req: NextRequest) {
           ).onConflictDoNothing();
         }
 
-        created.push(funder.name);
+        if (isUpdate) updated.push(funder.name);
+        else created.push(funder.name);
         okCount++;
       } catch (e) {
         const msg = e instanceof z.ZodError
@@ -382,6 +466,7 @@ export async function POST(req: NextRequest) {
       total: rows.length,
       errors: rowErrors,
       created,
+      updated,
     });
   } catch (e) {
     return apiError(e);
@@ -460,16 +545,30 @@ export async function GET() {
     '# REQUIRED columns: only "name" must be filled.',
     '# All others are optional but encouraged.',
     '#',
+    '# RE-UPLOAD = UPDATE:',
+    '# - Re-uploading a CSV with a funder name that already exists will UPDATE',
+    '#   that funder in place (not skip and not duplicate). Submission emails',
+    '#   and phones are MERGED with what\'s already there — partial uploads',
+    '#   never erase existing data. Notes get appended.',
+    '#',
     '# IMPORTANT — how emails work:',
     '# - "submission_email" = where deals are sent when you shop them. You can list MULTIPLE',
     '#   addresses separated by ; or | (e.g. "submissions@x.com;intake@x.com"). Every',
     '#   address gets the email when you submit a deal.',
     '# - "contact_email" = a human contact (e.g. your ISO rep there). NEVER used for shopping.',
+    '# - If you don\'t provide ANY contact info, each submission email is saved as a',
+    '#   default contact so the funder card never looks empty.',
     '#',
-    '# MULTIPLE TIERS:',
+    '# MULTIPLE TIERS WITH DIFFERENT RULES:',
     '# - "tiers" supports multiple values separated by ; or | (e.g. "A-Paper;Subprime").',
     '# - A funder will appear in every tier listed.',
     '# - Tiers that don\'t exist yet are created automatically.',
+    '# - PER-TIER OVERRIDES: add columns named "max_positions_<tier>" to set a',
+    '#   different max position count for that tier. Example: a funder might',
+    '#   accept up to 2 positions in their "A-Paper" tier but up to 4 in',
+    '#   "Subprime". Columns would be: max_positions_a_paper, max_positions_subprime.',
+    '#   Spaces and dashes become underscores; the match is case-insensitive.',
+    '# - The base "max_positions" applies to any tier that has no override.',
     '#',
     '# Other notes:',
     '# - "submission_method" accepts: email, portal (case-insensitive).',
