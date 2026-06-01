@@ -40,7 +40,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (body.isActive !== undefined) updates.isActive = body.isActive;
 
     if (Object.keys(updates).length) {
-      await db.update(leadSources).set(updates).where(eq(leadSources.id, params.id));
+      await db.update(leadSources).set(updates).where(and(eq(leadSources.id, params.id), eq(leadSources.companyId, ctx.companyId)));
     }
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
@@ -61,12 +61,12 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     if (!ls) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     const [hasComm] = await db.select({ id: leadSourceCommissions.id }).from(leadSourceCommissions)
-      .where(eq(leadSourceCommissions.leadSourceId, params.id)).limit(1);
+      .where(and(eq(leadSourceCommissions.leadSourceId, params.id), eq(leadSourceCommissions.companyId, ctx.companyId))).limit(1);
     if (hasComm) {
       return NextResponse.json({ error: 'This lead source has commissions. Deactivate it instead of deleting.' }, { status: 400 });
     }
 
-    await db.delete(leadSources).where(eq(leadSources.id, params.id));
+    await db.delete(leadSources).where(and(eq(leadSources.id, params.id), eq(leadSources.companyId, ctx.companyId)));
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }

@@ -66,7 +66,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       updates.commissionAmount = String(owed);
     }
 
-    await db.update(leadSourceCommissions).set(updates).where(eq(leadSourceCommissions.id, params.id));
+    await db.update(leadSourceCommissions).set(updates).where(and(eq(leadSourceCommissions.id, params.id), eq(leadSourceCommissions.companyId, ctx.companyId)));
     triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
@@ -87,13 +87,14 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
 
     await db.update(leadSourceCommissions)
       .set({ isDeleted: true, syncState: 'pending', updatedAt: new Date() })
-      .where(eq(leadSourceCommissions.id, params.id));
+      .where(and(eq(leadSourceCommissions.id, params.id), eq(leadSourceCommissions.companyId, ctx.companyId)));
 
     // Cascade: any payments logged against this LS commission are also marked
     // deleted so they no longer appear in the lead source's portal.
+    // Filter by companyId on the cascade too — defense in depth.
     await db.update(commissionPayments)
       .set({ isDeleted: true })
-      .where(eq(commissionPayments.leadSourceCommissionId, params.id));
+      .where(and(eq(commissionPayments.leadSourceCommissionId, params.id), eq(commissionPayments.companyId, ctx.companyId)));
 
     triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true, softDeleted: true });

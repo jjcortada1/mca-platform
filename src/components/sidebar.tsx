@@ -5,7 +5,7 @@ import { signOut } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import {
   ShoppingBag, Send, Inbox, Briefcase, Users, TrendingUp, Calculator, BookOpen,
-  Settings, LogOut, Building2, DollarSign, Menu, X,
+  Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { SessionUser } from '@/lib/auth/context';
@@ -267,6 +267,23 @@ function SidebarBody({
           );
         })}
 
+        {/* Personal: every user gets this, including reps + lead sources */}
+        <div className="mb-5">
+          <div className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+            Personal
+          </div>
+          <div className="space-y-0.5">
+            <Link
+              href="/account"
+              onClick={onNavigate}
+              className={cn('nav-item', pathname.startsWith('/account') ? 'nav-item-active' : 'nav-item-inactive')}
+            >
+              <UserCircle className="h-4 w-4" />
+              <span>My account</span>
+            </Link>
+          </div>
+        </div>
+
         {isAdmin && (
           <div className="mb-5">
             <div className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
@@ -281,14 +298,16 @@ function SidebarBody({
                 <Settings className="h-4 w-4" />
                 <span>Settings</span>
               </Link>
-              <Link
-                href="/master"
-                onClick={onNavigate}
-                className={cn('nav-item', pathname.startsWith('/master') ? 'nav-item-active' : 'nav-item-inactive')}
-              >
-                <Building2 className="h-4 w-4" />
-                <span>Companies</span>
-              </Link>
+              {user.role === 'master_admin' && (
+                <Link
+                  href="/master"
+                  onClick={onNavigate}
+                  className={cn('nav-item', pathname.startsWith('/master') ? 'nav-item-active' : 'nav-item-inactive')}
+                >
+                  <Building2 className="h-4 w-4" />
+                  <span>Companies</span>
+                </Link>
+              )}
             </div>
           </div>
         )}

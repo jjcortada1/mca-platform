@@ -38,8 +38,40 @@ export const viewport: Viewport = {
   ],
 };
 
+/**
+ * Conservative CSS color sanitizer for the tenant primary color injected into
+ * a <style> tag at request time. We accept ONLY shapes that look like valid
+ * color values; anything else returns null and the page falls back to the
+ * default CSS token. This prevents CSS injection through the branding store.
+ *
+ * Accepted shapes:
+ *   - HSL triple as used by the design system: "220 47% 17%" (whitespace-OK)
+ *   - hex:       "#abc" or "#aabbcc"
+ *   - rgb(a):    "rgb(1,2,3)" / "rgba(1,2,3,0.5)"
+ *   - hsl(a):    "hsl(220,47%,17%)" / "hsla(...)"
+ *   - bare color keywords up to 30 alphabetic chars
+ */
+function sanitizeCssColor(input: string | null | undefined): string | null {
+  if (!input) return null;
+  const v = String(input).trim();
+  if (!v || v.length > 80) return null;
+  // No braces/semicolons/quotes/angle brackets/backslashes — these are the
+  // characters needed to break out of a CSS property value into another rule.
+  if (/[{};"'<>\\]/.test(v)) return null;
+  // Allowed shapes:
+  const shapes: RegExp[] = [
+    /^\d{1,3}\s+\d{1,3}(?:\.\d+)?%\s+\d{1,3}(?:\.\d+)?%$/,         // HSL triple
+    /^#[0-9a-fA-F]{3,8}$/,                                          // hex
+    /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/,
+    /^hsla?\(\s*\d{1,3}\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/,
+    /^[a-zA-Z]{1,30}$/,                                             // keyword
+  ];
+  return shapes.some((re) => re.test(v)) ? v : null;
+}
+
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const branding = await getPublicBranding();
+  const safeColor = sanitizeCssColor(branding.primaryColor);
 
   return (
     <html lang="en">
@@ -50,11 +82,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <meta name="format-detection" content="telephone=no" />
       </head>
       <body>
-        <style
-          dangerouslySetInnerHTML={{
-            __html: `:root{--primary:${branding.primaryColor};--accent:${branding.primaryColor};--ring:${branding.primaryColor};}`,
-          }}
-        />
+        {safeColor && (
+          <style
+            dangerouslySetInnerHTML={{
+              __html: `:root{--primary:${safeColor};--accent:${safeColor};--ring:${safeColor};}`,
+            }}
+          />
+        )}
         <SessionProvider>
           <ToastProvider>{children}</ToastProvider>
         </SessionProvider>
@@ -62,3 +96,5 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     </html>
   );
 }
+
+

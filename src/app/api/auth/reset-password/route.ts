@@ -6,10 +6,25 @@ import { users, passwordResets } from '@/lib/db/schema';
 import { eq, and, gt, isNull } from 'drizzle-orm';
 import { resetPasswordSchema } from '@/lib/validation/schemas';
 import { apiError } from '@/lib/api/errors';
+import { rateLimit } from '@/lib/api/rate-limit';
 
 export async function POST(req: NextRequest) {
   try {
     const body = resetPasswordSchema.parse(await req.json());
+
+    // Throttle: 20 token attempts / 10 min per IP. The hash space is huge so
+    // brute force is impractical, but this is cheap defense in depth.
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+      || req.headers.get('x-real-ip')
+      || 'unknown';
+    const rl = rateLimit(`pwreset:${ip}`, { max: 20, windowMs: 10 * 60_000 });
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: `Too many attempts. Try again in ${rl.retryAfterSec}s.` },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } }
+      );
+    }
+
     const tokenHash = crypto.createHash('sha256').update(body.token).digest('hex');
 
     const [reset] = await db

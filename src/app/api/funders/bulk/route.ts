@@ -163,6 +163,16 @@ export async function POST(req: NextRequest) {
     const file = formData.get('file') as File | null;
     if (!file) return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
 
+    // Cap upload size — a malicious or buggy CSV could be huge and OOM the
+    // server during parse. 10MB is more than enough for thousands of rows.
+    const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return NextResponse.json(
+        { error: 'Upload is too large (>10MB). Split into smaller files.' },
+        { status: 413 }
+      );
+    }
+
     // Accept .csv, .xlsx, .xls. Convert spreadsheets to CSV in-memory so the
     // existing parser handles them uniformly.
     const filename = (file.name || '').toLowerCase();
@@ -191,6 +201,14 @@ export async function POST(req: NextRequest) {
 
     if (parseErrors.length) {
       return NextResponse.json({ error: parseErrors.join('; ') }, { status: 400 });
+    }
+    // Defense in depth: cap row count even if upload size was small.
+    const MAX_ROWS = 5000;
+    if (rows.length > MAX_ROWS) {
+      return NextResponse.json(
+        { error: `Too many rows (${rows.length}). Split into batches of ${MAX_ROWS} or fewer.` },
+        { status: 413 }
+      );
     }
     if (!headers.includes('name')) {
       return NextResponse.json({ error: 'CSV must include a "name" column' }, { status: 400 });

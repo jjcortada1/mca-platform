@@ -1784,7 +1784,7 @@ function LogoInput({ value, onChange }: { value: string; onChange: (v: string) =
       toast.error('File is too large. Maximum 1MB.');
       return;
     }
-    const allowed = ['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp', 'image/gif'];
+    const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
     if (!allowed.includes(file.type)) {
       toast.error('Unsupported file type. Use PNG, JPG, SVG, WebP, or GIF.');
       return;
@@ -1823,7 +1823,7 @@ function LogoInput({ value, onChange }: { value: string; onChange: (v: string) =
           <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-card hover:bg-muted text-sm font-medium transition">
             <input
               type="file"
-              accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif"
+              accept="image/png,image/jpeg,image/webp,image/gif"
               className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }}
             />

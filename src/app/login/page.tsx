@@ -54,7 +54,7 @@ function LoginInner() {
       setError('Email or password is incorrect.');
       return;
     }
-    const callbackUrl = search.get('callbackUrl') || '/dashboard';
+    const callbackUrl = sanitizeCallbackUrl(search.get('callbackUrl'));
     router.push(callbackUrl);
     router.refresh();
   }
@@ -153,4 +153,22 @@ function LoginInner() {
       </div>
     </div>
   );
+}
+
+/**
+ * Prevent open-redirect: only same-site relative paths starting with a single
+ * "/" are allowed. Anything else (protocol-relative "//evil.com", absolute
+ * "https://evil.com", or URL-encoded variants) falls back to /dashboard.
+ */
+function sanitizeCallbackUrl(raw: string | null | undefined): string {
+  if (!raw) return '/dashboard';
+  let s = String(raw).trim();
+  try { s = decodeURIComponent(s); } catch { /* ignore */ }
+  // Must start with single "/" and not "//" (protocol-relative)
+  if (!s.startsWith('/') || s.startsWith('//')) return '/dashboard';
+  // No scheme allowed inside
+  if (/^\/[a-z][\w+.-]*:/i.test(s)) return '/dashboard';
+  // No control chars
+  if (/[\r\n\0]/.test(s)) return '/dashboard';
+  return s;
 }

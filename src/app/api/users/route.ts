@@ -18,7 +18,7 @@ export async function GET() {
   try {
     const ctx = await requireTenantContext();
     const list = await db.select().from(users).where(eq(users.companyId, ctx.companyId));
-    const isAdmin = ctx.user.role === 'company_admin';
+    const isAdmin = ctx.user.role === 'company_admin' || ctx.user.role === 'master_admin';
 
     const permsByUser = new Map<string, string[]>();
     const lsByUser = new Map<string, string>();
@@ -66,6 +66,13 @@ export async function POST(req: NextRequest) {
   try {
     const ctx = await requireCompanyAdmin();
     const body = createUserSchema.parse(await req.json());
+
+    // Defense in depth: even though createUserSchema doesn't allow
+    // master_admin as a value, double-check at runtime. Only an existing
+    // master_admin can mint another master_admin.
+    if ((body.role as string) === 'master_admin' && ctx.user.role !== 'master_admin') {
+      return NextResponse.json({ error: 'Only a master admin can create another master admin.' }, { status: 403 });
+    }
 
     // Email uniqueness (global)
     const [exists] = await db.select().from(users).where(eq(users.email, body.email)).limit(1);

@@ -43,7 +43,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (body.referenceNumber !== undefined) updates.referenceNumber = body.referenceNumber;
     if (body.notes !== undefined) updates.notes = body.notes;
 
-    await db.update(accountingEntries).set(updates).where(eq(accountingEntries.id, params.id));
+    await db.update(accountingEntries).set(updates).where(and(eq(accountingEntries.id, params.id), eq(accountingEntries.companyId, ctx.companyId)));
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }
@@ -60,7 +60,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
 
     await db.update(accountingEntries)
       .set({ isDeleted: true, updatedAt: new Date() })
-      .where(eq(accountingEntries.id, params.id));
+      .where(and(eq(accountingEntries.id, params.id), eq(accountingEntries.companyId, ctx.companyId)));
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }

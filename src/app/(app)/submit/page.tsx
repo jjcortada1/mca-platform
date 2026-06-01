@@ -304,7 +304,11 @@ function SubmitDealInner() {
 
       {smtpConfigured === false && (
         <div className="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">
-          ⚠️ SMTP is not configured. Go to <a href="/settings" className="font-medium underline">Settings → SMTP</a> to set it up before sending.
+          ⚠️ Email is not configured yet. Go to{' '}
+          <a href={isAdmin ? '/settings' : '/account'} className="font-medium underline">
+            {isAdmin ? 'Settings → SMTP' : 'My account → My email SMTP'}
+          </a>{' '}
+          to set it up before sending.
         </div>
       )}
       {smtpConfigured && fromEmail && (

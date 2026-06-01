@@ -1,9 +1,12 @@
 /**
  * Database seed script.
  *
- * BAKED-IN DEFAULTS for first-time setup (override with env vars):
- *   - Master admin:  jj@cortadacapitalgroup.com / Flinjcorta1
- *   - Company admin: jj@cortadacapitalgroup.com / Flinjcorta1 (same login, both roles available)
+ * SAFE FIRST-TIME SETUP:
+ *   - Master admin email defaults to jj@cortadacapitalgroup.com (override with env)
+ *   - Password is NEVER hardcoded. If SEED_ADMIN_PASSWORD is not set and no
+ *     admin exists yet, a random strong password is generated and printed to
+ *     the console once. The operator must capture it from the boot log.
+ *   - If an admin already exists, the seed never touches their password.
  *
  * Three layered behaviors:
  *   1. ALWAYS — bootstraps master admin and populates master_default_funders.
@@ -11,12 +14,10 @@
  *   3. IF SEED_TEST_DATA=true — populates with sample funders, deals, submission, etc.
  *
  * Override defaults via env:
- *   MASTER_ADMIN_EMAIL              default: jj@cortadacapitalgroup.com
- *   MASTER_ADMIN_PASSWORD           default: Flinjcorta1
+ *   SEED_ADMIN_EMAIL                default: jj@cortadacapitalgroup.com
+ *   SEED_ADMIN_PASSWORD             default: random (generated and logged on first boot)
  *   SEED_COMPANY_NAME               default: Cortada Capital Group
  *   SEED_COMPANY_SLUG               default: cortada
- *   SEED_COMPANY_ADMIN_EMAIL        default: same as MASTER_ADMIN_EMAIL
- *   SEED_COMPANY_ADMIN_PASSWORD     default: same as MASTER_ADMIN_PASSWORD
  *   SEED_TEST_DATA                  default: true (set 'false' to skip)
  *   SEED_TEST_REP_EMAIL             default: rep@cortadacapitalgroup.com
  *   SEED_TEST_REP_PASSWORD          default: TestRep123!
@@ -418,7 +419,6 @@ async function seed() {
   // no separate rep. Company admin role grants access to all features including
   // master-admin features (creating new companies, managing master defaults).
   const adminEmail = (process.env.SEED_ADMIN_EMAIL ?? 'jj@cortadacapitalgroup.com').toLowerCase().trim();
-  const adminPass = process.env.SEED_ADMIN_PASSWORD ?? 'Flinjcorta1';
   const compName = process.env.SEED_COMPANY_NAME ?? 'Cortada Capital Group';
   const compSlug = process.env.SEED_COMPANY_SLUG ?? 'cortada';
 
@@ -426,7 +426,30 @@ async function seed() {
   await ensureMasterDefaultFunders();
 
   const { company } = await ensureCompany(compName, compSlug);
-  const admin = await ensureCompanyAdmin(company.id, adminEmail, adminPass);
+
+  // Check whether admin already exists. If yes, we don't touch the password.
+  // If NO and no env var supplied, we MUST refuse to seed a hardcoded password
+  // — instead generate a random one and print it ONCE so the operator can log in.
+  const [existingAdmin] = await db.select().from(users).where(eq(users.email, adminEmail));
+  let adminPass = process.env.SEED_ADMIN_PASSWORD ?? '';
+  if (!existingAdmin && !adminPass) {
+    // First-time install with no SEED_ADMIN_PASSWORD in env. Generate a strong
+    // random password instead of using a hardcoded default (which would be a
+    // huge credential leak if source is ever shared).
+    const crypto = await import('crypto');
+    adminPass = crypto.randomBytes(12).toString('base64').replace(/[+/=]/g, '').slice(0, 16) + '!9';
+    console.log('\n' + '='.repeat(70));
+    console.log('  FIRST-TIME SETUP — your admin password has been generated.');
+    console.log('  COPY THIS NOW. It will not be shown again.');
+    console.log('');
+    console.log(`    Email:    ${adminEmail}`);
+    console.log(`    Password: ${adminPass}`);
+    console.log('');
+    console.log('  Log in and change it immediately via My account → Change password.');
+    console.log('  To set your own seed password, set SEED_ADMIN_PASSWORD before re-running.');
+    console.log('='.repeat(70) + '\n');
+  }
+  const admin = await ensureCompanyAdmin(company.id, adminEmail, adminPass || 'placeholder');
 
   // Backfill match options for any existing company that doesn't have them yet
   // (idempotent — only adds missing kind/value combos)
@@ -446,12 +469,17 @@ async function seed() {
     }
 
     console.log('\n════════════════════════════════════════════════════════');
-    console.log('   LOGIN CREDENTIALS');
+    console.log('   ADMIN LOGIN');
     console.log('════════════════════════════════════════════════════════');
     console.log(`     Email:    ${adminEmail}`);
-    console.log(`     Password: ${adminPass}`);
+    if (!existingAdmin) {
+      console.log(`     Password: ${adminPass}`);
+      console.log('     ⚠ Save this password now. Will not be shown again.');
+    } else {
+      console.log('     Password: (unchanged — already set)');
+    }
     console.log('');
-    console.log('   This single login has full control over everything.');
+    console.log('   This login has full control over everything.');
     console.log('════════════════════════════════════════════════════════');
   }
 

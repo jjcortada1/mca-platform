@@ -63,7 +63,10 @@ export async function POST(req: NextRequest) {
     }
 
     const codeHash = crypto.createHash('sha256').update(body.code).digest('hex');
-    if (codeHash !== vc.codeHash) {
+    const got = Buffer.from(codeHash, 'hex');
+    const want = Buffer.from(vc.codeHash, 'hex');
+    const equal = got.length === want.length && crypto.timingSafeEqual(got, want);
+    if (!equal) {
       await db.update(verificationCodes)
         .set({ attempts: vc.attempts + 1 })
         .where(eq(verificationCodes.id, vc.id));

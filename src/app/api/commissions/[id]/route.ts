@@ -75,7 +75,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       updates.fundingDate = body.fundingDate ? new Date(body.fundingDate) : null;
     }
 
-    await db.update(dealCommissions).set(updates).where(eq(dealCommissions.id, params.id));
+    await db.update(dealCommissions).set(updates).where(and(eq(dealCommissions.id, params.id), eq(dealCommissions.companyId, ctx.companyId)));
     triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }

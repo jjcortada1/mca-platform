@@ -24,7 +24,7 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
       .limit(1);
     if (!sub) return NextResponse.json({ error: 'Submission not found' }, { status: 404 });
 
-    await db.delete(submissions).where(eq(submissions.id, params.id));
+    await db.delete(submissions).where(and(eq(submissions.id, params.id), eq(submissions.companyId, ctx.companyId)));
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }

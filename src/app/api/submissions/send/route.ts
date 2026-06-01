@@ -18,6 +18,25 @@ interface FunderSubmission {
   toEmail: string;
 }
 
+/**
+ * Defang an uploaded filename so it can't smuggle path traversal or email
+ * header injection. The original filename is just a label for the recipient —
+ * we never use it to write to disk, but Gmail/Outlook DO display it, and
+ * nodemailer puts it on the Content-Disposition header.
+ */
+function sanitizeFilename(raw: string): string {
+  let name = String(raw ?? '').trim();
+  // Drop NUL and CR/LF (header injection)
+  name = name.replace(/[\r\n\0]/g, '');
+  // Drop path separators
+  name = name.replace(/[/\\]/g, '_');
+  // Strip any leading dots / dotted segments (no traversal, no hidden files)
+  name = name.replace(/^\.+/, '');
+  // Cap length so a 2000-char filename can't blow up headers
+  if (name.length > 200) name = name.slice(0, 200);
+  return name || 'attachment';
+}
+
 export async function POST(req: NextRequest) {
   try {
     const ctx = await requirePermission('deals.submit');
@@ -111,16 +130,40 @@ export async function POST(req: NextRequest) {
       dealId = created.id;
     }
 
-    // Read attachments (memory only — never persisted)
+    // Read attachments (memory only — never persisted).
+    // SECURITY:
+    //   - Per-file cap: 25 MB (Gmail limit anyway; bigger files won't send).
+    //   - Aggregate cap: 50 MB across all attachments per submission.
+    //   - Filename sanitization: strip path separators, CR/LF (header injection),
+    //     NUL, and limit length. Attachers shouldn't be able to smuggle a
+    //     "../../../etc/passwd" or "\r\nBcc: attacker@x.com" into the email.
+    const MAX_FILE_BYTES = 25 * 1024 * 1024;
+    const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
+    const MAX_ATTACHMENTS = 30;
     const attachments: EmailAttachment[] = [];
+    let totalBytes = 0;
     for (const [, value] of Array.from(formData.entries())) {
       if (value instanceof File) {
+        if (value.size > MAX_FILE_BYTES) {
+          return NextResponse.json(
+            { error: `Attachment "${value.name}" is too large (>25MB).` },
+            { status: 413 }
+          );
+        }
+        totalBytes += value.size;
+        if (totalBytes > MAX_TOTAL_BYTES) {
+          return NextResponse.json(
+            { error: 'Total attachment size exceeds 50MB.' },
+            { status: 413 }
+          );
+        }
+        if (attachments.length >= MAX_ATTACHMENTS) {
+          return NextResponse.json({ error: `Max ${MAX_ATTACHMENTS} attachments` }, { status: 400 });
+        }
         const buf = Buffer.from(await value.arrayBuffer());
-        attachments.push({ filename: value.name, content: buf, contentType: value.type || undefined });
+        const safeName = sanitizeFilename(value.name);
+        attachments.push({ filename: safeName, content: buf, contentType: value.type || undefined });
       }
-    }
-    if (attachments.length > 30) {
-      return NextResponse.json({ error: 'Max 30 attachments' }, { status: 400 });
     }
 
     // Resolve SMTP config based on company emailMode

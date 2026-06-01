@@ -33,11 +33,18 @@ declare module 'next-auth/jwt' {
     role: 'master_admin' | 'company_admin' | 'rep' | 'lead_source';
     companyId: string | null;
     permissions: string[];
+    /** ms epoch; we re-query the DB after this to pick up role/active changes */
+    refreshAt?: number;
   }
 }
 
 export const authOptions: NextAuthOptions = {
-  session: { strategy: 'jwt', maxAge: 60 * 60 * 24 * 7 },
+  // Session lifetime: 24h. Shorter than the previous 7d so that if an admin
+  // demotes or disables a user, the change takes effect within a day at the
+  // worst case (immediately on logout). For production with sensitive
+  // operations a shorter window is more defensible than the convenience of
+  // week-long sessions.
+  session: { strategy: 'jwt', maxAge: 60 * 60 * 24 },
   pages: { signIn: '/login' },
   providers: [
     CredentialsProvider({
@@ -86,10 +93,39 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
+        // Initial sign-in — capture everything.
         token.id = user.id;
         token.role = user.role;
         token.companyId = user.companyId;
         token.permissions = user.permissions;
+        token.refreshAt = Date.now() + 5 * 60_000; // re-validate against DB every 5 min
+        return token;
+      }
+      // Subsequent requests: periodically re-pull role + active status from
+      // the DB so revoked admins, deactivated users, and permission changes
+      // take effect within minutes (not whenever the token expires).
+      if (token.id && (!token.refreshAt || Date.now() > Number(token.refreshAt))) {
+        try {
+          const [u] = await db.select().from(users).where(eq(users.id, String(token.id))).limit(1);
+          if (!u || !u.isActive) {
+            // Force this token to look invalid downstream — caller checks
+            // .role and will redirect/deny.
+            token.id = '';
+            token.role = 'rep';
+            token.permissions = [];
+          } else {
+            token.role = u.role;
+            token.companyId = u.companyId;
+            const perms = await db
+              .select({ key: permissions.permissionKey })
+              .from(permissions)
+              .where(eq(permissions.userId, u.id));
+            token.permissions = perms.map((p) => p.key);
+          }
+        } catch {
+          // DB hiccup — keep existing token, don't fail the request.
+        }
+        token.refreshAt = Date.now() + 5 * 60_000;
       }
       return token;
     },

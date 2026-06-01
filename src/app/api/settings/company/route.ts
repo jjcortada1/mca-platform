@@ -40,12 +40,15 @@ const patchSchema = z.object({
   displayName: z.string().max(200).optional().nullable(),
   // Accepts https URL, base64 data URI, OR a bundled-asset path (/brand/...).
   // Capped at ~1MB after base64 encoding (~750KB raw) so the DB row stays small.
+  // SVG is deliberately NOT allowed: SVGs can carry <script> tags and become
+  // XSS vectors if rendering ever switches from <img src=...> to inline SVG.
+  // Use PNG/JPG/WebP/GIF — they're safer and render the same.
   logoUrl: z.string().max(1_400_000).refine((v) => {
     if (!v) return true;
     if (/^https?:\/\//i.test(v)) return v.length <= 2048;
     if (/^\/brand\//.test(v)) return v.length <= 200;
-    return /^data:image\/(png|jpe?g|svg\+xml|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v);
-  }, { message: 'Logo must be an https URL, a relative /brand/... path, or an uploaded image file (PNG/JPG/SVG/WebP, max ~1MB).' }).optional().nullable().or(z.literal('')),
+    return /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v);
+  }, { message: 'Logo must be an https URL, a relative /brand/... path, or an uploaded image file (PNG/JPG/WebP/GIF, max ~1MB). SVG not allowed.' }).optional().nullable().or(z.literal('')),
   // HSL string format: "hue saturation% lightness%" e.g. "184 70% 22%"
   primaryColor: z
     .string()

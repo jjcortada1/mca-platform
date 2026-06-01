@@ -76,18 +76,21 @@ export async function requireTenantContext(): Promise<{
  */
 export async function requireMasterAdmin(): Promise<SessionUser> {
   const user = await requireUser();
-  if (user.role !== 'master_admin' && user.role !== 'company_admin') {
-    throw new ForbiddenError('Admin only');
+  if (user.role !== 'master_admin') {
+    throw new ForbiddenError('Master admin only');
   }
   return user;
 }
 
 /**
- * Requires company admin (or master admin acting on a specific company, NOT used for tenant data).
+ * Requires admin role. Both `company_admin` and `master_admin` qualify.
+ * Use this on any page or API that contains backend / multi-user information
+ * (other reps' data, lead sources, commission rules, sheets sync, etc.).
  */
 export async function requireCompanyAdmin(): Promise<{ user: SessionUser; companyId: string }> {
   const user = await requireUser();
-  if (user.role !== 'company_admin' || !user.companyId) {
+  const isAdmin = user.role === 'company_admin' || user.role === 'master_admin';
+  if (!isAdmin || !user.companyId) {
     throw new ForbiddenError('Company admin only');
   }
   return { user, companyId: user.companyId };
@@ -126,7 +129,10 @@ export async function pageRequireTenant(): Promise<{ user: SessionUser; companyI
 
 export async function pageRequireMaster(): Promise<SessionUser> {
   const user = await pageRequireUser();
-  // Both master_admin and company_admin can access master pages (single-tenant simplification)
-  if (user.role !== 'master_admin' && user.role !== 'company_admin') redirect('/dashboard');
+  // Master pages (multi-company control surface) are STRICTLY master_admin
+  // only. Company admins manage their own tenant via /settings, not the
+  // master surface. This is enforced both here (page) and in the
+  // /api/master-* endpoints via requireMasterAdmin.
+  if (user.role !== 'master_admin') redirect('/dashboard');
   return user;
 }

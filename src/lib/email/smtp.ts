@@ -122,6 +122,11 @@ export async function sendDealEmail(input: SendDealEmailInput): Promise<SendDeal
   if (!rawTo) {
     return { success: false, error: 'No recipient email provided' };
   }
+  // Header injection: CR/LF in any header value can split the message and add
+  // BCC, From, etc. Reject hard. Same applies to NUL.
+  if (/[\r\n\0]/.test(rawTo)) {
+    return { success: false, error: 'Invalid recipient address.' };
+  }
   // Reject any attempt to smuggle multiple recipients into a single send.
   if (/[,;]/.test(rawTo) || /\s/.test(rawTo.replace(/^[^<]*<|>$/g, ''))) {
     return {
@@ -129,16 +134,22 @@ export async function sendDealEmail(input: SendDealEmailInput): Promise<SendDeal
       error: 'Internal: multiple recipients in a single send are not allowed (funder isolation).',
     };
   }
+  // Sanity check the email shape.
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawTo)) {
+    return { success: false, error: 'Recipient email is not a valid address.' };
+  }
   const toEmail = rawTo;
 
   // CC list: dedupe, drop empties, and CRITICALLY remove the funder's own address
   // so a funder never appears in their own CC, and strip anything that isn't a
-  // plausible email. The CC person(s) get their own copy per funder by design.
+  // plausible email. Also reject any CC value that smuggles CR/LF.
   const ccEmails = Array.from(
     new Set(
       (input.ccEmails ?? [])
         .map((e) => String(e ?? '').trim())
         .filter((e) => e && e.includes('@'))
+        .filter((e) => !/[\r\n\0]/.test(e))
+        .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
         .filter((e) => e.toLowerCase() !== toEmail.toLowerCase())
     )
   );
@@ -222,8 +233,17 @@ export async function sendDealEmailBatch(
         out.push({ ref: r.ref, toEmail: '', success: false, error: 'No recipient email provided' });
         continue;
       }
+      // Header injection guard: CR/LF/NUL can split the email and inject BCC.
+      if (/[\r\n\0]/.test(rawTo)) {
+        out.push({ ref: r.ref, toEmail: rawTo, success: false, error: 'Invalid recipient address.' });
+        continue;
+      }
       if (/[,;]/.test(rawTo)) {
         out.push({ ref: r.ref, toEmail: rawTo, success: false, error: 'Internal: multiple recipients not allowed (funder isolation).' });
+        continue;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawTo)) {
+        out.push({ ref: r.ref, toEmail: rawTo, success: false, error: 'Recipient email is not a valid address.' });
         continue;
       }
       const toEmail = rawTo;
@@ -232,6 +252,8 @@ export async function sendDealEmailBatch(
           (base.ccEmails ?? [])
             .map((e) => String(e ?? '').trim())
             .filter((e) => e && e.includes('@'))
+            .filter((e) => !/[\r\n\0]/.test(e))
+            .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
             .filter((e) => e.toLowerCase() !== toEmail.toLowerCase())
         )
       );
