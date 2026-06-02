@@ -16,7 +16,7 @@
  * on when they click "configure SMTP" from the submit screen.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Card, CardHeader, CardTitle, CardContent, CardDescription,
   Button, Input, Textarea, Field, PageHeader,
@@ -361,27 +361,64 @@ function AlwaysCcCard() {
    ============================================================ */
 function SignatureCard() {
   const toast = useToast();
-  const [value, setValue] = useState('');
-  const [saved, setSaved] = useState('');
+  const [text, setText] = useState('');
+  const [logoUrl, setLogoUrl] = useState('');
+  const [link, setLink] = useState('');
+  const [savedText, setSavedText] = useState('');
+  const [savedLogo, setSavedLogo] = useState('');
+  const [savedLink, setSavedLink] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     fetch('/api/account/signature', { cache: 'no-store' })
       .then((r) => r.json())
       .then((j) => {
-        const v = j?.data?.emailSignature ?? '';
-        setValue(v); setSaved(v);
+        const t = j?.data?.emailSignature ?? '';
+        const l = j?.data?.signatureLogoUrl ?? '';
+        const k = j?.data?.signatureLink ?? '';
+        setText(t); setSavedText(t);
+        setLogoUrl(l); setSavedLogo(l);
+        setLink(k); setSavedLink(k);
       })
       .finally(() => setLoading(false));
   }, []);
 
+  function onLogoFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    // Reject SVG explicitly even though the OS file picker may show it.
+    if (!/^image\/(png|jpe?g|webp|gif)$/.test(f.type)) {
+      toast.error('Use PNG, JPG, WebP, or GIF (no SVG).');
+      return;
+    }
+    if (f.size > 500 * 1024) {
+      toast.error('Logo too large — keep it under 500 KB so emails don\'t get blocked.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => { setLogoUrl(String(reader.result)); };
+    reader.onerror = () => { toast.error('Could not read the file.'); };
+    reader.readAsDataURL(f);
+  }
+
   async function save() {
+    // Validate link is http(s) if provided
+    if (link.trim() && !/^https?:\/\//i.test(link.trim())) {
+      toast.error('Link must start with http:// or https://');
+      return;
+    }
     setSaving(true);
     const res = await fetch('/api/account/signature', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ emailSignature: value }),
+      body: JSON.stringify({
+        emailSignature: text,
+        signatureLogoUrl: logoUrl,
+        signatureLink: link.trim(),
+      }),
     });
     const j = await res.json();
     setSaving(false);
@@ -389,9 +426,13 @@ function SignatureCard() {
       toast.error(j.error || 'Could not save.');
       return;
     }
-    setSaved(j?.data?.emailSignature ?? '');
+    setSavedText(j?.data?.emailSignature ?? '');
+    setSavedLogo(j?.data?.signatureLogoUrl ?? '');
+    setSavedLink(j?.data?.signatureLink ?? '');
     toast.success('Signature saved.');
   }
+
+  const isDirty = text !== savedText || logoUrl !== savedLogo || link !== savedLink;
 
   if (loading) return null;
 
@@ -402,19 +443,63 @@ function SignatureCard() {
           <PenLine className="h-4 w-4" /> Email signature
         </CardTitle>
         <CardDescription>
-          Appears at the bottom of every email you send through the platform — deal submissions and funded notifications. Plain text. Multiple lines OK.
+          Appears at the bottom of every email you send — deal submissions and funded notifications. The text version goes to plain-text inboxes, the logo and link to HTML inboxes.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <Textarea
-          rows={6}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder={'Best,\nYour Name\nDirect: (555) 555-5555\nyour@email.com'}
-        />
-        <Button onClick={save} disabled={saving || value === saved}>
-          {saving ? 'Saving…' : 'Save signature'}
-        </Button>
+      <CardContent className="space-y-4">
+        <Field label="Signature text" hint="Your name, title, phone, and email. Multiple lines OK.">
+          <Textarea
+            rows={5}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={'Best,\nYour Name\nDirect: (555) 555-5555\nyour@email.com'}
+          />
+        </Field>
+
+        <Field label="Logo (optional)" hint="PNG, JPG, WebP, or GIF — under 500 KB. Appears below your text in HTML inboxes.">
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <Button variant="outline" type="button" onClick={() => fileRef.current?.click()}>
+                {logoUrl ? 'Replace logo' : 'Upload logo'}
+              </Button>
+              {logoUrl && (
+                <Button variant="ghost" type="button" onClick={() => setLogoUrl('')}>
+                  Remove
+                </Button>
+              )}
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                onChange={onLogoFileChange}
+                className="hidden"
+              />
+            </div>
+            {logoUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoUrl}
+                alt="Signature logo preview"
+                className="block max-h-20 max-w-[260px] rounded border border-border bg-white p-1"
+              />
+            )}
+          </div>
+        </Field>
+
+        <Field label="Link (optional)" hint="A URL the logo will link to. If no logo is set, the link still appears as a clickable line.">
+          <Input
+            type="url"
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            placeholder="https://yourcompany.com"
+          />
+        </Field>
+
+        <div>
+          <Button onClick={save} disabled={saving || !isDirty}>
+            {saving ? 'Saving…' : 'Save signature'}
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );

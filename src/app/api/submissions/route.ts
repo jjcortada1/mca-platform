@@ -69,6 +69,8 @@ export async function GET() {
       dealName: s.dealName,
       dealStatus: s.dealStatus,
       merchantName: [s.merchantFirstName, s.merchantLastName].filter(Boolean).join(' '),
+      // Both id and name — the client uses id for filtering and name for display.
+      assignedRepId: s.assignedRepId,
       assignedRepName: s.assignedRepId ? repsMap.get(s.assignedRepId) : null,
       updatedAt: s.sUpdatedAt,
       createdAt: s.sCreatedAt,

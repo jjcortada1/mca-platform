@@ -85,17 +85,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Either dealId or dealName is required' }, { status: 400 });
     }
 
-    // Resolve or create the deal
-    // Validate that the chosen rep belongs to this company (admins can assign
-    // anyone; non-admins are silently forced to themselves).
+    // Resolve or create the deal.
+    // Any sender (rep, admin) can choose who the deal is assigned to. Default
+    // is the sender themselves. Lead source users are NEVER valid assignees.
     let resolvedRepId = ctx.user.id;
-    const isAdmin = ctx.user.role === 'company_admin' || ctx.user.role === 'master_admin';
-    if (isAdmin && assignedRepId) {
+    if (assignedRepId) {
       const [rep] = await db.select({ id: users.id, role: users.role })
         .from(users)
         .where(and(eq(users.id, assignedRepId), eq(users.companyId, ctx.companyId)))
         .limit(1);
-      // Lead source users can't own deals — fall back to sender if someone tries.
       if (rep && rep.role !== 'lead_source') resolvedRepId = rep.id;
     }
 
@@ -108,9 +106,10 @@ export async function POST(req: NextRequest) {
         .limit(1);
       if (!found) return NextResponse.json({ error: 'Deal not found' }, { status: 404 });
       deal = found;
-      // If the admin explicitly picked a different rep for this submission,
-      // propagate that to the deal record.
-      if (isAdmin && assignedRepIdRaw && resolvedRepId !== found.assignedRepId) {
+      // Propagate the chosen rep to the deal record. Now allowed for any
+      // sender (no longer admin-gated) — a rep can reassign a deal to a
+      // teammate when shopping on their behalf.
+      if (assignedRepIdRaw && resolvedRepId !== found.assignedRepId) {
         await db.update(deals).set({ assignedRepId: resolvedRepId, updatedAt: new Date() })
           .where(eq(deals.id, found.id));
         deal = { ...found, assignedRepId: resolvedRepId };
@@ -179,48 +178,56 @@ export async function POST(req: NextRequest) {
       smtp = (me?.smtpConfig as SmtpConfig | null) ?? null;
     }
     if (!smtp) {
+      // Distinct messages by mode so the rep knows exactly where to go.
+      // Per-rep mode means the rep configures their OWN SMTP on /account.
+      // Shared mode means an admin needs to set the company SMTP in /settings.
+      const isPerRep = company.emailMode === 'per_rep';
       return NextResponse.json(
-        { error: 'No SMTP configured. Configure in Settings.' },
+        {
+          error: isPerRep
+            ? 'Your email account isn\'t connected yet. Go to "My account" → "My email SMTP" and set it up before shopping deals.'
+            : 'Email is not configured for the company yet. Ask an admin to set up SMTP in Settings.',
+        },
         { status: 400 }
       );
     }
 
-    // Merge global CC + the assigned rep's "always CC" address (set on their
-    // /account page). A rep with manager@x.com set gets that copied on every
-    // deal they own, including ones an admin submits on their behalf.
+    // Merge company's global CC + the SENDER's "always CC".
+    //
+    // IMPORTANT: this is the SENDER's always-CC only — never the assigned
+    // rep's. If an admin shops on behalf of a rep, the rep's manager-CC
+    // should NOT be added: the rep didn't send this email, so their
+    // personal CC preference doesn't apply. The setting is "always CC ME on
+    // emails I send," not "always CC me on emails about my deals."
     const globalCc = (company.globalCcEmails as string[] | null) ?? [];
-    let repAlwaysCc: string | null = null;
-    if (resolvedRepId) {
-      const [repRow] = await db.select({ alwaysCcEmail: users.alwaysCcEmail })
-        .from(users)
-        .where(eq(users.id, resolvedRepId))
-        .limit(1);
-      repAlwaysCc = repRow?.alwaysCcEmail ?? null;
-    }
-    // Also pick up the SENDER's alwaysCc (an admin sending on their own
-    // behalf may also want their own always-CC applied).
-    let senderAlwaysCc: string | null = null;
-    if (ctx.user.id !== resolvedRepId) {
-      const [senderRow] = await db.select({ alwaysCcEmail: users.alwaysCcEmail })
-        .from(users)
-        .where(eq(users.id, ctx.user.id))
-        .limit(1);
-      senderAlwaysCc = senderRow?.alwaysCcEmail ?? null;
-    }
-    // Sender's signature — appended to the body of every outbound email. We
-    // use the actual SENDER (ctx.user), not the assigned rep, because the
-    // sender is the human whose name/contact info goes at the bottom of the
-    // outgoing message.
-    const [senderUser] = await db.select({ emailSignature: users.emailSignature })
+    const [senderRow] = await db.select({ alwaysCcEmail: users.alwaysCcEmail })
       .from(users)
       .where(eq(users.id, ctx.user.id))
       .limit(1);
-    const signature = senderUser?.emailSignature ?? null;
+    const senderAlwaysCc = senderRow?.alwaysCcEmail ?? null;
+
+    // Sender's signature — pulled from the actual sender (ctx.user), not the
+    // assigned rep, because the signature represents who's writing the email.
+    const [senderUser] = await db
+      .select({
+        emailSignature: users.emailSignature,
+        signatureLogoUrl: users.signatureLogoUrl,
+        signatureLink: users.signatureLink,
+      })
+      .from(users)
+      .where(eq(users.id, ctx.user.id))
+      .limit(1);
+    const signature = (senderUser?.emailSignature || senderUser?.signatureLogoUrl || senderUser?.signatureLink)
+      ? {
+          text: senderUser.emailSignature ?? '',
+          logoDataUri: senderUser.signatureLogoUrl ?? null,
+          link: senderUser.signatureLink ?? null,
+        }
+      : null;
 
     const allCc = Array.from(new Set([
       ...ccEmails,
       ...globalCc,
-      ...(repAlwaysCc ? [repAlwaysCc] : []),
       ...(senderAlwaysCc ? [senderAlwaysCc] : []),
     ].filter(Boolean)));
 
@@ -299,25 +306,21 @@ export async function POST(req: NextRequest) {
       toSend.push({ fi, fName, ref: `r${refCounter++}` });
     }
 
-    // Sender's signature is appended to the body so the recipient sees who
-    // the email is from + their contact info. Built as plain text below the
-    // notes, separated by a blank line and "--" delimiter (RFC convention).
-    const bodyWithSig = signature && signature.trim()
-      ? `${bodyNotes.trim()}\n\n--\n${signature.trim()}`
-      : bodyNotes;
-
     // Send all as isolated messages over a single pooled connection.
     // Each funder gets its OWN email with its own subject suffix so each one
-    // lands in a separate conversation thread on the sender's side.
+    // lands in a separate conversation thread on the sender's side. The
+    // signature (text + optional logo + optional link) is built into both
+    // the text and HTML versions of the email.
     const sendResults = toSend.length
       ? await sendDealEmailBatch(
           {
             smtp,
             ccEmails: allCc,
             dealName: deal.name,
-            bodyNotes: bodyWithSig,
+            bodyNotes,
             structuredFields: structuredFieldsInput,
             attachments,
+            signature,
           },
           toSend.map((t) => ({ toEmail: t.fi.toEmail, ref: t.ref, label: t.fName }))
         )

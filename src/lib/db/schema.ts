@@ -105,6 +105,13 @@ export const users = pgTable(
     // Plain text, multi-line. Each rep edits their own on /account; reps
     // never see or edit another rep's signature.
     emailSignature: text('email_signature'),
+    // Optional inline logo image (data URI, PNG/JPG/WebP/GIF — no SVG).
+    // Rendered in the HTML version of outgoing emails; the text-only version
+    // still has the plain signature text. Capped ~500KB after base64.
+    signatureLogoUrl: text('signature_logo_url'),
+    // Optional URL to wrap the logo (and a "Visit" link at the bottom of
+    // the signature). Validated server-side to be http(s) only.
+    signatureLink: varchar('signature_link', { length: 500 }),
     isActive: boolean('is_active').notNull().default(true),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

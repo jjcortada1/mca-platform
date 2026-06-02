@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   Card, CardContent,
@@ -24,6 +24,7 @@ interface SubmissionRow {
   dealName: string;
   dealStatus: string;
   merchantName: string;
+  assignedRepId: string | null;
   assignedRepName: string | null;
   createdAt: string;
   updatedAt: string;
@@ -46,6 +47,13 @@ export default function SubmissionsPage() {
     notes: '',
   });
   const [manualSaving, setManualSaving] = useState(false);
+  // Rep filter: 'all' (default) | 'unassigned' | <user-id>. Lets a manager see
+  // only one rep's submissions, or just the ones with no assignee.
+  const [repFilter, setRepFilter] = useState<string>('all');
+  // Sort: 'recent' (default), 'rep' alphabetical by rep name.
+  const [sortBy, setSortBy] = useState<'recent' | 'rep'>('recent');
+  // Search across deal name / merchant name / funder names.
+  const [search, setSearch] = useState('');
 
   /** Open the manual-add modal pre-filled for a specific existing deal. */
   function openManualForDeal(dealId: string, dealName: string) {
@@ -166,6 +174,49 @@ export default function SubmissionsPage() {
     }));
   }
 
+  // Unique list of reps that appear across the loaded submissions, plus an
+  // "Unassigned" slot if any submission has no rep.
+  const repOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    let hasUnassigned = false;
+    for (const r of rows) {
+      if (!r.assignedRepId) hasUnassigned = true;
+      else if (r.assignedRepName) m.set(r.assignedRepId, r.assignedRepName);
+    }
+    const list = Array.from(m.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return { reps: list, hasUnassigned };
+  }, [rows]);
+
+  // Apply rep filter, then text search, then sort.
+  const filteredRows = useMemo(() => {
+    let out = rows;
+    if (repFilter === 'unassigned') {
+      out = out.filter((r) => !r.assignedRepId);
+    } else if (repFilter !== 'all') {
+      out = out.filter((r) => r.assignedRepId === repFilter);
+    }
+    const q = search.trim().toLowerCase();
+    if (q) {
+      out = out.filter((r) =>
+        r.dealName.toLowerCase().includes(q) ||
+        r.merchantName.toLowerCase().includes(q) ||
+        r.funders.some((f) => f.funderName.toLowerCase().includes(q))
+      );
+    }
+    if (sortBy === 'rep') {
+      // Group by rep name alpha, then most recent first within each group.
+      out = [...out].sort((a, b) => {
+        const an = (a.assignedRepName ?? 'zzz_unassigned').toLowerCase();
+        const bn = (b.assignedRepName ?? 'zzz_unassigned').toLowerCase();
+        if (an !== bn) return an.localeCompare(bn);
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+    }
+    return out;
+  }, [rows, repFilter, sortBy, search]);
+
   return (
     <div className="space-y-6 p-6">
       <header className="flex items-center justify-between">
@@ -215,17 +266,86 @@ export default function SubmissionsPage() {
         </div>
       </header>
 
+      {/* Filters / sort / search row */}
+      {rows.length > 0 && (
+        <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+          {/* Rep filter chips */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={() => setRepFilter('all')}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+                repFilter === 'all'
+                  ? 'bg-foreground text-background border-foreground'
+                  : 'bg-card text-foreground border-border hover:border-foreground/40'
+              }`}
+            >
+              All reps ({rows.length})
+            </button>
+            {repOptions.reps.map((r) => {
+              const count = rows.filter((row) => row.assignedRepId === r.id).length;
+              return (
+                <button
+                  key={r.id}
+                  onClick={() => setRepFilter(r.id)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+                    repFilter === r.id
+                      ? 'bg-foreground text-background border-foreground'
+                      : 'bg-card text-foreground border-border hover:border-foreground/40'
+                  }`}
+                >
+                  {r.name} ({count})
+                </button>
+              );
+            })}
+            {repOptions.hasUnassigned && (
+              <button
+                onClick={() => setRepFilter('unassigned')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+                  repFilter === 'unassigned'
+                    ? 'bg-foreground text-background border-foreground'
+                    : 'bg-card text-foreground border-border hover:border-foreground/40'
+                }`}
+              >
+                Unassigned ({rows.filter((r) => !r.assignedRepId).length})
+              </button>
+            )}
+          </div>
+
+          {/* Sort + search on the right */}
+          <div className="flex items-center gap-2 sm:ml-auto">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search deal, merchant, funder…"
+              className="h-9 w-full sm:w-64 rounded-md border border-input bg-card px-3 text-sm"
+            />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'recent' | 'rep')}
+              className="h-9 rounded-md border border-input bg-card px-2 text-sm"
+              title="Sort"
+            >
+              <option value="recent">Most recent</option>
+              <option value="rep">By rep</option>
+            </select>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="text-sm text-muted-foreground">Loading…</div>
-      ) : rows.length === 0 ? (
+      ) : filteredRows.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            No submissions yet. Shop your first deal to get started.
+            {rows.length === 0
+              ? 'No submissions yet. Shop your first deal to get started.'
+              : 'No submissions match the current filters.'}
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-3">
-          {rows.map((row) => {
+          {filteredRows.map((row) => {
             const isOpen = expanded[row.submissionId] ?? false;
             const counts = {
               total: row.funders.length,
@@ -241,8 +361,17 @@ export default function SubmissionsPage() {
                     className="flex-1 text-left px-6 py-4 flex items-center justify-between hover:bg-muted/40 transition"
                   >
                     <div>
-                      <div className="font-medium">{row.dealName}</div>
+                      <div className="font-medium flex items-center gap-2">
+                        {row.dealName}
+                        {/* Assigned rep pill — quickly answers "whose deal is this?"
+                            without expanding the row. Falls back to "Unassigned" so
+                            stray rows don't slip by unnoticed. */}
+                        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                          {row.assignedRepName ?? 'Unassigned'}
+                        </span>
+                      </div>
                       <div className="text-xs text-muted-foreground mt-0.5">
+                        {row.merchantName && <>{row.merchantName} • </>}
                         Last activity {formatDate(row.updatedAt)} • {counts.total} funder{counts.total === 1 ? '' : 's'}
                       </div>
                     </div>

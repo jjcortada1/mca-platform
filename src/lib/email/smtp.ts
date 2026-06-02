@@ -33,6 +33,23 @@ export interface StructuredField {
   value: string;
 }
 
+/**
+ * Rich signature data. When present, emails are sent as multipart with both
+ * a plain-text body (for clients that don't render HTML) AND an HTML body
+ * that includes the inline logo + clickable link.
+ *
+ * The logo (if any) is sent as a CID-referenced attachment so it renders
+ * inline in Gmail/Outlook without an external image fetch.
+ */
+export interface SignatureBlock {
+  /** Plain text — included in BOTH the text and html versions. */
+  text: string;
+  /** Optional inline logo as a data URI ("data:image/png;base64,..."). */
+  logoDataUri?: string | null;
+  /** Optional click-through URL (http/https). Wraps the logo + adds a link line. */
+  link?: string | null;
+}
+
 export interface SendDealEmailInput {
   smtp: SmtpConfig;
   toEmail: string;
@@ -42,6 +59,8 @@ export interface SendDealEmailInput {
   structuredFields: StructuredField[];
   attachments: EmailAttachment[];
   replyTo?: string;
+  /** When provided, the body is sent as multipart text + HTML. */
+  signature?: SignatureBlock | null;
 }
 
 export interface SendDealEmailResult {
@@ -51,7 +70,55 @@ export interface SendDealEmailResult {
   error?: string;
 }
 
-function buildBody(notes: string, fields: StructuredField[]): string {
+/**
+ * Escape user-controlled text for inclusion inside HTML. Used when building
+ * the multipart HTML version of an email body. Without this, a rep typing
+ * "<script>" into their signature would actually send live script tags to
+ * the recipient (whose mail client might render them).
+ */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Turn URLs in a block of text into clickable <a> tags for the HTML version.
+ * Same idea as the in-app linkify helper but operates AFTER escapeHtml so
+ * angle brackets in adjacent text are already neutralized.
+ *
+ * Only http/https — never javascript:, mailto:, data:, etc. — to keep the
+ * HTML safe even if the sender's signature text contained something hostile.
+ */
+function htmlAutolink(escapedHtml: string): string {
+  // After escapeHtml, "https://x" stays intact; we wrap it in an anchor.
+  return escapedHtml.replace(/(https?:\/\/[^\s<]+)/g, (m) => `<a href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>`);
+}
+
+/**
+ * Build the plain-text version of the body. Used for both text-only sends
+ * and as the text/plain part of multipart messages.
+ *
+ * Layout:
+ *   Label: value          ← one per line, stacked vertically
+ *   Label: value
+ *
+ *   {notes}               ← optional free-text
+ *
+ *   --                    ← RFC 3676 signature delimiter
+ *   {signature text}      ← rep's signature lines
+ *   {link}                ← if signature has a link, the URL on its own line
+ *
+ * The text version intentionally does NOT include the logo (it's text-only).
+ */
+function buildPlainTextBody(
+  notes: string,
+  fields: StructuredField[],
+  signature: SignatureBlock | null | undefined,
+): string {
   const lines: string[] = [];
   if (fields.length) {
     for (const f of fields) {
@@ -61,10 +128,102 @@ function buildBody(notes: string, fields: StructuredField[]): string {
     }
     lines.push('');
   }
-  if (notes && notes.trim()) {
-    lines.push(notes.trim());
+  if (notes && notes.trim()) lines.push(notes.trim());
+  if (signature && (signature.text?.trim() || signature.link)) {
+    lines.push('');
+    lines.push('--');
+    if (signature.text?.trim()) lines.push(signature.text.trim());
+    if (signature.link) lines.push(signature.link);
   }
   return lines.join('\n');
+}
+
+/**
+ * Build the HTML version of the body. Uses <pre> for the deal info so the
+ * Label: value alignment stays as the user typed it. Signature gets its own
+ * styled block with the inline logo (if any) and a clickable link.
+ *
+ * The inline logo is referenced via `cid:signature-logo` so the email client
+ * fetches it from the attached binary, not from the public internet.
+ */
+function buildHtmlBody(
+  notes: string,
+  fields: StructuredField[],
+  signature: SignatureBlock | null | undefined,
+  logoCid: string | null,
+): string {
+  const parts: string[] = [];
+  parts.push('<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; font-size: 14px; color: #111; line-height: 1.55;">');
+
+  if (fields.length) {
+    const inner = fields
+      .filter((f) => f.value && f.value.trim())
+      .map((f) => `<div><strong>${escapeHtml(f.label)}:</strong> ${htmlAutolink(escapeHtml(f.value))}</div>`)
+      .join('');
+    if (inner) parts.push(`<div style="margin-bottom:16px;">${inner}</div>`);
+  }
+
+  if (notes && notes.trim()) {
+    // Preserve typed newlines without losing layout.
+    const notesEsc = htmlAutolink(escapeHtml(notes.trim())).replace(/\n/g, '<br>');
+    parts.push(`<div style="margin-bottom:16px; white-space:pre-wrap;">${notesEsc}</div>`);
+  }
+
+  // Signature block
+  if (signature && (signature.text?.trim() || logoCid || signature.link)) {
+    parts.push('<div style="margin-top:24px; padding-top:12px; border-top:1px solid #e5e7eb; color:#374151; font-size:13px;">');
+    if (signature.text?.trim()) {
+      const sigEsc = htmlAutolink(escapeHtml(signature.text.trim())).replace(/\n/g, '<br>');
+      parts.push(`<div style="margin-bottom:8px;">${sigEsc}</div>`);
+    }
+    if (logoCid) {
+      const img = `<img src="cid:${logoCid}" alt="logo" style="max-height:60px; max-width:240px; display:block; margin:8px 0;" />`;
+      // Wrap the logo in the link, if provided.
+      if (signature.link) {
+        parts.push(`<a href="${escapeHtml(signature.link)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;">${img}</a>`);
+      } else {
+        parts.push(img);
+      }
+    }
+    if (signature.link && !logoCid) {
+      // Link-only (no logo) — render as a plain anchor row.
+      parts.push(`<div style="margin-top:6px;"><a href="${escapeHtml(signature.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(signature.link)}</a></div>`);
+    } else if (signature.link && logoCid) {
+      // Link AND logo — also show the URL as text so it's clear (and so plain
+      // text fallback matches).
+      parts.push(`<div style="margin-top:6px; font-size:12px;"><a href="${escapeHtml(signature.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(signature.link)}</a></div>`);
+    }
+    parts.push('</div>');
+  }
+
+  parts.push('</div>');
+  return parts.join('');
+}
+
+/**
+ * Extract the bytes + content type from a data URI, for use as a CID inline
+ * attachment. Returns null if the data URI is unusable (wrong shape, etc.).
+ */
+function dataUriToInline(dataUri: string, cid: string): EmailAttachment & { cid: string } | null {
+  const m = dataUri.match(/^data:(image\/(?:png|jpe?g|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+  if (!m) return null;
+  const mime = m[1];
+  const buf = Buffer.from(m[2], 'base64');
+  // Be defensive about size — reject anything obviously too big for an
+  // inline signature graphic. 600KB is generous; most logos are under 50KB.
+  if (buf.length > 600 * 1024) return null;
+  const ext = mime === 'image/jpeg' ? 'jpg' : mime.split('/')[1];
+  return {
+    filename: `signature-logo.${ext}`,
+    content: buf,
+    contentType: mime,
+    cid,
+  };
+}
+
+function buildBody(notes: string, fields: StructuredField[]): string {
+  // Kept for back-compat with callers that don't pass a signature block.
+  return buildPlainTextBody(notes, fields, null);
 }
 
 function buildSubject(dealName: string): string {
@@ -157,18 +316,49 @@ export async function sendDealEmail(input: SendDealEmailInput): Promise<SendDeal
 
   const transporter = makeTransport(input.smtp);
   try {
+    // Build text + (optionally) HTML versions. When a signature is provided
+    // we send multipart so the logo + clickable link render in HTML clients
+    // while plain-text clients still get a readable signature.
+    const sig = input.signature ?? null;
+    const text = buildPlainTextBody(input.bodyNotes, input.structuredFields, sig);
+
+    let html: string | undefined;
+    const inlineAttachments: { filename: string; content: Buffer; contentType?: string; cid: string }[] = [];
+
+    if (sig) {
+      let logoCid: string | null = null;
+      if (sig.logoDataUri) {
+        const cid = `signature-logo-${Date.now()}`;
+        const inline = dataUriToInline(sig.logoDataUri, cid);
+        if (inline) {
+          inlineAttachments.push(inline);
+          logoCid = cid;
+        }
+      }
+      html = buildHtmlBody(input.bodyNotes, input.structuredFields, sig, logoCid);
+    }
+
     const info = await transporter.sendMail({
       from: input.smtp.from,
       to: toEmail,
       cc: ccEmails.length ? ccEmails : undefined,
       replyTo: input.replyTo,
       subject: buildSubject(input.dealName),
-      text: buildBody(input.bodyNotes, input.structuredFields),
-      attachments: input.attachments.map((a) => ({
-        filename: a.filename,
-        content: a.content,
-        contentType: a.contentType,
-      })),
+      text,
+      html,
+      attachments: [
+        ...input.attachments.map((a) => ({
+          filename: a.filename,
+          content: a.content,
+          contentType: a.contentType,
+        })),
+        ...inlineAttachments.map((a) => ({
+          filename: a.filename,
+          content: a.content,
+          contentType: a.contentType,
+          cid: a.cid,
+        })),
+      ],
       // No In-Reply-To, no References — every send to a different funder is its own thread.
     });
     return { success: true, messageId: info.messageId, response: info.response };
@@ -261,6 +451,29 @@ export async function sendDealEmailBatch(
       // Gmail's same-subject conversation grouping without uglifying the subject.
       const cleanSubject = buildSubject(base.dealName);
       const subjectForSend = applyThreadBreaker(cleanSubject, `${r.ref}|${toEmail}`);
+
+      // Build text + (optional) HTML body. When the sender has a signature we
+      // send multipart. The logo is inlined as a CID attachment per message so
+      // it renders in Gmail/Outlook without needing an external image fetch.
+      const sig = base.signature ?? null;
+      const text = buildPlainTextBody(base.bodyNotes, base.structuredFields, sig);
+      let html: string | undefined;
+      const inlineAttachments: { filename: string; content: Buffer; contentType?: string; cid: string }[] = [];
+      if (sig) {
+        let logoCid: string | null = null;
+        if (sig.logoDataUri) {
+          // Unique CID per recipient to avoid any chance of clients caching
+          // the wrong image when the same transport handles multiple sends.
+          const cid = `signature-logo-${Date.now()}-${r.ref.replace(/[^a-z0-9]/gi, '').slice(0, 8)}`;
+          const inline = dataUriToInline(sig.logoDataUri, cid);
+          if (inline) {
+            inlineAttachments.push(inline);
+            logoCid = cid;
+          }
+        }
+        html = buildHtmlBody(base.bodyNotes, base.structuredFields, sig, logoCid);
+      }
+
       try {
         const info = await transporter.sendMail({
           from: base.smtp.from,
@@ -268,12 +481,21 @@ export async function sendDealEmailBatch(
           cc: ccEmails.length ? ccEmails : undefined,
           replyTo: base.replyTo,
           subject: subjectForSend,
-          text: buildBody(base.bodyNotes, base.structuredFields),
-          attachments: base.attachments.map((a) => ({
-            filename: a.filename,
-            content: a.content,
-            contentType: a.contentType,
-          })),
+          text,
+          html,
+          attachments: [
+            ...base.attachments.map((a) => ({
+              filename: a.filename,
+              content: a.content,
+              contentType: a.contentType,
+            })),
+            ...inlineAttachments.map((a) => ({
+              filename: a.filename,
+              content: a.content,
+              contentType: a.contentType,
+              cid: a.cid,
+            })),
+          ],
           // Defensively make sure no reply/reference header sneaks in from
           // pooled transport state. Each message stands on its own.
           inReplyTo: undefined,
@@ -325,8 +547,12 @@ export interface SendGenericEmailInput {
   structuredFields: StructuredField[];
   attachments: EmailAttachment[];
   replyTo?: string;
-  // Optional signature appended after the body (separated by a blank line + "--").
-  signature?: string;
+  /**
+   * Rich signature. Same shape as the deal-email path. If provided, the
+   * message is sent as multipart text + HTML so the logo + clickable link
+   * render in modern clients.
+   */
+  signature?: SignatureBlock | null;
 }
 
 export async function sendGenericEmail(input: SendGenericEmailInput): Promise<SendDealEmailResult> {
@@ -357,10 +583,24 @@ export async function sendGenericEmail(input: SendGenericEmailInput): Promise<Se
   }
   const subject = rawSubject || '(no subject)';
 
-  // Body: stacked structured fields, then notes, then signature.
-  let body = buildBody(input.bodyNotes, input.structuredFields);
-  if (input.signature && input.signature.trim()) {
-    body = `${body}\n\n--\n${input.signature.trim()}`;
+  // Build text + HTML versions. When the rep has a signature with a logo
+  // we send multipart; otherwise text-only is fine.
+  const sig = input.signature ?? null;
+  const text = buildPlainTextBody(input.bodyNotes, input.structuredFields, sig);
+
+  let html: string | undefined;
+  const inlineAttachments: { filename: string; content: Buffer; contentType?: string; cid: string }[] = [];
+  if (sig) {
+    let logoCid: string | null = null;
+    if (sig.logoDataUri) {
+      const cid = `signature-logo-${Date.now()}`;
+      const inline = dataUriToInline(sig.logoDataUri, cid);
+      if (inline) {
+        inlineAttachments.push(inline);
+        logoCid = cid;
+      }
+    }
+    html = buildHtmlBody(input.bodyNotes, input.structuredFields, sig, logoCid);
   }
 
   const transporter = makeTransport(input.smtp);
@@ -371,12 +611,21 @@ export async function sendGenericEmail(input: SendGenericEmailInput): Promise<Se
       cc: ccEmails.length ? ccEmails : undefined,
       replyTo: input.replyTo || undefined,
       subject,
-      text: body,
-      attachments: input.attachments.map((a) => ({
-        filename: a.filename,
-        content: a.content,
-        contentType: a.contentType,
-      })),
+      text,
+      html,
+      attachments: [
+        ...input.attachments.map((a) => ({
+          filename: a.filename,
+          content: a.content,
+          contentType: a.contentType,
+        })),
+        ...inlineAttachments.map((a) => ({
+          filename: a.filename,
+          content: a.content,
+          contentType: a.contentType,
+          cid: a.cid,
+        })),
+      ],
       inReplyTo: undefined,
       references: undefined,
     });

@@ -337,8 +337,8 @@ function SubmitDealInner() {
                 className={dealLocked ? 'bg-muted/40 cursor-not-allowed' : ''}
               />
             </Field>
-            {isAdmin && reps.length > 0 && (
-              <Field label="Assign to rep" hint="Who owns this deal">
+            {reps.length > 0 && (
+              <Field label="Assign to rep" hint="Defaults to you. Change if shopping on behalf of someone else.">
                 <select
                   value={assignedRepId}
                   onChange={(e) => setAssignedRepId(e.target.value)}

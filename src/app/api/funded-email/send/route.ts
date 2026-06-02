@@ -114,13 +114,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Sender's signature is appended to the body.
+    // Sender's signature with optional logo and link — built into the email
+    // body as both text and HTML (multipart). The logo is sent inline via CID.
     const [sender] = await db
-      .select({ emailSignature: users.emailSignature })
+      .select({
+        emailSignature: users.emailSignature,
+        signatureLogoUrl: users.signatureLogoUrl,
+        signatureLink: users.signatureLink,
+      })
       .from(users)
       .where(eq(users.id, ctx.user.id))
       .limit(1);
-    const signature = sender?.emailSignature ?? null;
+    const signature = (sender?.emailSignature || sender?.signatureLogoUrl || sender?.signatureLink)
+      ? {
+          text: sender.emailSignature ?? '',
+          logoDataUri: sender.signatureLogoUrl ?? null,
+          link: sender.signatureLink ?? null,
+        }
+      : null;
 
     // IMPORTANT: per spec, the sender's "always CC" does NOT apply to funded
     // emails. Only the rep-typed CC list (and nothing else) is used. The
@@ -134,7 +145,7 @@ export async function POST(req: NextRequest) {
       bodyNotes: notes,
       structuredFields,
       attachments,
-      signature: signature ?? undefined,
+      signature,
     });
 
     if (!result.success) {
