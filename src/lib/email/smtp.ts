@@ -129,9 +129,11 @@ function buildPlainTextBody(
     lines.push('');
   }
   if (notes && notes.trim()) lines.push(notes.trim());
+  // Signature appended after a single blank line — no "--" divider per
+  // user spec ("remove that line"). The signature reads as a continuation
+  // of the message body, not as a visually separate block.
   if (signature && (signature.text?.trim() || signature.link)) {
     lines.push('');
-    lines.push('--');
     if (signature.text?.trim()) lines.push(signature.text.trim());
     if (signature.link) lines.push(signature.link);
   }
@@ -153,7 +155,13 @@ function buildHtmlBody(
   logoCid: string | null,
 ): string {
   const parts: string[] = [];
-  parts.push('<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; font-size: 14px; color: #111; line-height: 1.55;">');
+  // Outer wrapper: no font-family override so the email body uses whatever
+  // font the recipient's mail client uses by default (the same font the
+  // sender's signature was composed in renders the same way on receive).
+  // No color override either — that way auto-linked URLs in the signature
+  // (which inherit color via the rules below) match the surrounding text
+  // instead of going blue.
+  parts.push('<div style="font-size:14px; line-height:1.55;">');
 
   if (fields.length) {
     const inner = fields
@@ -164,34 +172,43 @@ function buildHtmlBody(
   }
 
   if (notes && notes.trim()) {
-    // Preserve typed newlines without losing layout.
+    // Convert typed newlines into <br> ONLY (no white-space:pre-wrap). Using
+    // both at once was producing double line breaks — pre-wrap preserved the
+    // original \n AND the <br> rendered as a separate break, so every line
+    // got an extra blank one. <br> alone gives a clean single break that
+    // matches exactly what the user typed.
     const notesEsc = htmlAutolink(escapeHtml(notes.trim())).replace(/\n/g, '<br>');
-    parts.push(`<div style="margin-bottom:16px; white-space:pre-wrap;">${notesEsc}</div>`);
+    parts.push(`<div style="margin-bottom:16px;">${notesEsc}</div>`);
   }
 
-  // Signature block
+  // Signature block — no top border / divider. The signature flows directly
+  // after the notes, separated only by a small margin so it reads as one
+  // continuous message. Auto-linked text uses `color:inherit` so a URL
+  // inside the signature stays the surrounding color instead of going blue.
   if (signature && (signature.text?.trim() || logoCid || signature.link)) {
-    parts.push('<div style="margin-top:24px; padding-top:12px; border-top:1px solid #e5e7eb; color:#374151; font-size:13px;">');
+    parts.push('<div style="margin-top:16px; font-size:13px;">');
     if (signature.text?.trim()) {
-      const sigEsc = htmlAutolink(escapeHtml(signature.text.trim())).replace(/\n/g, '<br>');
-      parts.push(`<div style="margin-bottom:8px;">${sigEsc}</div>`);
+      // Same \n → <br> approach as notes. Anchors inside the signature get
+      // `color:inherit; text-decoration:none` so the rep's contact info
+      // doesn't render as blue links — it looks like the signature text
+      // they typed but is still clickable.
+      const sigEsc = htmlAutolink(escapeHtml(signature.text.trim()))
+        .replace(/\n/g, '<br>')
+        .replace(/<a /g, '<a style="color:inherit; text-decoration:none;" ');
+      parts.push(`<div>${sigEsc}</div>`);
     }
     if (logoCid) {
-      const img = `<img src="cid:${logoCid}" alt="logo" style="max-height:60px; max-width:240px; display:block; margin:8px 0;" />`;
+      const img = `<img src="cid:${logoCid}" alt="" style="max-height:60px; max-width:240px; display:block; margin:8px 0; border:0;" />`;
       // Wrap the logo in the link, if provided.
       if (signature.link) {
-        parts.push(`<a href="${escapeHtml(signature.link)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;">${img}</a>`);
+        parts.push(`<a href="${escapeHtml(signature.link)}" target="_blank" rel="noopener noreferrer" style="display:inline-block; color:inherit; text-decoration:none;">${img}</a>`);
       } else {
         parts.push(img);
       }
     }
     if (signature.link && !logoCid) {
-      // Link-only (no logo) — render as a plain anchor row.
-      parts.push(`<div style="margin-top:6px;"><a href="${escapeHtml(signature.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(signature.link)}</a></div>`);
-    } else if (signature.link && logoCid) {
-      // Link AND logo — also show the URL as text so it's clear (and so plain
-      // text fallback matches).
-      parts.push(`<div style="margin-top:6px; font-size:12px;"><a href="${escapeHtml(signature.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(signature.link)}</a></div>`);
+      // Link-only (no logo) — render as a plain anchor that inherits color.
+      parts.push(`<div style="margin-top:6px;"><a href="${escapeHtml(signature.link)}" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:none;">${escapeHtml(signature.link)}</a></div>`);
     }
     parts.push('</div>');
   }

@@ -137,28 +137,58 @@ export default function SubmissionsPage() {
   const [localNotes, setLocalNotes] = useState<Record<string, string>>({});
 
   async function updateFunder(sfId: string, patch: { status?: string; notes?: string }) {
-    await fetch(`/api/submission-funders/${sfId}`, {
+    // Optimistic local update — change the row in-place WITHOUT triggering
+    // a full reload of every submission. The full reload was causing two
+    // visible problems:
+    //   1. The page felt like it was "refreshing" (perceived flash)
+    //   2. Expanded rows would visually reorder/reposition as the data
+    //      refetched, which read as the deal being duplicated
+    // The PATCH itself is fast; if it fails we revert the local state.
+    setRows((prev) => prev.map((row) => ({
+      ...row,
+      funders: row.funders.map((f) =>
+        f.id === sfId
+          ? {
+              ...f,
+              ...(patch.status !== undefined ? { status: patch.status as typeof f.status } : {}),
+              ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
+            }
+          : f
+      ),
+    })));
+    const res = await fetch(`/api/submission-funders/${sfId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     });
-    load();
+    if (!res.ok) {
+      // Server rejected — reload to resync. Worst case the user sees the
+      // brief flash they would have seen before, but only on actual errors.
+      load();
+    }
   }
 
   async function saveFunder(sfId: string) {
     const e = editing[sfId];
     if (!e) return;
-    await fetch(`/api/submission-funders/${sfId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: e.status, notes: e.notes }),
-    });
+    // Same optimistic strategy — apply locally, send PATCH, only reload on error.
+    setRows((prev) => prev.map((row) => ({
+      ...row,
+      funders: row.funders.map((f) =>
+        f.id === sfId ? { ...f, status: e.status as typeof f.status, notes: e.notes } : f
+      ),
+    })));
     setEditing((prev) => {
       const next = { ...prev };
       delete next[sfId];
       return next;
     });
-    load();
+    const res = await fetch(`/api/submission-funders/${sfId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: e.status, notes: e.notes }),
+    });
+    if (!res.ok) load();
   }
 
   async function removeFunder(sfId: string) {
