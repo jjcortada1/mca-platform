@@ -207,6 +207,16 @@ export async function POST(req: NextRequest) {
         .limit(1);
       senderAlwaysCc = senderRow?.alwaysCcEmail ?? null;
     }
+    // Sender's signature — appended to the body of every outbound email. We
+    // use the actual SENDER (ctx.user), not the assigned rep, because the
+    // sender is the human whose name/contact info goes at the bottom of the
+    // outgoing message.
+    const [senderUser] = await db.select({ emailSignature: users.emailSignature })
+      .from(users)
+      .where(eq(users.id, ctx.user.id))
+      .limit(1);
+    const signature = senderUser?.emailSignature ?? null;
+
     const allCc = Array.from(new Set([
       ...ccEmails,
       ...globalCc,
@@ -289,6 +299,13 @@ export async function POST(req: NextRequest) {
       toSend.push({ fi, fName, ref: `r${refCounter++}` });
     }
 
+    // Sender's signature is appended to the body so the recipient sees who
+    // the email is from + their contact info. Built as plain text below the
+    // notes, separated by a blank line and "--" delimiter (RFC convention).
+    const bodyWithSig = signature && signature.trim()
+      ? `${bodyNotes.trim()}\n\n--\n${signature.trim()}`
+      : bodyNotes;
+
     // Send all as isolated messages over a single pooled connection.
     // Each funder gets its OWN email with its own subject suffix so each one
     // lands in a separate conversation thread on the sender's side.
@@ -298,7 +315,7 @@ export async function POST(req: NextRequest) {
             smtp,
             ccEmails: allCc,
             dealName: deal.name,
-            bodyNotes,
+            bodyNotes: bodyWithSig,
             structuredFields: structuredFieldsInput,
             attachments,
           },

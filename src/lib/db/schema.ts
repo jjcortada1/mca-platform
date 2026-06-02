@@ -68,6 +68,15 @@ export const companies = pgTable('companies', {
   logoUrl: text('logo_url'),
   primaryColor: varchar('primary_color', { length: 30 }),  // HSL string e.g. "184 70% 22%"
   emailSignature: text('email_signature'),
+  // Funded-email template — admin defines this once in Settings. Shape:
+  // { subject: string, fields: [{ id, label, recommended? }], attachmentNote?: string }
+  //  - subject: a fixed string used as the email subject ("Funded — {merchantName}").
+  //    Reps can fill in {placeholders} when sending.
+  //  - fields: ordered list of labeled inputs the rep fills in. Each becomes
+  //    its own line in the body, stacked vertically: "Label: value".
+  //  - attachmentNote: optional free text shown next to the attach-files UI
+  //    to remind reps what to upload ("Statement of payoff, void check, etc.")
+  fundedEmailTemplate: jsonb('funded_email_template'),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -90,7 +99,12 @@ export const users = pgTable(
     // Per-rep "always CC" — when this user sends a deal email, this address
     // is automatically added to CC on every outbound message. Used by reps
     // who want their manager copied on everything. Empty = no auto CC.
+    // NOTE: Funded emails (different flow) intentionally do NOT honor this.
     alwaysCcEmail: varchar('always_cc_email', { length: 255 }),
+    // Per-rep email signature appended to outgoing emails this rep sends.
+    // Plain text, multi-line. Each rep edits their own on /account; reps
+    // never see or edit another rep's signature.
+    emailSignature: text('email_signature'),
     isActive: boolean('is_active').notNull().default(true),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -457,6 +471,29 @@ export const commissionStatusEnum = pgEnum('commission_status', [
 
 // Sync state for the external Google Sheet mirror (used in the next slice).
 export const syncStateEnum = pgEnum('sync_state', ['pending', 'synced', 'failed']);
+
+/**
+ * Per-user saved contact list for funded emails. When a rep clicks "Send
+ * funded email" they can either type any address OR pick from this list.
+ *
+ * Scoped to (companyId, userId) so each rep manages their own list — never
+ * shared between reps. Admins don't get a global override either; this is
+ * personal, not company-wide.
+ */
+export const fundedEmailContacts = pgTable(
+  'funded_email_contacts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 200 }).notNull(),
+    email: varchar('email', { length: 255 }).notNull(),
+    company: varchar('company', { length: 200 }),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  }
+);
 
 /**
  * Lead sources — external partners who refer deals and get paid a commission.

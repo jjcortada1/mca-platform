@@ -24,6 +24,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     items: [
       { href: '/deal-shop', label: 'Shop Deals', icon: ShoppingBag, perm: 'deals.shop' },
       { href: '/submit', label: 'Submit Deal', icon: Send, perm: 'deals.submit' },
+      { href: '/funded-email', label: 'Funded Email', icon: Send, perm: 'deals.submit' },
       { href: '/submissions', label: 'Submissions', icon: Inbox, perm: 'submissions.view' },
       { href: '/active-deals', label: 'Active Deals', icon: Briefcase, perm: 'active_deals.view' },
       { href: '/funded-board', label: 'Funded Board', icon: TrendingUp, perm: 'active_deals.view' },

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { signOut } from 'next-auth/react';
+import { formatCalendarDate } from '@/lib/dates';
 
 interface CommissionRow {
   id: string;
@@ -27,7 +28,9 @@ interface PortalData {
 }
 
 const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
-const fmtDate = (s: string | null | undefined) => (s ? new Date(s).toLocaleDateString() : '—');
+// formatCalendarDate parses the date in UTC and renders in UTC so the
+// displayed day matches what was typed in — no timezone day-shift.
+const fmtDate = (s: string | null | undefined) => formatCalendarDate(s);
 const STATUS_LABEL: Record<string, string> = { pending: 'Pending', cleared: 'Paid/Cleared', clawed_back: 'Clawed back' };
 
 export default function LeadSourcePortalPage() {

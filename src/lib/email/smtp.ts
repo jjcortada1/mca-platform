@@ -304,3 +304,86 @@ export async function verifySmtp(smtp: SmtpConfig): Promise<{ ok: boolean; error
     transporter.close();
   }
 }
+
+/**
+ * Generic single-recipient send. Used by the funded-email flow (and any
+ * future one-off notifications). Differences from sendDealEmail:
+ *   - Subject is whatever the caller passed (no "New Deal -" prefix).
+ *   - No invisible thread-breaker (single recipient, doesn't matter).
+ *   - No funder-isolation rules (not a shopping path).
+ *   - The body is built from the same Label: value stacked-vertical format.
+ *
+ * All the security guards stay: CR/LF/NUL rejection, email regex check,
+ * filename sanitization. These are non-negotiable for any send path.
+ */
+export interface SendGenericEmailInput {
+  smtp: SmtpConfig;
+  toEmail: string;
+  ccEmails: string[];
+  subject: string;
+  bodyNotes: string;
+  structuredFields: StructuredField[];
+  attachments: EmailAttachment[];
+  replyTo?: string;
+  // Optional signature appended after the body (separated by a blank line + "--").
+  signature?: string;
+}
+
+export async function sendGenericEmail(input: SendGenericEmailInput): Promise<SendDealEmailResult> {
+  const rawTo = String(input.toEmail ?? '').trim();
+  if (!rawTo) return { success: false, error: 'No recipient email provided' };
+  if (/[\r\n\0]/.test(rawTo)) return { success: false, error: 'Invalid recipient address.' };
+  if (/[,;]/.test(rawTo)) return { success: false, error: 'Multiple recipients not allowed.' };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawTo)) {
+    return { success: false, error: 'Recipient email is not a valid address.' };
+  }
+  const toEmail = rawTo;
+
+  const ccEmails = Array.from(
+    new Set(
+      (input.ccEmails ?? [])
+        .map((e) => String(e ?? '').trim())
+        .filter((e) => e && e.includes('@'))
+        .filter((e) => !/[\r\n\0]/.test(e))
+        .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
+        .filter((e) => e.toLowerCase() !== toEmail.toLowerCase())
+    )
+  );
+
+  // Defensive header check on subject
+  const rawSubject = String(input.subject ?? '').trim();
+  if (/[\r\n\0]/.test(rawSubject)) {
+    return { success: false, error: 'Invalid subject.' };
+  }
+  const subject = rawSubject || '(no subject)';
+
+  // Body: stacked structured fields, then notes, then signature.
+  let body = buildBody(input.bodyNotes, input.structuredFields);
+  if (input.signature && input.signature.trim()) {
+    body = `${body}\n\n--\n${input.signature.trim()}`;
+  }
+
+  const transporter = makeTransport(input.smtp);
+  try {
+    const info = await transporter.sendMail({
+      from: input.smtp.from,
+      to: toEmail,
+      cc: ccEmails.length ? ccEmails : undefined,
+      replyTo: input.replyTo || undefined,
+      subject,
+      text: body,
+      attachments: input.attachments.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
+      inReplyTo: undefined,
+      references: undefined,
+    });
+    return { success: true, messageId: info.messageId, response: info.response };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    transporter.close();
+  }
+}

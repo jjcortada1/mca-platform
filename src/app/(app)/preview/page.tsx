@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, Button, PageHeader, Badge } from '@/components/ui/primitives';
 import { formatCurrency } from '@/lib/utils';
+import { formatCalendarDate } from '@/lib/dates';
 import { computePaydown } from '@/lib/deals/paydown';
 
 interface Rep { id: string; name: string; role: string }
@@ -201,7 +202,7 @@ function LSPreview({ rows, stats }: { rows: LSCommission[]; stats: { total: numb
             <tbody className="divide-y divide-border/60">
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{r.fundingDate ? new Date(r.fundingDate).toLocaleDateString() : '—'}</td>
+                  <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{formatCalendarDate(r.fundingDate)}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(r.commissionAmount))}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">{formatCurrency(Number(r.paidAmount))}</td>
                   <td className="px-3 py-2.5">

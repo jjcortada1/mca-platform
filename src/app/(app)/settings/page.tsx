@@ -11,7 +11,7 @@ import {
   Users as UsersIcon, GitBranch, Database, ShieldCheck,
 } from 'lucide-react';
 
-type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup';
+type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded';
 
 // Flatter, friendlier settings nav. Each entry has an icon + one-line
 // description so the user can scan and find what they want without reading
@@ -33,6 +33,7 @@ const TAB_GROUPS: {
       { key: 'email', label: 'Email mode', icon: Mail, description: 'Shared inbox vs per-rep' },
       { key: 'smtp', label: 'SMTP setup', icon: Send, description: 'Connect your sending account' },
       { key: 'fields', label: 'Email fields', icon: FileText, description: 'Custom deal info fields' },
+      { key: 'funded', label: 'Funded email template', icon: FileText, description: 'Subject + fields for the funded email' },
     ],
   },
   {
@@ -122,6 +123,7 @@ export default function SettingsPage() {
           {tab === 'smtp' && <SmtpSection />}
           {tab === 'commission' && <CommissionRulesSection />}
           {tab === 'fields' && <StructuredFieldsSection />}
+          {tab === 'funded' && <FundedTemplateSection />}
           {tab === 'users' && <UsersSection />}
           {tab === 'tiers' && <TiersSection />}
           {tab === 'options' && <MatchOptionsSection />}
@@ -2152,6 +2154,160 @@ function LogoInput({ value, onChange }: { value: string; onChange: (v: string) =
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ============================================================
+   FUNDED EMAIL TEMPLATE
+   Admin defines subject + ordered list of fields. Reps use this
+   to send funded notifications. Body stacks one field per line.
+   ============================================================ */
+interface FundedField { id?: string; label: string; hint?: string }
+interface FundedTemplate { subject: string; fields: FundedField[]; attachmentNote?: string | null }
+
+function FundedTemplateSection() {
+  const toast = useToast();
+  const [tmpl, setTmpl] = useState<FundedTemplate>({ subject: '', fields: [], attachmentNote: '' });
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/settings/funded-email-template', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => {
+        const d = j?.data ?? null;
+        if (d && typeof d === 'object') {
+          setTmpl({
+            subject: d.subject ?? '',
+            fields: Array.isArray(d.fields) ? d.fields : [],
+            attachmentNote: d.attachmentNote ?? '',
+          });
+        }
+      })
+      .finally(() => setLoaded(true));
+  }, []);
+
+  function updateField(i: number, k: 'label' | 'hint', v: string) {
+    const next = [...tmpl.fields];
+    next[i] = { ...next[i], [k]: v };
+    setTmpl({ ...tmpl, fields: next });
+  }
+  function addField() {
+    setTmpl({ ...tmpl, fields: [...tmpl.fields, { label: '', hint: '' }] });
+  }
+  function removeField(i: number) {
+    setTmpl({ ...tmpl, fields: tmpl.fields.filter((_, idx) => idx !== i) });
+  }
+  function move(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= tmpl.fields.length) return;
+    const next = [...tmpl.fields];
+    [next[i], next[j]] = [next[j], next[i]];
+    setTmpl({ ...tmpl, fields: next });
+  }
+
+  async function save() {
+    setSaving(true);
+    const res = await fetch('/api/settings/funded-email-template', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subject: tmpl.subject.trim(),
+        fields: tmpl.fields.filter((f) => f.label.trim()).map((f) => ({
+          id: f.id, label: f.label.trim(), hint: f.hint?.trim() || undefined,
+        })),
+        attachmentNote: tmpl.attachmentNote?.trim() || null,
+      }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || 'Save failed.');
+      return;
+    }
+    toast.success('Funded email template saved.');
+  }
+
+  if (!loaded) return <div className="text-sm text-muted-foreground">Loading…</div>;
+
+  return (
+    <div className="space-y-5 max-w-2xl">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Subject line</CardTitle>
+          <CardDescription>
+            Used as the email subject when a rep sends a funded notification. Reps see this exactly as you write it.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Field label="Subject">
+            <Input
+              value={tmpl.subject}
+              onChange={(e) => setTmpl({ ...tmpl, subject: e.target.value })}
+              placeholder="Funded — Merchant Name"
+            />
+          </Field>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Information fields</CardTitle>
+          <CardDescription>
+            One per line in the order they appear in the email. Reps fill these in when sending; the body stacks them vertically as <span className="font-mono">Label: value</span>.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {tmpl.fields.length === 0 && (
+            <div className="text-xs text-muted-foreground">No fields yet. Add one below.</div>
+          )}
+          {tmpl.fields.map((f, i) => (
+            <div key={i} className="flex items-start gap-2 p-2 rounded border border-border bg-card">
+              <div className="flex flex-col pt-2">
+                <button onClick={() => move(i, -1)} disabled={i === 0} className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 text-xs">▲</button>
+                <button onClick={() => move(i, 1)} disabled={i === tmpl.fields.length - 1} className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 text-xs">▼</button>
+              </div>
+              <div className="flex-1 space-y-1.5">
+                <Input
+                  value={f.label}
+                  onChange={(e) => updateField(i, 'label', e.target.value)}
+                  placeholder="Label (e.g. Merchant Name, Funded Amount, Factor Rate)"
+                />
+                <Input
+                  value={f.hint ?? ''}
+                  onChange={(e) => updateField(i, 'hint', e.target.value)}
+                  placeholder="Hint shown under the input (optional)"
+                  className="text-xs"
+                />
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => removeField(i)}>Delete</Button>
+            </div>
+          ))}
+          <Button variant="outline" onClick={addField}>+ Add field</Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Attachments — recommendation note</CardTitle>
+          <CardDescription>
+            Shown next to the attach-files button on the funded-email page. Use it to remind reps what to upload.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Textarea
+            rows={3}
+            value={tmpl.attachmentNote ?? ''}
+            onChange={(e) => setTmpl({ ...tmpl, attachmentNote: e.target.value })}
+            placeholder="e.g. Attach the signed contract, void check, and funding confirmation."
+          />
+        </CardContent>
+      </Card>
+
+      <div>
+        <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save template'}</Button>
+      </div>
     </div>
   );
 }

@@ -19,10 +19,10 @@
 import { useEffect, useState } from 'react';
 import {
   Card, CardHeader, CardTitle, CardContent, CardDescription,
-  Button, Input, Field, PageHeader,
+  Button, Input, Textarea, Field, PageHeader,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
-import { Mail, KeyRound, ShieldCheck } from 'lucide-react';
+import { Mail, KeyRound, ShieldCheck, PenLine } from 'lucide-react';
 
 interface MeUser { id: string; name: string; email: string; role: string }
 
@@ -70,6 +70,8 @@ export default function AccountPage() {
       <ChangePasswordCard />
 
       <AlwaysCcCard />
+
+      <SignatureCard />
 
       {emailMode === 'per_rep' ? (
         <MySmtpCard />
@@ -348,6 +350,71 @@ function AlwaysCcCard() {
             </span>
           )}
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ============================================================
+   Email signature — appended to every email this rep sends.
+   Plain text, multi-line. Each rep manages their own.
+   ============================================================ */
+function SignatureCard() {
+  const toast = useToast();
+  const [value, setValue] = useState('');
+  const [saved, setSaved] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/account/signature', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => {
+        const v = j?.data?.emailSignature ?? '';
+        setValue(v); setSaved(v);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    const res = await fetch('/api/account/signature', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ emailSignature: value }),
+    });
+    const j = await res.json();
+    setSaving(false);
+    if (!res.ok) {
+      toast.error(j.error || 'Could not save.');
+      return;
+    }
+    setSaved(j?.data?.emailSignature ?? '');
+    toast.success('Signature saved.');
+  }
+
+  if (loading) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <PenLine className="h-4 w-4" /> Email signature
+        </CardTitle>
+        <CardDescription>
+          Appears at the bottom of every email you send through the platform — deal submissions and funded notifications. Plain text. Multiple lines OK.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Textarea
+          rows={6}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={'Best,\nYour Name\nDirect: (555) 555-5555\nyour@email.com'}
+        />
+        <Button onClick={save} disabled={saving || value === saved}>
+          {saving ? 'Saving…' : 'Save signature'}
+        </Button>
       </CardContent>
     </Card>
   );
