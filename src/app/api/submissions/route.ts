@@ -24,7 +24,7 @@ export async function GET() {
       })
       .from(submissions)
       .innerJoin(deals, eq(deals.id, submissions.dealId))
-      .where(eq(submissions.companyId, ctx.companyId))
+      .where(and(eq(submissions.companyId, ctx.companyId), eq(deals.isDeleted, false)))
       .orderBy(desc(submissions.updatedAt));
 
     if (!subs.length) return NextResponse.json({ submissions: [] });
@@ -126,9 +126,9 @@ export async function POST(req: Request) {
       }).returning();
       dealId = created.id;
     } else {
-      // Cross-tenant guard
+      // Cross-tenant + soft-delete guard
       const [d] = await db.select().from(deals).where(eq(deals.id, dealId)).limit(1);
-      if (!d || d.companyId !== ctx.companyId) {
+      if (!d || d.companyId !== ctx.companyId || d.isDeleted) {
         return NextResponse.json({ error: 'Deal not found' }, { status: 404 });
       }
     }

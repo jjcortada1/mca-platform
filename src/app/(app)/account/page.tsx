@@ -69,6 +69,8 @@ export default function AccountPage() {
 
       <ChangePasswordCard />
 
+      <AlwaysCcCard />
+
       {emailMode === 'per_rep' ? (
         <MySmtpCard />
       ) : (
@@ -268,6 +270,84 @@ function MySmtpCard() {
         <p className="text-xs text-muted-foreground mt-2">
           For Gmail/Workspace, use a 16-character <a className="underline" href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">App Password</a> (NOT your regular password). 2-Step Verification must be on first.
         </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ============================================================
+   Always CC — adds a fixed CC address to every deal email
+   this rep sends. Stored on the rep's own user row so each
+   user has their own preference. Empty clears the setting.
+   ============================================================ */
+function AlwaysCcCard() {
+  const toast = useToast();
+  const [value, setValue] = useState('');
+  const [saved, setSaved] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/account/cc', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => {
+        const v = j?.data?.alwaysCcEmail ?? '';
+        setValue(v);
+        setSaved(v || null);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    const res = await fetch('/api/account/cc', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ alwaysCcEmail: value.trim() }),
+    });
+    const j = await res.json();
+    setSaving(false);
+    if (!res.ok) {
+      toast.error(j.error || 'Could not save.');
+      return;
+    }
+    const newVal = j?.data?.alwaysCcEmail ?? null;
+    setSaved(newVal);
+    setValue(newVal ?? '');
+    toast.success(newVal ? 'Always CC saved.' : 'Always CC cleared.');
+  }
+
+  if (loading) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Mail className="h-4 w-4" /> Always CC
+        </CardTitle>
+        <CardDescription>
+          Automatically add this email address as CC on every deal you submit. Useful if you want your manager copied on outgoing submissions. Leave blank to turn off.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Field label="CC email">
+          <Input
+            type="email"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="manager@company.com"
+          />
+        </Field>
+        <div className="flex items-center gap-3">
+          <Button onClick={save} disabled={saving || value.trim() === (saved ?? '')}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+          {saved && (
+            <span className="text-xs text-muted-foreground">
+              Currently CCing: <span className="font-mono">{saved}</span>
+            </span>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

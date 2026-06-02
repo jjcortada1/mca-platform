@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { deals, users, dealCommissions } from '@/lib/db/schema';
+import { deals, users, dealCommissions, leadSourceCommissions, accountingEntries, commissionPayments } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { requireTenantContext, requirePermission } from '@/lib/auth/context';
 import { upsertDealSchema } from '@/lib/validation/schemas';
@@ -10,7 +10,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   try {
     const ctx = await requireTenantContext();
     const [d] = await db.select().from(deals)
-      .where(and(eq(deals.id, params.id), eq(deals.companyId, ctx.companyId))).limit(1);
+      .where(and(eq(deals.id, params.id), eq(deals.companyId, ctx.companyId), eq(deals.isDeleted, false))).limit(1);
     if (!d) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ deal: d });
   } catch (e) { return apiError(e); }
@@ -61,7 +61,46 @@ export const PUT = PATCH;
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const ctx = await requirePermission('deals.edit');
-    await db.delete(deals).where(and(eq(deals.id, params.id), eq(deals.companyId, ctx.companyId)));
+
+    // Soft-delete the deal AND every dependent record so it disappears from
+    // every list, dropdown, commission view, accounting page, lead source
+    // portal, and rep view. We never hard-delete here — historical audit
+    // data is preserved for accounting/legal review.
+    const now = new Date();
+    await db.update(deals)
+      .set({ isDeleted: true, updatedAt: now })
+      .where(and(eq(deals.id, params.id), eq(deals.companyId, ctx.companyId)));
+
+    // Cascade soft-delete on every downstream record. Each table has its
+    // own isDeleted column; we set them all in one batch so the deal is
+    // truly gone from every query that filters on isDeleted=false.
+    await db.update(dealCommissions)
+      .set({ isDeleted: true, syncState: 'pending', updatedAt: now })
+      .where(and(eq(dealCommissions.dealId, params.id), eq(dealCommissions.companyId, ctx.companyId)));
+    await db.update(leadSourceCommissions)
+      .set({ isDeleted: true, syncState: 'pending', updatedAt: now })
+      .where(and(eq(leadSourceCommissions.dealId, params.id), eq(leadSourceCommissions.companyId, ctx.companyId)));
+    await db.update(accountingEntries)
+      .set({ isDeleted: true, updatedAt: now })
+      .where(and(eq(accountingEntries.dealId, params.id), eq(accountingEntries.companyId, ctx.companyId)));
+    // Payments linked to this deal's commissions get soft-deleted too. Since
+    // payments don't carry a dealId directly we filter via the parent
+    // commission ids we just marked deleted.
+    const dcIds = await db.select({ id: dealCommissions.id }).from(dealCommissions)
+      .where(and(eq(dealCommissions.dealId, params.id), eq(dealCommissions.companyId, ctx.companyId)));
+    const lscIds = await db.select({ id: leadSourceCommissions.id }).from(leadSourceCommissions)
+      .where(and(eq(leadSourceCommissions.dealId, params.id), eq(leadSourceCommissions.companyId, ctx.companyId)));
+    for (const { id } of dcIds) {
+      await db.update(commissionPayments)
+        .set({ isDeleted: true })
+        .where(and(eq(commissionPayments.dealCommissionId, id), eq(commissionPayments.companyId, ctx.companyId)));
+    }
+    for (const { id } of lscIds) {
+      await db.update(commissionPayments)
+        .set({ isDeleted: true })
+        .where(and(eq(commissionPayments.leadSourceCommissionId, id), eq(commissionPayments.companyId, ctx.companyId)));
+    }
+
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }

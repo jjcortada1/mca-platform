@@ -41,7 +41,7 @@ export default function AccountingPage() {
     try {
       const [a, d] = await Promise.all([
         fetch('/api/accounting').then((r) => r.json()),
-        fetch('/api/deals').then((r) => r.json()),
+        fetch('/api/deals', { cache: 'no-store' }).then((r) => r.json()),
       ]);
       setEntries(a.entries ?? []);
       setDeals((d.data ?? d.deals ?? []).map((x: DealOpt) => ({ id: x.id, name: x.name })));

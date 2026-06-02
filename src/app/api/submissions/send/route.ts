@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
       const [found] = await db
         .select()
         .from(deals)
-        .where(and(eq(deals.id, dealId), eq(deals.companyId, ctx.companyId)))
+        .where(and(eq(deals.id, dealId), eq(deals.companyId, ctx.companyId), eq(deals.isDeleted, false)))
         .limit(1);
       if (!found) return NextResponse.json({ error: 'Deal not found' }, { status: 404 });
       deal = found;
@@ -184,9 +184,34 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Merge global CC
+    // Merge global CC + the assigned rep's "always CC" address (set on their
+    // /account page). A rep with manager@x.com set gets that copied on every
+    // deal they own, including ones an admin submits on their behalf.
     const globalCc = (company.globalCcEmails as string[] | null) ?? [];
-    const allCc = Array.from(new Set([...ccEmails, ...globalCc]));
+    let repAlwaysCc: string | null = null;
+    if (resolvedRepId) {
+      const [repRow] = await db.select({ alwaysCcEmail: users.alwaysCcEmail })
+        .from(users)
+        .where(eq(users.id, resolvedRepId))
+        .limit(1);
+      repAlwaysCc = repRow?.alwaysCcEmail ?? null;
+    }
+    // Also pick up the SENDER's alwaysCc (an admin sending on their own
+    // behalf may also want their own always-CC applied).
+    let senderAlwaysCc: string | null = null;
+    if (ctx.user.id !== resolvedRepId) {
+      const [senderRow] = await db.select({ alwaysCcEmail: users.alwaysCcEmail })
+        .from(users)
+        .where(eq(users.id, ctx.user.id))
+        .limit(1);
+      senderAlwaysCc = senderRow?.alwaysCcEmail ?? null;
+    }
+    const allCc = Array.from(new Set([
+      ...ccEmails,
+      ...globalCc,
+      ...(repAlwaysCc ? [repAlwaysCc] : []),
+      ...(senderAlwaysCc ? [senderAlwaysCc] : []),
+    ].filter(Boolean)));
 
     // Upsert submission row (one per deal, ever)
     let [submission] = await db

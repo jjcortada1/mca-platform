@@ -6,11 +6,20 @@ import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import { upsertDealSchema } from '@/lib/validation/schemas';
 import { apiError } from '@/lib/api/errors';
 
+// Deal edits / deletions must reflect immediately in every dropdown across
+// the app. No caching of this endpoint.
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   try {
     const ctx = await requireTenantContext();
+    // Hard rule: deleted deals never appear in any list, dropdown, or
+    // downstream view. They stay in the DB (audit trail) but are filtered
+    // out at every read.
     const list = await db.select().from(deals)
-      .where(eq(deals.companyId, ctx.companyId)).orderBy(desc(deals.createdAt));
+      .where(and(eq(deals.companyId, ctx.companyId), eq(deals.isDeleted, false)))
+      .orderBy(desc(deals.createdAt));
     return NextResponse.json({ deals: list, data: list });
   } catch (e) { return apiError(e); }
 }

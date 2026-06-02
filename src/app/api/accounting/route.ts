@@ -24,6 +24,7 @@ export async function GET() {
     const rows = await db.select({
       e: accountingEntries,
       dealName: deals.name,
+      dealDeleted: deals.isDeleted,
       createdByName: creator.name,
     })
       .from(accountingEntries)
@@ -32,8 +33,12 @@ export async function GET() {
       .where(and(eq(accountingEntries.companyId, ctx.companyId), eq(accountingEntries.isDeleted, false)))
       .orderBy(desc(accountingEntries.entryDate));
 
+    // Drop entries whose linked deal is soft-deleted. Standalone entries
+    // (no dealId) still show.
+    const visible = rows.filter((r) => !r.e.dealId || r.dealDeleted === false);
+
     return NextResponse.json({
-      entries: rows.map((r) => ({ ...r.e, dealName: r.dealName, createdByName: r.createdByName })),
+      entries: visible.map((r) => ({ ...r.e, dealName: r.dealName, createdByName: r.createdByName })),
     });
   } catch (e) { return apiError(e); }
 }

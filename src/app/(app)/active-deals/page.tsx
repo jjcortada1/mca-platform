@@ -92,7 +92,7 @@ export default function ActiveDealsPage() {
   async function load() {
     setLoading(true);
     const [dRes, uRes] = await Promise.all([
-      fetch('/api/deals').then((r) => r.json()),
+      fetch('/api/deals', { cache: 'no-store' }).then((r) => r.json()),
       fetch('/api/users').then((r) => r.json()).catch(() => ({ data: [] })),
     ]);
     setDeals(dRes.data ?? dRes ?? []);

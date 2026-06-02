@@ -87,6 +87,10 @@ export const users = pgTable(
     role: userRoleEnum('role').notNull(),
     // Per-rep SMTP config when company.emailMode = 'per_rep'. Same shape as companies.smtpConfig.
     smtpConfig: jsonb('smtp_config'),
+    // Per-rep "always CC" — when this user sends a deal email, this address
+    // is automatically added to CC on every outbound message. Used by reps
+    // who want their manager copied on everything. Empty = no auto CC.
+    alwaysCcEmail: varchar('always_cc_email', { length: 255 }),
     isActive: boolean('is_active').notNull().default(true),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -274,6 +278,11 @@ export const deals = pgTable(
     // Total collected so far (drives the paydown tracker). Defaults handled in app.
     amountCollected: numeric('amount_collected', { precision: 14, scale: 2 }),
     renewalNotes: text('renewal_notes'),
+    // Soft-delete flag. When true, the deal is treated as gone everywhere —
+    // hidden from dropdowns, lists, commission views, accounting, etc. We
+    // soft-delete instead of hard-delete so historical audit data is
+    // preserved and bookkeeping records aren't orphaned by cascade.
+    isDeleted: boolean('is_deleted').notNull().default(false),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

@@ -38,7 +38,11 @@ export async function GET() {
       .from(leadSourceCommissions)
       .innerJoin(deals, eq(deals.id, leadSourceCommissions.dealId))
       .innerJoin(leadSources, eq(leadSources.id, leadSourceCommissions.leadSourceId))
-      .where(and(eq(leadSourceCommissions.companyId, ctx.companyId), eq(leadSourceCommissions.isDeleted, false)))
+      .where(and(
+        eq(leadSourceCommissions.companyId, ctx.companyId),
+        eq(leadSourceCommissions.isDeleted, false),
+        eq(deals.isDeleted, false),
+      ))
       .orderBy(desc(leadSourceCommissions.updatedAt));
 
     const now = new Date();
@@ -102,9 +106,11 @@ export async function POST(req: NextRequest) {
     if (!isAdmin(ctx.user)) return NextResponse.json({ error: 'Admin only' }, { status: 403 });
     const body = upsertSchema.parse(await req.json());
 
-    // Tenant guards
+    // Tenant guards — reject soft-deleted deals too.
     const [deal] = await db.select().from(deals).where(eq(deals.id, body.dealId)).limit(1);
-    if (!deal || deal.companyId !== ctx.companyId) return NextResponse.json({ error: 'Deal not found' }, { status: 404 });
+    if (!deal || deal.companyId !== ctx.companyId || deal.isDeleted) {
+      return NextResponse.json({ error: 'Deal not found' }, { status: 404 });
+    }
     const [ls] = await db.select().from(leadSources).where(eq(leadSources.id, body.leadSourceId)).limit(1);
     if (!ls || ls.companyId !== ctx.companyId) return NextResponse.json({ error: 'Lead source not found' }, { status: 404 });
 

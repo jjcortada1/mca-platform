@@ -79,15 +79,24 @@ export default function FundersPage() {
   const [tierFilter, setTierFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [bulkOpen, setBulkOpen] = useState(false);
+  // Industries pulled from Settings → match_options (kind='industry'). UI
+  // shows whatever the admin has set up there + falls back to the seed list
+  // so brand-new tenants aren't starting from a blank dropdown.
+  const [industries, setIndustries] = useState<string[]>(COMMON_INDUSTRIES);
 
   async function load() {
     setLoading(true);
-    const [fres, tres] = await Promise.all([
-      fetch('/api/funders').then((r) => r.json()),
-      fetch('/api/funder-tiers').then((r) => r.json()).catch(() => ({ data: [] })),
+    const [fres, tres, mres] = await Promise.all([
+      fetch('/api/funders', { cache: 'no-store' }).then((r) => r.json()),
+      fetch('/api/funder-tiers', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({ data: [] })),
+      fetch('/api/settings/match-options?kind=industry', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({ data: [] })),
     ]);
     setFunders(fres.data ?? fres ?? []);
     setTiers(tres.data ?? []);
+    // Use the admin-configured list when present; fall back to seed when empty.
+    const adminIndustries = (mres.data ?? []) as { label: string; value: string; isActive: boolean }[];
+    const names = adminIndustries.filter((o) => o.isActive !== false).map((o) => o.label);
+    setIndustries(names.length ? names : COMMON_INDUSTRIES);
     setLoading(false);
   }
 
@@ -422,6 +431,7 @@ export default function FundersPage() {
         <FunderDrawer
           funder={editing}
           tiers={tiers}
+          industries={industries}
           onChange={setEditing}
           onClose={() => setEditing(null)}
           onSave={save}
@@ -445,10 +455,11 @@ export default function FundersPage() {
 }
 
 function FunderDrawer({
-  funder, tiers, onChange, onClose, onSave, onDelete,
+  funder, tiers, industries, onChange, onClose, onSave, onDelete,
 }: {
   funder: Funder;
   tiers: FunderTier[];
+  industries: string[];
   onChange: (f: Funder) => void;
   onClose: () => void;
   onSave: () => void;
@@ -741,8 +752,10 @@ function FunderDrawer({
 
           <section className="space-y-2">
             <h3 className="font-medium text-sm uppercase tracking-wide text-muted-foreground">Restricted industries</h3>
+            <p className="text-[11px] text-muted-foreground -mt-1">Manage the master list in Settings → Match options.</p>
             <div className="flex flex-wrap gap-1">
-              {COMMON_INDUSTRIES.map((ind) => {
+              {/* Merge admin list + anything already on this funder so saved data is never lost. */}
+              {Array.from(new Set([...industries, ...funder.restrictedIndustries])).map((ind) => {
                 const selected = funder.restrictedIndustries.includes(ind);
                 return (
                   <button

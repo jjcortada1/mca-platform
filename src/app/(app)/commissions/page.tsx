@@ -138,7 +138,7 @@ export default function CommissionsPage() {
 
       if (admin) {
         const [dRes, uRes, lsRes, lscRes] = await Promise.all([
-          fetch('/api/deals'),
+          fetch('/api/deals', { cache: 'no-store' }),
           fetch('/api/users'),
           fetch('/api/lead-sources'),
           fetch('/api/lead-source-commissions'),

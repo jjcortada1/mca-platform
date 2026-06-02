@@ -44,8 +44,8 @@ export async function GET() {
       .leftJoin(users, eq(users.id, dealCommissions.repId))
       .where(
         isAdmin
-          ? and(eq(dealCommissions.companyId, ctx.companyId), eq(dealCommissions.isDeleted, false))
-          : and(eq(dealCommissions.companyId, ctx.companyId), eq(dealCommissions.isDeleted, false), eq(dealCommissions.repId, ctx.user.id))
+          ? and(eq(dealCommissions.companyId, ctx.companyId), eq(dealCommissions.isDeleted, false), eq(deals.isDeleted, false))
+          : and(eq(dealCommissions.companyId, ctx.companyId), eq(dealCommissions.isDeleted, false), eq(deals.isDeleted, false), eq(dealCommissions.repId, ctx.user.id))
       )
       .orderBy(desc(dealCommissions.updatedAt));
 
@@ -117,9 +117,10 @@ export async function POST(req: NextRequest) {
     }
     const body = upsertSchema.parse(await req.json());
 
-    // Tenant guard on the deal
+    // Tenant guard on the deal — also reject soft-deleted deals so a stale
+    // dropdown reference can't create commissions on a deal that's been removed.
     const [deal] = await db.select().from(deals).where(eq(deals.id, body.dealId)).limit(1);
-    if (!deal || deal.companyId !== ctx.companyId) {
+    if (!deal || deal.companyId !== ctx.companyId || deal.isDeleted) {
       return NextResponse.json({ error: 'Deal not found' }, { status: 404 });
     }
     // Rep guard

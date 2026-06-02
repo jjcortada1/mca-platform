@@ -6,6 +6,11 @@ import { requireTenantContext, requireCompanyAdmin } from '@/lib/auth/context';
 import { z } from 'zod';
 import { apiError } from '@/lib/api/errors';
 
+// Match options (industries, statuses, etc.) edited in Settings must show
+// up immediately on funder edit / deal shop pages with no cache delay.
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 /**
  * GET /api/settings/match-options
  *   ?kind=credit_range  → returns options of that kind only
@@ -42,11 +47,16 @@ export async function GET(req: NextRequest) {
 }
 
 const optionSchema = z.object({
-  value: z.string().min(1).max(100),
-  label: z.string().min(1).max(200),
+  // value and label are both optional individually, but at least one must be present.
+  // If only one is given, it doubles as both. This lets the UI offer a single
+  // text input (e.g. for industries) where the user just types the name once.
+  value: z.string().min(1).max(100).optional(),
+  label: z.string().min(1).max(200).optional(),
   sortOrder: z.number().int().optional(),
   isActive: z.boolean().optional(),
   meta: z.record(z.unknown()).nullable().optional(),
+}).refine((o) => !!(o.value?.trim() || o.label?.trim()), {
+  message: 'Each option needs a value or label.',
 });
 
 const putSchema = z.object({
@@ -69,14 +79,23 @@ export async function PUT(req: NextRequest) {
       and(eq(matchOptions.companyId, ctx.companyId), eq(matchOptions.kind, body.kind))
     );
 
-    // Insert new ones (skip empty)
+    // Insert new ones — auto-derive missing value/label. Simple kinds like
+    // "industry" only need the name once; we use it for both fields.
     const toInsert = body.options
-      .filter((o) => o.value.trim() && o.label.trim())
+      .map((o) => {
+        const labelTrim = (o.label ?? '').trim();
+        const valueTrim = (o.value ?? '').trim();
+        // Whichever side has text wins for the other side.
+        const label = labelTrim || valueTrim;
+        const value = valueTrim || labelTrim;
+        return { ...o, label, value };
+      })
+      .filter((o) => o.value && o.label)
       .map((o, i) => ({
         companyId: ctx.companyId,
         kind: body.kind,
-        value: o.value.trim(),
-        label: o.label.trim(),
+        value: o.value,
+        label: o.label,
         sortOrder: o.sortOrder ?? i,
         isActive: o.isActive ?? true,
         meta: o.meta ?? null,

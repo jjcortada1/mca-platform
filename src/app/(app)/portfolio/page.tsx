@@ -43,7 +43,7 @@ export default function PortfolioPage() {
   const [sort, setSort] = useState<SortKey>('recent');
 
   useEffect(() => {
-    fetch('/api/deals').then((r) => r.json()).then((j) => {
+    fetch('/api/deals', { cache: 'no-store' }).then((r) => r.json()).then((j) => {
       setDeals((j.data ?? j.deals ?? []) as Deal[]);
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);

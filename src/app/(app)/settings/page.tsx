@@ -6,92 +6,129 @@ import {
   Button, Input, Textarea, Field, Label, Badge, PageHeader,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
+import {
+  Palette, Mail, Send, FileText, DollarSign, Layers, ListChecks,
+  Users as UsersIcon, GitBranch, Database, ShieldCheck,
+} from 'lucide-react';
 
 type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources';
 
-const TAB_GROUPS: { title: string; tabs: { key: Tab; label: string }[] }[] = [
+// Flatter, friendlier settings nav. Each entry has an icon + one-line
+// description so the user can scan and find what they want without reading
+// tab labels twice.
+const TAB_GROUPS: {
+  title: string;
+  tabs: { key: Tab; label: string; icon: React.ComponentType<{ className?: string }>; description: string }[];
+}[] = [
   {
-    title: 'Account',
-    tabs: [{ key: 'security', label: 'Security' }],
-  },
-  {
-    title: 'Brand',
-    tabs: [{ key: 'branding', label: 'Branding' }],
+    title: 'General',
+    tabs: [
+      { key: 'branding', label: 'Branding', icon: Palette, description: 'Logo, colors, company name' },
+      { key: 'security', label: 'Security', icon: ShieldCheck, description: 'Your password and audit log' },
+    ],
   },
   {
     title: 'Email',
     tabs: [
-      { key: 'email', label: 'Email mode' },
-      { key: 'smtp', label: 'SMTP' },
-      { key: 'fields', label: 'Email fields' },
+      { key: 'email', label: 'Email mode', icon: Mail, description: 'Shared inbox vs per-rep' },
+      { key: 'smtp', label: 'SMTP setup', icon: Send, description: 'Connect your sending account' },
+      { key: 'fields', label: 'Email fields', icon: FileText, description: 'Custom deal info fields' },
     ],
   },
   {
-    title: 'Financial',
-    tabs: [{ key: 'commission', label: 'Commission rules' }],
-  },
-  {
-    title: 'Matching',
+    title: 'Deals',
     tabs: [
-      { key: 'tiers', label: 'Funder tiers' },
-      { key: 'options', label: 'Match options' },
+      { key: 'tiers', label: 'Funder tiers', icon: Layers, description: 'A-Paper, Subprime, etc.' },
+      { key: 'options', label: 'Industries, states, more', icon: ListChecks, description: 'Dropdown options used everywhere' },
+      { key: 'commission', label: 'Commission rules', icon: DollarSign, description: 'Default split + broker fee' },
     ],
   },
   {
     title: 'Team',
-    tabs: [{ key: 'users', label: 'Users' }, { key: 'leadsources', label: 'Lead Sources' }],
+    tabs: [
+      { key: 'users', label: 'Reps & admins', icon: UsersIcon, description: 'Invite, deactivate, permissions' },
+      { key: 'leadsources', label: 'Lead sources', icon: GitBranch, description: 'Referral partner accounts' },
+    ],
   },
   {
-    title: 'Integrations',
-    tabs: [{ key: 'sheets', label: 'Google Sheets backup' }],
+    title: 'Backup',
+    tabs: [
+      { key: 'sheets', label: 'Google Sheets backup', icon: Database, description: 'Mirror your CRM to a sheet' },
+    ],
   },
 ];
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<Tab>('security');
+  const [tab, setTab] = useState<Tab>('branding');
+
+  // Find active item for header display
+  const activeItem = TAB_GROUPS.flatMap((g) => g.tabs).find((t) => t.key === tab);
 
   return (
-    <div className="space-y-8 max-w-5xl">
-      <PageHeader title="Settings" description="Branding, email, financial, and team configuration." />
+    <div className="space-y-6">
+      <PageHeader title="Settings" description="Manage your company, team, deals, and integrations." />
 
-      <div className="border-b border-border overflow-x-auto -mx-1">
-        <div className="flex items-end gap-6 px-1">
-          {TAB_GROUPS.map((group) => (
-            <div key={group.title} className="flex flex-col">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-1 mb-1">
-                {group.title}
+      <div className="flex flex-col lg:flex-row gap-6 lg:gap-10">
+        {/* Sidebar nav — vertical, grouped, scrollable on mobile */}
+        <aside className="lg:w-64 shrink-0">
+          <nav className="space-y-5 lg:sticky lg:top-6">
+            {TAB_GROUPS.map((group) => (
+              <div key={group.title}>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 mb-1.5 px-2">
+                  {group.title}
+                </div>
+                <div className="space-y-0.5">
+                  {group.tabs.map((t) => {
+                    const Icon = t.icon;
+                    const active = tab === t.key;
+                    return (
+                      <button
+                        key={t.key}
+                        onClick={() => setTab(t.key)}
+                        className={`w-full flex items-start gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors ${
+                          active
+                            ? 'bg-foreground text-background'
+                            : 'hover:bg-muted text-foreground'
+                        }`}
+                      >
+                        <Icon className={`h-4 w-4 shrink-0 mt-0.5 ${active ? '' : 'text-muted-foreground'}`} />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium leading-tight">{t.label}</div>
+                          <div className={`text-[11px] leading-tight mt-0.5 ${active ? 'text-background/70' : 'text-muted-foreground'}`}>
+                            {t.description}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="flex">
-                {group.tabs.map((t) => (
-                  <button
-                    key={t.key}
-                    onClick={() => setTab(t.key)}
-                    className={`px-3 py-2 text-sm border-b-2 whitespace-nowrap transition-colors ${
-                      tab === t.key
-                        ? 'border-primary text-foreground font-medium'
-                        : 'border-transparent text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
+            ))}
+          </nav>
+        </aside>
+
+        {/* Main settings panel */}
+        <div className="flex-1 min-w-0 space-y-4">
+          {activeItem && (
+            <div className="pb-2 border-b border-border">
+              <h2 className="text-lg font-semibold tracking-tight">{activeItem.label}</h2>
+              <p className="text-sm text-muted-foreground mt-0.5">{activeItem.description}</p>
             </div>
-          ))}
+          )}
+
+          {tab === 'branding' && <BrandingSection />}
+          {tab === 'email' && <EmailModeSection />}
+          {tab === 'smtp' && <SmtpSection />}
+          {tab === 'commission' && <CommissionRulesSection />}
+          {tab === 'fields' && <StructuredFieldsSection />}
+          {tab === 'users' && <UsersSection />}
+          {tab === 'tiers' && <TiersSection />}
+          {tab === 'options' && <MatchOptionsSection />}
+          {tab === 'security' && <SecuritySection />}
+          {tab === 'sheets' && <SheetSyncSection />}
+          {tab === 'leadsources' && <LeadSourcesSection />}
         </div>
       </div>
-
-      {tab === 'branding' && <BrandingSection />}
-      {tab === 'email' && <EmailModeSection />}
-      {tab === 'smtp' && <SmtpSection />}
-      {tab === 'commission' && <CommissionRulesSection />}
-      {tab === 'fields' && <StructuredFieldsSection />}
-      {tab === 'users' && <UsersSection />}
-      {tab === 'tiers' && <TiersSection />}
-      {tab === 'options' && <MatchOptionsSection />}
-      {tab === 'security' && <SecuritySection />}
-      {tab === 'sheets' && <SheetSyncSection />}
-      {tab === 'leadsources' && <LeadSourcesSection />}
     </div>
   );
 }
@@ -1046,7 +1083,7 @@ interface MatchOption {
   meta?: Record<string, unknown> | null;
 }
 
-const MATCH_KINDS: { key: string; title: string; description: string; metaFields?: { key: string; label: string; type: 'number' }[] }[] = [
+const MATCH_KINDS: { key: string; title: string; description: string; simple?: boolean; metaFields?: { key: string; label: string; type: 'number' }[] }[] = [
   {
     key: 'credit_range',
     title: 'Credit ranges',
@@ -1065,12 +1102,14 @@ const MATCH_KINDS: { key: string; title: string; description: string; metaFields
   {
     key: 'industry',
     title: 'Industries',
-    description: 'Shown in deal shop industry dropdown and used as funder restriction labels. "Other" must exist to allow skipping.',
+    description: 'Industries that appear in the deal shop and as funder restriction tags. Just type the name — the system uses it everywhere.',
+    simple: true,
   },
   {
     key: 'state',
     title: 'States',
-    description: 'Which states appear in the deal shop dropdown. Use a 2-letter code as the value (e.g. FL). Leave this empty to show all 50 states. "Other" is always available to skip state filtering.',
+    description: 'Which states appear in the deal shop dropdown. Use 2-letter codes (FL, CA, NY). Leave empty to show all 50 states.',
+    simple: true,
   },
   {
     key: 'deal_type',
@@ -1080,7 +1119,8 @@ const MATCH_KINDS: { key: string; title: string; description: string; metaFields
   {
     key: 'position_option',
     title: 'Positions',
-    description: 'Shown in deal shop positions dropdown.',
+    description: 'Position options shown in the deal shop dropdown.',
+    simple: true,
   },
 ];
 
@@ -1167,8 +1207,9 @@ function MatchOptionsKindEditor({ kind }: { kind: string }) {
   }
 
   async function save() {
-    // Filter empties
-    const valid = options.filter((o) => o.value.trim() && o.label.trim());
+    // Allow rows where the user filled in either field — the server will
+    // mirror missing value↔label automatically.
+    const valid = options.filter((o) => (o.value?.trim() || o.label?.trim()));
     setSaving(true);
     const res = await fetch('/api/settings/match-options', {
       method: 'PUT',
@@ -1176,8 +1217,8 @@ function MatchOptionsKindEditor({ kind }: { kind: string }) {
       body: JSON.stringify({
         kind,
         options: valid.map((o, i) => ({
-          value: o.value.trim(),
-          label: o.label.trim(),
+          value: (o.value ?? '').trim() || (o.label ?? '').trim(),
+          label: (o.label ?? '').trim() || (o.value ?? '').trim(),
           sortOrder: i,
           meta: o.meta ?? null,
         })),
@@ -1225,21 +1266,40 @@ function MatchOptionsKindEditor({ kind }: { kind: string }) {
                 >▼</button>
               </div>
               <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <Field label="Value" hint="Internal — lowercase + underscores. Don't change after creation if funders reference it.">
-                  <Input
-                    value={o.value}
-                    onChange={(e) => update(i, 'value', e.target.value)}
-                    placeholder="e.g. above_700"
-                    className="font-mono text-xs"
-                  />
-                </Field>
-                <Field label="Label" hint="Shown to users in the dropdown.">
-                  <Input
-                    value={o.label}
-                    onChange={(e) => update(i, 'label', e.target.value)}
-                    placeholder="e.g. Above 700"
-                  />
-                </Field>
+                {def.simple ? (
+                  // SIMPLE MODE — one input. Whatever you type IS the value AND the label.
+                  // Server will mirror it into both columns automatically.
+                  <Field label="Name" hint="What appears in the dropdown.">
+                    <Input
+                      value={o.label}
+                      onChange={(e) => {
+                        // Update both fields so it's clear they stay in sync.
+                        update(i, 'label', e.target.value);
+                        update(i, 'value', e.target.value);
+                      }}
+                      placeholder="e.g. Construction"
+                      className="sm:col-span-2"
+                    />
+                  </Field>
+                ) : (
+                  <>
+                    <Field label="Value" hint="Internal — lowercase + underscores. Don't change after creation if funders reference it.">
+                      <Input
+                        value={o.value}
+                        onChange={(e) => update(i, 'value', e.target.value)}
+                        placeholder="e.g. above_700"
+                        className="font-mono text-xs"
+                      />
+                    </Field>
+                    <Field label="Label" hint="Shown to users in the dropdown.">
+                      <Input
+                        value={o.label}
+                        onChange={(e) => update(i, 'label', e.target.value)}
+                        placeholder="e.g. Above 700"
+                      />
+                    </Field>
+                  </>
+                )}
                 {def.metaFields?.map((mf) => (
                   <Field key={mf.key} label={mf.label}>
                     <Input
@@ -1574,71 +1634,183 @@ function SheetSyncSection() {
 
   if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
 
+  const step1Done = !!cfg?.configured;
+  const step2Done = !!cfg?.spreadsheetId;
+  const step3Done = cfg?.lastSyncStatus === 'ok';
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Google Sheets backup</CardTitle>
-        <CardDescription>
-          Continuously mirror commission data to one permanent Google Sheet. The CRM database
-          stays the source of truth; the Sheet is a live external backup that updates automatically.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-5 max-w-2xl">
-        {/* Status */}
-        <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <span className={`h-2.5 w-2.5 rounded-full ${cfg?.enabled ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
-            <span className="font-medium">{cfg?.enabled ? 'Sync enabled' : 'Sync disabled'}</span>
-            {cfg?.lastSyncStatus && (
-              <Badge variant={cfg.lastSyncStatus === 'ok' ? 'success' : 'destructive'} className="text-[10px]">
-                last: {cfg.lastSyncStatus === 'ok' ? 'Synced' : 'Failed'}
-              </Badge>
+    <div className="space-y-5 max-w-2xl">
+      {/* Live status bar — always visible at the top */}
+      <Card>
+        <CardContent className="p-4 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <span className={`h-3 w-3 rounded-full ${cfg?.enabled && step3Done ? 'bg-emerald-500' : cfg?.enabled ? 'bg-amber-400' : 'bg-muted-foreground/40'}`} />
+            <div>
+              <div className="font-semibold text-sm">
+                {cfg?.enabled && step3Done ? 'Backup is live' : cfg?.enabled ? 'Backup configured — waiting for first sync' : 'Backup is off'}
+              </div>
+              {cfg?.lastSyncAt && (
+                <div className="text-[11px] text-muted-foreground">Last sync: {new Date(cfg.lastSyncAt).toLocaleString()}</div>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {cfg?.configured && cfg?.spreadsheetId && (
+              <Button size="sm" variant="outline" onClick={() => runAction('force')} loading={forcing}>
+                Sync now
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant={cfg?.enabled ? 'outline' : 'default'}
+              onClick={() => save(!cfg?.enabled)}
+              loading={saving}
+              disabled={!step1Done || !step2Done}
+            >
+              {cfg?.enabled ? 'Pause backup' : 'Turn on backup'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {cfg?.lastSyncError && (
+        <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded p-2">
+          <strong>Last sync error:</strong> {cfg.lastSyncError}
+        </div>
+      )}
+
+      {/* Step 1: Service account */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <StepBadge done={step1Done} number={1} />
+            <div className="flex-1 min-w-0">
+              <CardTitle className="text-base">Connect Google</CardTitle>
+              <CardDescription>One-time. Lets the platform write to your Sheet on your behalf.</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {!step1Done ? (
+            <>
+              <ol className="text-sm space-y-1.5 list-decimal pl-5 text-muted-foreground">
+                <li>Open{' '}
+                  <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noreferrer" className="underline text-foreground">
+                    Google Cloud Console
+                  </a>{' '}
+                  and create a new project (any name).
+                </li>
+                <li>Search for &quot;Google Sheets API&quot; and click <strong>Enable</strong>.</li>
+                <li>Go to <strong>IAM &amp; Admin → Service Accounts</strong>, click <strong>Create service account</strong>, give it any name, then skip the optional permission steps.</li>
+                <li>On the new service account, open the <strong>Keys</strong> tab → <strong>Add Key → JSON</strong>. A file downloads.</li>
+                <li>Open the downloaded JSON file in any text editor and paste the entire contents below.</li>
+              </ol>
+              <Field label="Paste the JSON key file contents">
+                <Textarea rows={4} value={credentials} onChange={(e) => setCredentials(e.target.value)} placeholder='{ "type": "service_account", "client_email": "...", "private_key": "..." }' />
+              </Field>
+              <Button onClick={() => save()} loading={saving} disabled={!credentials.trim()}>
+                Save credentials
+              </Button>
+            </>
+          ) : (
+            <div className="flex items-start gap-2 text-sm">
+              <div className="flex-1">
+                <div className="font-medium text-emerald-700">Connected ✓</div>
+                <div className="text-xs text-muted-foreground mt-0.5">Service account:</div>
+                <div className="font-mono text-xs break-all">{cfg.serviceAccountEmail}</div>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => { setCredentials(''); }}>Replace</Button>
+            </div>
+          )}
+          {step1Done && credentials.trim().length > 0 && (
+            <>
+              <Field label="Replace JSON key">
+                <Textarea rows={4} value={credentials} onChange={(e) => setCredentials(e.target.value)} />
+              </Field>
+              <Button onClick={() => save()} loading={saving}>Update credentials</Button>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Step 2: Sheet */}
+      <Card className={!step1Done ? 'opacity-50 pointer-events-none' : ''}>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <StepBadge done={step2Done} number={2} />
+            <div className="flex-1 min-w-0">
+              <CardTitle className="text-base">Pick your backup Sheet</CardTitle>
+              <CardDescription>Create one Google Sheet and paste its link or ID.</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {cfg?.serviceAccountEmail && (
+            <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2.5 text-amber-900">
+              <strong>Important:</strong> Open your Google Sheet, click <strong>Share</strong>, and give <strong>Editor</strong> access to this email:
+              <div className="font-mono font-semibold break-all mt-1.5 text-foreground">{cfg.serviceAccountEmail}</div>
+            </div>
+          )}
+          <Field
+            label="Google Sheet link or ID"
+            hint='Paste the URL ("https://docs.google.com/spreadsheets/d/AbC123.../edit") OR just the ID part.'
+          >
+            <Input
+              value={spreadsheetId}
+              onChange={(e) => {
+                // Accept full URL — auto-extract the ID
+                const v = e.target.value;
+                const m = v.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                setSpreadsheetId(m ? m[1] : v.trim());
+              }}
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+            />
+          </Field>
+          <div className="flex gap-2">
+            <Button onClick={() => save()} loading={saving} disabled={!spreadsheetId.trim()}>
+              {step2Done ? 'Update sheet' : 'Save sheet'}
+            </Button>
+            {step2Done && (
+              <Button variant="outline" onClick={() => runAction('test')} loading={testing}>
+                Test connection
+              </Button>
             )}
           </div>
-          <Button size="sm" variant={cfg?.enabled ? 'outline' : 'default'} onClick={() => save(!cfg?.enabled)} loading={saving}>
-            {cfg?.enabled ? 'Disable sync' : 'Enable sync'}
-          </Button>
-        </div>
-        {cfg?.lastSyncError && (
-          <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded p-2">{cfg.lastSyncError}</div>
-        )}
+        </CardContent>
+      </Card>
 
-        {/* Setup steps */}
-        <div className="text-xs text-muted-foreground space-y-1 rounded-lg border border-border p-3">
-          <div className="font-semibold text-foreground text-sm mb-1">One-time setup</div>
-          <div>1. In Google Cloud Console, create a project and enable the <strong>Google Sheets API</strong>.</div>
-          <div>2. Create a <strong>service account</strong> and download its <strong>JSON key</strong>.</div>
-          <div>3. Create your permanent Google Sheet; copy its <strong>Sheet ID</strong> (the long string in the URL between /d/ and /edit).</div>
-          <div>4. Share the Sheet (as Editor) with the service account email shown below after you paste credentials.</div>
-          <div>5. Paste the JSON + Sheet ID here, Save, then Test connection.</div>
-        </div>
-
-        <Field label="Google Sheet ID">
-          <Input value={spreadsheetId} onChange={(e) => setSpreadsheetId(e.target.value)} placeholder="1AbC...xyz" />
-        </Field>
-
-        <Field label={cfg?.configured ? 'Service account JSON (paste to replace)' : 'Service account JSON'} hint={cfg?.configured ? 'Leave blank to keep the saved credentials.' : 'Paste the full contents of the downloaded key file.'}>
-          <Textarea rows={5} value={credentials} onChange={(e) => setCredentials(e.target.value)} placeholder='{ "type": "service_account", "client_email": "...", "private_key": "..." }' />
-        </Field>
-
-        {cfg?.serviceAccountEmail && (
-          <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2.5 text-amber-900">
-            Share your Google Sheet (Editor access) with this address:<br />
-            <span className="font-mono font-medium break-all">{cfg.serviceAccountEmail}</span>
+      {/* Step 3: Turn it on */}
+      <Card className={!step2Done ? 'opacity-50 pointer-events-none' : ''}>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <StepBadge done={!!cfg?.enabled} number={3} />
+            <div className="flex-1 min-w-0">
+              <CardTitle className="text-base">Turn on automatic backup</CardTitle>
+              <CardDescription>Every change to your CRM syncs to the Sheet within seconds.</CardDescription>
+            </div>
           </div>
-        )}
+        </CardHeader>
+        <CardContent>
+          <Button
+            onClick={() => save(!cfg?.enabled)}
+            loading={saving}
+            variant={cfg?.enabled ? 'outline' : 'default'}
+          >
+            {cfg?.enabled ? 'Pause automatic backup' : 'Turn on automatic backup'}
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
-        <div className="flex flex-wrap gap-2 pt-1">
-          <Button onClick={() => save()} loading={saving}>Save settings</Button>
-          <Button variant="outline" onClick={() => runAction('test')} loading={testing} disabled={!cfg?.configured}>Test connection</Button>
-          <Button variant="outline" onClick={() => runAction('force')} loading={forcing} disabled={!cfg?.enabled}>Force sync now</Button>
-        </div>
-
-        {cfg?.lastSyncAt && (
-          <div className="text-xs text-muted-foreground">Last sync: {new Date(cfg.lastSyncAt).toLocaleString()}</div>
-        )}
-      </CardContent>
-    </Card>
+function StepBadge({ number, done }: { number: number; done: boolean }) {
+  return (
+    <div className={`h-7 w-7 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 ${
+      done ? 'bg-emerald-500 text-white' : 'bg-muted text-muted-foreground'
+    }`}>
+      {done ? '✓' : number}
+    </div>
   );
 }
 

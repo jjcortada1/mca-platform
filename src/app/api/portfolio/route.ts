@@ -24,8 +24,8 @@ export async function GET() {
     const admin = isAdmin(ctx.user.role, ctx.user.permissions ?? []);
     const now = new Date();
 
-    // Deals (scoped: admin = all, rep = own)
-    const dealConds = [eq(deals.companyId, ctx.companyId)];
+    // Deals (scoped: admin = all, rep = own). Soft-deleted excluded.
+    const dealConds = [eq(deals.companyId, ctx.companyId), eq(deals.isDeleted, false)];
     if (!admin) dealConds.push(eq(deals.assignedRepId, ctx.user.id));
     const dealRows = await db.select().from(deals).where(and(...dealConds));
 
