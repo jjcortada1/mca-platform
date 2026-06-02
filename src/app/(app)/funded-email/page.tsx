@@ -28,8 +28,26 @@ import {
 import { useToast } from '@/components/toast';
 import { Plus, X, Send, Paperclip, BookOpen } from 'lucide-react';
 
-interface TemplateField { id?: string; label: string; hint?: string }
+interface TemplateField { id?: string; label: string; hint?: string; type?: 'text' | 'date' }
 interface FundedTemplate { subject: string; fields: TemplateField[]; attachmentNote?: string | null }
+
+/** A field is a date input if the admin set type='date' OR the label mentions 'date'. */
+function isDateField(f: TemplateField): boolean {
+  if (f.type === 'date') return true;
+  return /\bdate\b/i.test(f.label || '');
+}
+
+/** Format a YYYY-MM-DD calendar date for the email body. Returns input unchanged
+ *  if it doesn't look like an ISO date (so non-date fields aren't touched). */
+function formatDateForBody(v: string): string {
+  const m = (v || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return v;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  // Build in UTC and render in UTC so the day never shifts. Same approach
+  // as lib/dates.ts to stay consistent with the rest of the app.
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+}
 interface SavedContact { id: string; name: string; email: string; company: string | null; notes: string | null }
 
 export default function FundedEmailPage() {
@@ -108,7 +126,10 @@ export default function FundedEmailPage() {
       JSON.stringify(
         (tmpl?.fields ?? []).map((f, i) => ({
           label: f.label,
-          value: values[i] ?? '',
+          // Dates are stored as YYYY-MM-DD in state. Convert them to a human
+          // calendar format ("Jan 15, 2026") for the email body so the
+          // recipient sees a readable date, not an ISO string.
+          value: isDateField(f) ? formatDateForBody(values[i] ?? '') : (values[i] ?? ''),
         })).filter((f) => f.value.trim())
       )
     );
@@ -262,6 +283,10 @@ export default function FundedEmailPage() {
             {tmpl.fields.map((f, i) => (
               <Field key={i} label={f.label} hint={f.hint}>
                 <Input
+                  // Date fields get a native date picker. Everything else
+                  // is a regular text input. Type is set by the admin
+                  // template OR auto-detected when the label mentions "date".
+                  type={isDateField(f) ? 'date' : 'text'}
                   value={values[i] ?? ''}
                   onChange={(e) => setValues({ ...values, [i]: e.target.value })}
                 />

@@ -377,21 +377,37 @@ export async function sendDealEmail(input: SendDealEmailInput): Promise<SendDeal
  * Isolation guarantee is identical to sendDealEmail: one address in `to`,
  * funder never in their own or anyone else's recipients.
  */
+/**
+ * Per-funder isolated send. The `toEmails` array carries ALL of one funder's
+ * submission addresses so they ride on a single email (one thread per funder).
+ * Different funders STILL get separate messages — no funder appears in
+ * another funder's recipient list.
+ */
 export interface BatchRecipient {
-  toEmail: string;
+  /**
+   * All addresses for this ONE funder. If a funder has multiple submission
+   * emails (e.g. submissions@x.com + deals@x.com), they all go into the
+   * To: header of a single message so the funder sees one thread.
+   * The legacy `toEmail` single-string field is accepted as a fallback.
+   */
+  toEmails?: string[];
+  toEmail?: string;
   /** Opaque tag the caller uses to correlate results (e.g. funderId or name). */
   ref: string;
   /**
    * Optional label appended to the subject for this recipient so each email
    * ends up in its own conversation thread on the sender's side (Gmail
    * threads by exact subject match). Typically the funder name. If omitted,
-   * we fall back to the local-part of the recipient address.
+   * we fall back to the local-part of the first recipient address.
    */
   label?: string;
 }
 
 export interface BatchSendResult {
   ref: string;
+  /** All addresses this email went to (one funder may have several). */
+  toEmails: string[];
+  /** Convenience: first address from toEmails (back-compat with old callers). */
   toEmail: string;
   success: boolean;
   messageId?: string;
@@ -418,25 +434,33 @@ export async function sendDealEmailBatch(
   const out: BatchSendResult[] = [];
   try {
     for (const r of recipients) {
-      const rawTo = String(r.toEmail ?? '').trim();
-      if (!rawTo) {
-        out.push({ ref: r.ref, toEmail: '', success: false, error: 'No recipient email provided' });
+      // Normalize the recipient: accept the new toEmails array OR the legacy
+      // single toEmail string. All addresses for one funder go into the SAME
+      // outgoing message's To: header.
+      const rawList = (r.toEmails && r.toEmails.length) ? r.toEmails : (r.toEmail ? [r.toEmail] : []);
+      const addresses: string[] = [];
+      let badAddress: string | null = null;
+      for (const addr of rawList) {
+        const v = String(addr ?? '').trim();
+        if (!v) continue;
+        // Each address gets the same hard validation as the single-address path.
+        if (/[\r\n\0]/.test(v)) { badAddress = `Invalid recipient address: header chars`; break; }
+        if (/[,;]/.test(v)) { badAddress = `Address contains comma/semicolon: ${v}`; break; }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { badAddress = `Not a valid email: ${v}`; break; }
+        if (!addresses.find((x) => x.toLowerCase() === v.toLowerCase())) addresses.push(v);
+      }
+      if (badAddress) {
+        out.push({ ref: r.ref, toEmails: rawList, toEmail: rawList[0] ?? '', success: false, error: badAddress });
         continue;
       }
-      // Header injection guard: CR/LF/NUL can split the email and inject BCC.
-      if (/[\r\n\0]/.test(rawTo)) {
-        out.push({ ref: r.ref, toEmail: rawTo, success: false, error: 'Invalid recipient address.' });
+      if (addresses.length === 0) {
+        out.push({ ref: r.ref, toEmails: [], toEmail: '', success: false, error: 'No recipient email provided' });
         continue;
       }
-      if (/[,;]/.test(rawTo)) {
-        out.push({ ref: r.ref, toEmail: rawTo, success: false, error: 'Internal: multiple recipients not allowed (funder isolation).' });
-        continue;
-      }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawTo)) {
-        out.push({ ref: r.ref, toEmail: rawTo, success: false, error: 'Recipient email is not a valid address.' });
-        continue;
-      }
-      const toEmail = rawTo;
+
+      // CC list — strip anything that's in the To list to avoid double delivery,
+      // and dedupe / validate as before.
+      const toLower = new Set(addresses.map((a) => a.toLowerCase()));
       const ccEmails = Array.from(
         new Set(
           (base.ccEmails ?? [])
@@ -444,13 +468,16 @@ export async function sendDealEmailBatch(
             .filter((e) => e && e.includes('@'))
             .filter((e) => !/[\r\n\0]/.test(e))
             .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
-            .filter((e) => e.toLowerCase() !== toEmail.toLowerCase())
+            .filter((e) => !toLower.has(e.toLowerCase()))
         )
       );
+
       // Clean subject. Invisible per-recipient disambiguator appended to defeat
       // Gmail's same-subject conversation grouping without uglifying the subject.
+      // We tag with the FUNDER ref (not individual address), so all addresses
+      // for one funder share the same subject = one thread for that funder.
       const cleanSubject = buildSubject(base.dealName);
-      const subjectForSend = applyThreadBreaker(cleanSubject, `${r.ref}|${toEmail}`);
+      const subjectForSend = applyThreadBreaker(cleanSubject, `${r.ref}|${addresses[0]}`);
 
       // Build text + (optional) HTML body. When the sender has a signature we
       // send multipart. The logo is inlined as a CID attachment per message so
@@ -477,7 +504,10 @@ export async function sendDealEmailBatch(
       try {
         const info = await transporter.sendMail({
           from: base.smtp.from,
-          to: toEmail,
+          // All of this funder's addresses ride on one message. nodemailer
+          // accepts an array of strings here and writes them comma-joined
+          // into the To: header.
+          to: addresses,
           cc: ccEmails.length ? ccEmails : undefined,
           replyTo: base.replyTo,
           subject: subjectForSend,
@@ -501,9 +531,9 @@ export async function sendDealEmailBatch(
           inReplyTo: undefined,
           references: undefined,
         });
-        out.push({ ref: r.ref, toEmail, success: true, messageId: info.messageId, response: info.response });
+        out.push({ ref: r.ref, toEmails: addresses, toEmail: addresses[0], success: true, messageId: info.messageId, response: info.response });
       } catch (err) {
-        out.push({ ref: r.ref, toEmail, success: false, error: err instanceof Error ? err.message : String(err) });
+        out.push({ ref: r.ref, toEmails: addresses, toEmail: addresses[0], success: false, error: err instanceof Error ? err.message : String(err) });
       }
     }
   } finally {

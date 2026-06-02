@@ -27,6 +27,11 @@ const fieldSchema = z.object({
   label: z.string().min(1).max(200),
   // Optional hint shown under the input to help the rep
   hint: z.string().max(400).optional(),
+  // Input type. 'date' renders a date picker on the send page and gets
+  // formatted as "Jan 15, 2026" in the email body. 'text' is free-form.
+  // Defaults to 'text' for back-compat. Existing fields whose label contains
+  // "date" are auto-treated as date on the rep side even without this set.
+  type: z.enum(['text', 'date']).optional(),
 });
 
 const templateSchema = z.object({
@@ -58,6 +63,7 @@ export async function PUT(req: NextRequest) {
       id: f.id?.trim() || `f${Date.now().toString(36)}_${i}`,
       label: f.label.trim(),
       hint: f.hint?.trim() || undefined,
+      type: f.type ?? 'text',
     }));
     await db.update(companies)
       .set({

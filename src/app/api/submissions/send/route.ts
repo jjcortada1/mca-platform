@@ -16,7 +16,22 @@ export const runtime = 'nodejs';
 interface FunderSubmission {
   funderId?: string;
   manualFunderName?: string;
-  toEmail: string;
+  // Plural — one funder may have multiple submission emails that all need to
+  // ride on the SAME outgoing message (so they're a single thread per funder).
+  // Falls back to the singular legacy field if a caller hasn't updated yet.
+  toEmails?: string[];
+  toEmail?: string;
+}
+
+/** Normalize a funder entry to a deduped, lowercased array of addresses. */
+function normalizeToEmails(fi: FunderSubmission): string[] {
+  const raw = (fi.toEmails && fi.toEmails.length) ? fi.toEmails : (fi.toEmail ? [fi.toEmail] : []);
+  return Array.from(new Set(
+    raw
+      .map((e) => String(e ?? '').trim())
+      .filter((e) => e && e.includes('@'))
+      .map((e) => e.toLowerCase())
+  ));
 }
 
 /**
@@ -273,44 +288,50 @@ export async function POST(req: NextRequest) {
     }
 
     // Build the list of funders to actually send to (after dedupe).
-    // Each entry maps 1:1 to a separate, isolated email.
+    // Each entry maps to ONE outbound message, even if the funder has
+    // multiple submission emails. All addresses ride on the same email so
+    // the funder's team sees a single thread, not several.
     type Target = {
       fi: FunderSubmission;
       fName: string;
       ref: string;
+      addresses: string[]; // normalized, deduped
     };
     const toSend: Target[] = [];
-    const results: Array<{ toEmail: string; funderName: string; success: boolean; error?: string }> = [];
+    const results: Array<{ toEmails: string[]; funderName: string; success: boolean; error?: string }> = [];
 
     let refCounter = 0;
     for (const fi of fundersInput) {
       const fName = fi.funderId
         ? (dirFunders.find((f) => f.id === fi.funderId)?.name ?? 'Unknown')
-        : (fi.manualFunderName ?? fi.toEmail);
+        : (fi.manualFunderName ?? (fi.toEmail ?? ''));
+
+      const addresses = normalizeToEmails(fi);
 
       // Dedupe — already submitted to this funder on this deal
       if (fi.funderId && existingDirIds.has(fi.funderId)) {
-        results.push({ toEmail: fi.toEmail, funderName: fName, success: true, error: 'already submitted' });
+        results.push({ toEmails: addresses, funderName: fName, success: true, error: 'already submitted' });
         continue;
       }
       if (!fi.funderId && fi.manualFunderName && existingManual.has(fi.manualFunderName.toLowerCase())) {
-        results.push({ toEmail: fi.toEmail, funderName: fName, success: true, error: 'already submitted' });
+        results.push({ toEmails: addresses, funderName: fName, success: true, error: 'already submitted' });
         continue;
       }
-      // Guard: must have a deliverable address
-      if (!fi.toEmail || !fi.toEmail.includes('@')) {
-        results.push({ toEmail: fi.toEmail ?? '', funderName: fName, success: false, error: 'No valid email for this funder' });
+      // Guard: must have at least one deliverable address
+      if (!addresses.length) {
+        results.push({ toEmails: [], funderName: fName, success: false, error: 'No valid email for this funder' });
         continue;
       }
 
-      toSend.push({ fi, fName, ref: `r${refCounter++}` });
+      toSend.push({ fi, fName, ref: `r${refCounter++}`, addresses });
     }
 
     // Send all as isolated messages over a single pooled connection.
-    // Each funder gets its OWN email with its own subject suffix so each one
-    // lands in a separate conversation thread on the sender's side. The
-    // signature (text + optional logo + optional link) is built into both
-    // the text and HTML versions of the email.
+    // Each FUNDER gets its OWN email (with all of that funder's addresses in
+    // the To: header so it stays one thread for them), and its own subject
+    // suffix so each funder's email lands in a separate conversation on the
+    // sender's side. The signature (text + optional logo + optional link)
+    // is built into both the text and HTML versions.
     const sendResults = toSend.length
       ? await sendDealEmailBatch(
           {
@@ -322,12 +343,15 @@ export async function POST(req: NextRequest) {
             attachments,
             signature,
           },
-          toSend.map((t) => ({ toEmail: t.fi.toEmail, ref: t.ref, label: t.fName }))
+          toSend.map((t) => ({ toEmails: t.addresses, ref: t.ref, label: t.fName }))
         )
       : [];
     const byRef = new Map(sendResults.map((r) => [r.ref, r]));
 
-    // Persist one submissionFunder + submissionEmail per target.
+    // Persist one submissionFunder + submissionEmail per FUNDER (not per
+    // address). The submissionEmail log keeps the first/primary address in
+    // its toEmail column for back-compat; the full list is joined into the
+    // ccEmails field as informational context.
     for (const t of toSend) {
       const sr = byRef.get(t.ref);
       const [sf] = await db
@@ -341,11 +365,16 @@ export async function POST(req: NextRequest) {
         })
         .returning();
 
-      // Mirror the per-recipient subject we used on the actual send.
+      // Primary recipient for the log row is the first address; the rest are
+      // captured as part of the audit so the full delivery target is preserved.
+      const primaryTo = t.addresses[0];
+      const extraTo = t.addresses.slice(1);
       await db.insert(submissionEmails).values({
         submissionFunderId: sf.id,
-        toEmail: t.fi.toEmail,
-        ccEmails: allCc,
+        toEmail: primaryTo,
+        // Store the company-additional addresses alongside the CCs so the
+        // audit row reflects the real recipient set without losing info.
+        ccEmails: [...extraTo, ...allCc],
         subject: `New Deal - ${deal.name}`,
         body: bodyNotes,
         attachmentMeta: attachments.map((a) => ({ name: a.filename, size: a.content.length })),
@@ -356,7 +385,7 @@ export async function POST(req: NextRequest) {
       });
 
       results.push({
-        toEmail: t.fi.toEmail,
+        toEmails: t.addresses,
         funderName: t.fName,
         success: sr?.success ?? false,
         error: sr?.error,

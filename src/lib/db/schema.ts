@@ -77,6 +77,11 @@ export const companies = pgTable('companies', {
   //  - attachmentNote: optional free text shown next to the attach-files UI
   //    to remind reps what to upload ("Statement of payoff, void check, etc.")
   fundedEmailTemplate: jsonb('funded_email_template'),
+  // Sidebar order — array of nav item keys (the href strings) in the order
+  // they should appear in the left nav. When set, this overrides the default
+  // hardcoded order for EVERY user in the company (admin and rep alike) so
+  // the menu looks the same for everyone. NULL = use the default order.
+  sidebarOrder: jsonb('sidebar_order').$type<string[]>(),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

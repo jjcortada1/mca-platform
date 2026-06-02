@@ -8,10 +8,10 @@ import {
 import { useToast } from '@/components/toast';
 import {
   Palette, Mail, Send, FileText, DollarSign, Layers, ListChecks,
-  Users as UsersIcon, GitBranch, Database, ShieldCheck,
+  Users as UsersIcon, GitBranch, Database, ShieldCheck, Menu as MenuIcon,
 } from 'lucide-react';
 
-type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded';
+type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar';
 
 // Flatter, friendlier settings nav. Each entry has an icon + one-line
 // description so the user can scan and find what they want without reading
@@ -24,6 +24,7 @@ const TAB_GROUPS: {
     title: 'General',
     tabs: [
       { key: 'branding', label: 'Branding', icon: Palette, description: 'Logo, colors, company name' },
+      { key: 'sidebar', label: 'Sidebar order', icon: MenuIcon, description: 'Rearrange the left navigation menu' },
       { key: 'security', label: 'Security', icon: ShieldCheck, description: 'Your password and audit log' },
     ],
   },
@@ -119,6 +120,7 @@ export default function SettingsPage() {
           )}
 
           {tab === 'branding' && <BrandingSection />}
+          {tab === 'sidebar' && <SidebarOrderSection />}
           {tab === 'email' && <EmailModeSection />}
           {tab === 'smtp' && <SmtpSection />}
           {tab === 'commission' && <CommissionRulesSection />}
@@ -2163,7 +2165,7 @@ function LogoInput({ value, onChange }: { value: string; onChange: (v: string) =
    Admin defines subject + ordered list of fields. Reps use this
    to send funded notifications. Body stacks one field per line.
    ============================================================ */
-interface FundedField { id?: string; label: string; hint?: string }
+interface FundedField { id?: string; label: string; hint?: string; type?: 'text' | 'date' }
 interface FundedTemplate { subject: string; fields: FundedField[]; attachmentNote?: string | null }
 
 function FundedTemplateSection() {
@@ -2188,9 +2190,13 @@ function FundedTemplateSection() {
       .finally(() => setLoaded(true));
   }, []);
 
-  function updateField(i: number, k: 'label' | 'hint', v: string) {
+  function updateField(i: number, k: 'label' | 'hint' | 'type', v: string) {
     const next = [...tmpl.fields];
-    next[i] = { ...next[i], [k]: v };
+    if (k === 'type') {
+      next[i] = { ...next[i], type: (v === 'date' ? 'date' : 'text') };
+    } else {
+      next[i] = { ...next[i], [k]: v };
+    }
     setTmpl({ ...tmpl, fields: next });
   }
   function addField() {
@@ -2216,6 +2222,7 @@ function FundedTemplateSection() {
         subject: tmpl.subject.trim(),
         fields: tmpl.fields.filter((f) => f.label.trim()).map((f) => ({
           id: f.id, label: f.label.trim(), hint: f.hint?.trim() || undefined,
+          type: f.type ?? 'text',
         })),
         attachmentNote: tmpl.attachmentNote?.trim() || null,
       }),
@@ -2269,11 +2276,25 @@ function FundedTemplateSection() {
                 <button onClick={() => move(i, 1)} disabled={i === tmpl.fields.length - 1} className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 text-xs">▼</button>
               </div>
               <div className="flex-1 space-y-1.5">
-                <Input
-                  value={f.label}
-                  onChange={(e) => updateField(i, 'label', e.target.value)}
-                  placeholder="Label (e.g. Merchant Name, Funded Amount, Factor Rate)"
-                />
+                <div className="flex gap-2">
+                  <Input
+                    value={f.label}
+                    onChange={(e) => updateField(i, 'label', e.target.value)}
+                    placeholder="Label (e.g. Merchant Name, Funded Amount, Funded Date)"
+                  />
+                  {/* Type selector — controls whether the rep sees a date picker
+                      or a text input. Date fields are formatted as "Jan 15, 2026"
+                      in the email body. Defaults to Text. */}
+                  <select
+                    value={f.type ?? 'text'}
+                    onChange={(e) => updateField(i, 'type', e.target.value as 'text' | 'date')}
+                    className="h-10 rounded-md border border-input bg-card px-2 text-sm shrink-0"
+                    title="Input type"
+                  >
+                    <option value="text">Text</option>
+                    <option value="date">Date</option>
+                  </select>
+                </div>
                 <Input
                   value={f.hint ?? ''}
                   onChange={(e) => updateField(i, 'hint', e.target.value)}
@@ -2307,6 +2328,153 @@ function FundedTemplateSection() {
 
       <div>
         <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save template'}</Button>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   SIDEBAR ORDER
+   Admin reorders the left nav. Order applies globally — every
+   user in the company sees the same order. New items added in
+   future releases auto-append at the end.
+   ============================================================ */
+import { ALL_NAV_ITEMS } from '@/components/sidebar';
+
+function SidebarOrderSection() {
+  const toast = useToast();
+  // Items shown in the editor — initialized to the master list in default
+  // order, then reordered when we load the saved value. We work on the local
+  // copy so the admin can shuffle around without instant DB writes.
+  const [items, setItems] = useState<typeof ALL_NAV_ITEMS>(ALL_NAV_ITEMS);
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
+  // Pull the saved order. If set, reorder local state to match.
+  useEffect(() => {
+    fetch('/api/settings/sidebar-order', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => {
+        const saved = j?.data?.order as string[] | null;
+        if (Array.isArray(saved) && saved.length) {
+          const byHref = new Map(ALL_NAV_ITEMS.map((i) => [i.href, i]));
+          const seen = new Set<string>();
+          const ordered: typeof ALL_NAV_ITEMS = [];
+          for (const href of saved) {
+            const it = byHref.get(href);
+            if (it && !seen.has(href)) { ordered.push(it); seen.add(href); }
+          }
+          // Any items not in the saved order go at the bottom (covers new
+          // app features added since the admin last saved their order).
+          for (const it of ALL_NAV_ITEMS) if (!seen.has(it.href)) ordered.push(it);
+          setItems(ordered);
+        }
+      })
+      .finally(() => setLoaded(true));
+  }, []);
+
+  function move(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= items.length) return;
+    const next = [...items];
+    [next[i], next[j]] = [next[j], next[i]];
+    setItems(next);
+  }
+
+  async function save() {
+    setSaving(true);
+    const res = await fetch('/api/settings/sidebar-order', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order: items.map((i) => i.href) }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || 'Could not save order.');
+      return;
+    }
+    toast.success('Sidebar order saved. Refresh to see it in the menu.');
+  }
+
+  async function resetToDefault() {
+    if (!confirm('Reset the sidebar order back to the default for everyone in your company?')) return;
+    setResetting(true);
+    const res = await fetch('/api/settings/sidebar-order', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order: null }),
+    });
+    setResetting(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || 'Could not reset.');
+      return;
+    }
+    setItems(ALL_NAV_ITEMS);
+    toast.success('Reset to default order. Refresh to see the change.');
+  }
+
+  if (!loaded) return <div className="text-sm text-muted-foreground">Loading…</div>;
+
+  return (
+    <div className="space-y-5 max-w-2xl">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Left navigation order</CardTitle>
+          <CardDescription>
+            Drag items up or down to reorder the left sidebar. The order is saved company-wide — every user (admins and reps) will see the same order. Each user still only sees the items their permissions allow.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {items.map((item, i) => {
+            const Icon = item.icon;
+            return (
+              <div
+                key={item.href}
+                className="flex items-center gap-2 p-2 rounded-md border border-border bg-card"
+              >
+                <div className="flex flex-col">
+                  <button
+                    onClick={() => move(i, -1)}
+                    disabled={i === 0}
+                    className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
+                    title="Move up"
+                    aria-label={`Move ${item.label} up`}
+                  >▲</button>
+                  <button
+                    onClick={() => move(i, 1)}
+                    disabled={i === items.length - 1}
+                    className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
+                    title="Move down"
+                    aria-label={`Move ${item.label} down`}
+                  >▼</button>
+                </div>
+                <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium">{item.label}</div>
+                  <div className="text-[11px] text-muted-foreground font-mono truncate">{item.href}</div>
+                </div>
+                <div className="text-[11px] text-muted-foreground tabular-nums w-6 text-right">
+                  {i + 1}
+                </div>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      <div className="flex items-center gap-3">
+        <Button onClick={save} disabled={saving}>
+          {saving ? 'Saving…' : 'Save order'}
+        </Button>
+        <Button variant="outline" onClick={resetToDefault} disabled={resetting}>
+          {resetting ? 'Resetting…' : 'Reset to default'}
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          Users need to refresh their browser to see the new order.
+        </span>
       </div>
     </div>
   );

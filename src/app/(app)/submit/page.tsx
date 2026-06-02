@@ -217,9 +217,13 @@ function SubmitDealInner() {
     // For each selected funder we use funders.emails (the submission/shopping
     // emails). If that list has multiple addresses we fan out — one row per
     // email — so the deal lands in every inbox the funder gave us. We fall
-    // back to the primary contact's email only if no shopping emails exist
-    // (legacy data).
-    const funderTargets: { funderId?: string; manualFunderName?: string; toEmail: string; funderName: string }[] = [];
+    // Build one target per funder, NOT per email address. A funder with
+    // multiple submission emails (submissions@acme.com + deals@acme.com)
+    // gets ONE outbound email addressed to all of them together. That's a
+    // single thread for the funder, with both addresses visible to each
+    // other in the To: field — same as if the rep had emailed the funder
+    // directly using their company's distribution list.
+    const funderTargets: { funderId?: string; manualFunderName?: string; toEmails: string[]; funderName: string }[] = [];
     for (const id of Array.from(selectedFunderIds)) {
       const f = allFunders.find((x) => x.id === id);
       if (!f) continue;
@@ -227,19 +231,18 @@ function SubmitDealInner() {
         .map((e) => (e || '').trim())
         .filter((e) => e && e.includes('@'));
       if (submissionEmails.length) {
-        for (const em of submissionEmails) {
-          funderTargets.push({ funderId: id, toEmail: em, funderName: f.name });
-        }
+        // All addresses for this funder ride on a single email send.
+        funderTargets.push({ funderId: id, toEmails: submissionEmails, funderName: f.name });
       } else {
-        // Fallback: pick primary contact's email (legacy behavior).
+        // Legacy fallback: no submission emails set — use the primary contact.
         const primary = f.contacts.find((c) => c.isPrimary && c.email) ?? f.contacts.find((c) => c.email);
         if (primary?.email) {
-          funderTargets.push({ funderId: id, toEmail: primary.email, funderName: f.name });
+          funderTargets.push({ funderId: id, toEmails: [primary.email], funderName: f.name });
         }
       }
     }
     for (const c of validCustom) {
-      funderTargets.push({ manualFunderName: c.name || c.email, toEmail: c.email.trim(), funderName: c.name || c.email });
+      funderTargets.push({ manualFunderName: c.name || c.email, toEmails: [c.email.trim()], funderName: c.name || c.email });
     }
 
     if (funderTargets.length === 0) {
@@ -262,10 +265,11 @@ function SubmitDealInner() {
         setSending(false);
         return;
       }
-      // Map results
+      // Map results — toEmails is now an array (each funder gets one row even
+      // when sent to multiple addresses).
       const sendResults: SendResult[] = (json.results ?? []).map((r: any) => ({
-        funderName: r.funderName ?? r.toEmail,
-        toEmail: r.toEmail,
+        funderName: r.funderName ?? (Array.isArray(r.toEmails) ? r.toEmails.join(', ') : r.toEmail),
+        toEmail: Array.isArray(r.toEmails) ? r.toEmails.join(', ') : r.toEmail,
         status: r.success ? 'ok' : 'error',
         message: r.error || (r.success ? 'Sent' : 'Failed'),
       }));
