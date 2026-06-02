@@ -34,7 +34,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'force') {
-      const result = await syncCompanyToSheet(ctx.companyId);
+      // Manual "Sync now" includes the manual-only tabs (funder contacts).
+      const result = await syncCompanyToSheet(ctx.companyId, { manual: true });
       return NextResponse.json(result);
     }
 

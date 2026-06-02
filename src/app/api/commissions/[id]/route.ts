@@ -7,6 +7,7 @@ import type { SessionUser } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
 import { triggerSync } from '@/lib/sheets/sync';
 import { z } from 'zod';
+import { fromDateInput } from '@/lib/dates';
 
 export const runtime = 'nodejs';
 
@@ -72,7 +73,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     // Funding date is stored on the rep commission row itself. The parent
     // deal is NEVER modified by edits here — that record stays as it was.
     if (body.fundingDate !== undefined) {
-      updates.fundingDate = body.fundingDate ? new Date(body.fundingDate) : null;
+      updates.fundingDate = body.fundingDate ? fromDateInput(body.fundingDate) ?? new Date() : null;
     }
 
     await db.update(dealCommissions).set(updates).where(and(eq(dealCommissions.id, params.id), eq(dealCommissions.companyId, ctx.companyId)));

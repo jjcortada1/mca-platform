@@ -6,6 +6,7 @@ import { useToast } from '@/components/toast';
 import { formatCurrency } from '@/lib/utils';
 import { Search, Download } from 'lucide-react';
 import { exportCSV } from '@/lib/csv-export';
+import { formatCalendarDate } from '@/lib/dates';
 
 interface Entry {
   id: string;
@@ -24,7 +25,7 @@ interface Entry {
 interface DealOpt { id: string; name: string }
 
 const METHODS = ['ach', 'wire', 'check', 'cash', 'zelle', 'other'] as const;
-const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString() : '—');
+const fmtDate = (d: string | null) => formatCalendarDate(d);
 
 export default function AccountingPage() {
   const toast = useToast();

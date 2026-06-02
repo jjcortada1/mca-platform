@@ -6,6 +6,7 @@ import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import type { SessionUser } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
 import { z } from 'zod';
+import { fromDateInput } from '@/lib/dates';
 
 export const runtime = 'nodejs';
 
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
       companyId: ctx.companyId,
       repId: body.repId,
       amount: String(body.amount),
-      drawDate: body.drawDate ? new Date(body.drawDate) : new Date(),
+      drawDate: body.drawDate ? fromDateInput(body.drawDate) ?? new Date() : new Date(),
       notes: body.notes ?? null,
       createdBy: ctx.user.id,
     }).returning();

@@ -9,6 +9,7 @@ import { requirePermission } from '@/lib/auth/context';
 import { sendDealEmailBatch, type EmailAttachment, type SmtpConfig } from '@/lib/email/smtp';
 import { apiError } from '@/lib/api/errors';
 import { rateLimit } from '@/lib/api/rate-limit';
+import { triggerSync } from '@/lib/sheets/sync';
 
 export const runtime = 'nodejs';
 
@@ -348,6 +349,7 @@ export async function POST(req: NextRequest) {
         .where(and(eq(deals.id, deal.id), eq(deals.companyId, ctx.companyId)));
     }
 
+    triggerSync(ctx.companyId);
     return NextResponse.json({ submissionId: submission.id, results });
   } catch (e) {
     return apiError(e);

@@ -5,6 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { requireTenantContext } from '@/lib/auth/context';
 import { fundedEntrySchema } from '@/lib/validation/schemas';
 import { apiError } from '@/lib/api/errors';
+import { fromDateInput } from '@/lib/dates';
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -23,7 +24,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const updates: any = {};
     if (body.dealInitials !== undefined) updates.dealInitials = body.dealInitials;
     if (body.amountFunded !== undefined) updates.amountFunded = String(body.amountFunded);
-    if (body.fundedDate !== undefined) updates.fundedDate = new Date(body.fundedDate);
+    if (body.fundedDate !== undefined) updates.fundedDate = fromDateInput(body.fundedDate) ?? new Date();
     if (body.notes !== undefined) updates.notes = body.notes;
     if (body.repId !== undefined && ctx.user.role === 'company_admin') updates.repId = body.repId;
 

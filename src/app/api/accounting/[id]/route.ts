@@ -6,6 +6,8 @@ import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import type { SessionUser } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
 import { z } from 'zod';
+import { fromDateInput } from '@/lib/dates';
+import { triggerSync } from '@/lib/sheets/sync';
 
 export const runtime = 'nodejs';
 
@@ -38,12 +40,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (body.dealId !== undefined) updates.dealId = body.dealId;
     if (body.entryType !== undefined) updates.entryType = body.entryType;
     if (body.amount !== undefined) updates.amount = String(body.amount);
-    if (body.entryDate !== undefined) updates.entryDate = body.entryDate ? new Date(body.entryDate) : new Date();
+    if (body.entryDate !== undefined) updates.entryDate = body.entryDate ? fromDateInput(body.entryDate) ?? new Date() : new Date();
     if (body.method !== undefined) updates.method = body.method;
     if (body.referenceNumber !== undefined) updates.referenceNumber = body.referenceNumber;
     if (body.notes !== undefined) updates.notes = body.notes;
 
     await db.update(accountingEntries).set(updates).where(and(eq(accountingEntries.id, params.id), eq(accountingEntries.companyId, ctx.companyId)));
+    triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }
@@ -61,6 +64,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     await db.update(accountingEntries)
       .set({ isDeleted: true, updatedAt: new Date() })
       .where(and(eq(accountingEntries.id, params.id), eq(accountingEntries.companyId, ctx.companyId)));
+    triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }

@@ -6,6 +6,7 @@ import { useToast } from '@/components/toast';
 import { formatCurrency } from '@/lib/utils';
 import { Search, Download } from 'lucide-react';
 import { exportCSV } from '@/lib/csv-export';
+import { formatCalendarDate } from '@/lib/dates';
 
 interface Payment {
   id: string;
@@ -30,7 +31,7 @@ interface Payment {
 }
 
 const METHODS = ['ach', 'wire', 'check', 'cash', 'zelle', 'other'] as const;
-const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString() : '—');
+const fmtDate = (d: string | null) => formatCalendarDate(d);
 
 export default function PaymentsPage() {
   const toast = useToast();

@@ -11,7 +11,7 @@ import {
   Users as UsersIcon, GitBranch, Database, ShieldCheck,
 } from 'lucide-react';
 
-type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources';
+type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup';
 
 // Flatter, friendlier settings nav. Each entry has an icon + one-line
 // description so the user can scan and find what they want without reading
@@ -53,7 +53,8 @@ const TAB_GROUPS: {
   {
     title: 'Backup',
     tabs: [
-      { key: 'sheets', label: 'Google Sheets backup', icon: Database, description: 'Mirror your CRM to a sheet' },
+      { key: 'sheets', label: 'Live Google Sheet backup', icon: Database, description: 'Auto-mirror every change to a Sheet — append-only' },
+      { key: 'backup', label: 'Manual JSON download', icon: Database, description: 'One-click full export to your computer' },
     ],
   },
 ];
@@ -125,6 +126,7 @@ export default function SettingsPage() {
           {tab === 'tiers' && <TiersSection />}
           {tab === 'options' && <MatchOptionsSection />}
           {tab === 'security' && <SecuritySection />}
+          {tab === 'backup' && <BackupSection />}
           {tab === 'sheets' && <SheetSyncSection />}
           {tab === 'leadsources' && <LeadSourcesSection />}
         </div>
@@ -1575,6 +1577,79 @@ function SecuritySection() {
 }
 
 /* ============================================================
+   BACKUP & EXPORT — the easy, recommended path
+   ============================================================ */
+function BackupSection() {
+  const [downloading, setDownloading] = useState(false);
+
+  async function downloadSnapshot() {
+    setDownloading(true);
+    try {
+      const res = await fetch('/api/settings/backup-export', { cache: 'no-store' });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j.error || 'Could not generate backup.');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const dateStr = new Date().toISOString().slice(0, 10);
+      a.download = `cortada-backup-${dateStr}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-5 max-w-2xl">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Recommended: download a full backup</CardTitle>
+          <CardDescription>
+            One click downloads a complete JSON snapshot of your CRM — every deal, funder, contact, submission, commission, payment, and accounting entry. Save it to your computer, Dropbox, or anywhere safe. If your CRM ever gets wiped, this file has everything.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Button onClick={downloadSnapshot} disabled={downloading}>
+            {downloading ? 'Preparing your backup…' : 'Download backup now'}
+          </Button>
+          <div className="text-xs text-muted-foreground space-y-1 pt-2">
+            <div>• Includes every record visible in the CRM, plus historical/audit data.</div>
+            <div>• Excludes passwords and SMTP credentials (security).</div>
+            <div>• Plain JSON — opens in any text editor, viewer, or import tool.</div>
+            <div>• Recommended cadence: download once a week. Bookmark this page for one-click access.</div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Already automatic: Point-in-Time Recovery</CardTitle>
+          <CardDescription>
+            Your database (Neon Postgres) automatically saves continuous restore points. If something gets accidentally deleted or corrupted, the database can be rolled back to any second within the last 7 days at no extra cost — even if you don&apos;t have a manual backup. Contact support to use this.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Per-page CSV exports</CardTitle>
+          <CardDescription>
+            For lighter, spreadsheet-friendly exports, click <strong>Export CSV</strong> on any list page (Funders, Submissions, Commissions, Payments, Accounting, Active Deals, Funded Board). Useful for pulling one specific dataset into Excel for analysis.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    </div>
+  );
+}
+
+/* ============================================================
    GOOGLE SHEETS BACKUP
    ============================================================ */
 function SheetSyncSection() {
@@ -1628,7 +1703,16 @@ function SheetSyncSection() {
       const j = await res.json();
       if (!j.ok) { toast.error(j.error || `${action} failed`); return; }
       if (action === 'test') toast.success(`Connected to "${j.title}". Tabs: ${j.tabs.join(', ') || 'none yet'}.`);
-      else { toast.success(`Synced ${j.repCount ?? 0} rep + ${j.lsCount ?? 0} lead source rows.`); load(); }
+      else {
+        const a = (j.appended ?? {}) as Record<string, number>;
+        const total = Object.values(a).reduce((acc, n) => acc + (n as number), 0);
+        const summary = Object.entries(a)
+          .filter(([, c]) => (c as number) > 0)
+          .map(([k, c]) => `${c} ${k}`)
+          .join(', ');
+        toast.success(total > 0 ? `Appended ${total} rows (${summary}).` : 'Sheet already up to date.');
+        load();
+      }
     } finally { set(false); }
   }
 
@@ -1640,6 +1724,16 @@ function SheetSyncSection() {
 
   return (
     <div className="space-y-5 max-w-2xl">
+      {/* Explainer: what this does, in plain language */}
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-900">
+        <div className="font-semibold mb-1">How this works</div>
+        <div className="text-[13px] leading-relaxed text-emerald-900/90">
+          Once connected, every change you make in the CRM — new deals, funder edits, commission updates, payments, accounting entries — automatically appends a new row to your Google Sheet within seconds.
+          The Sheet is <strong>append-only</strong>: rows are added, never removed or overwritten. If a record gets deleted from the CRM, the last known state stays in the Sheet forever. Each appended row has a &quot;Backed up at&quot; timestamp so you can see exactly when it was saved.
+          You can stop using the CRM tomorrow and your Sheet would still have everything.
+        </div>
+      </div>
+
       {/* Live status bar — always visible at the top */}
       <Card>
         <CardContent className="p-4 flex items-center justify-between flex-wrap gap-3">

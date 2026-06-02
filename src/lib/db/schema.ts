@@ -681,6 +681,10 @@ export const sheetSyncConfig = pgTable(
     lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
     lastSyncStatus: varchar('last_sync_status', { length: 20 }), // 'ok' | 'error'
     lastSyncError: text('last_sync_error'),
+    // Per-table cursors for append-only backup. Shape: { [tableName]: ISO timestamp }.
+    // On each sync, we append every row that was updated AFTER its table's cursor.
+    // Deleted/edited rows are NEVER removed from the sheet — the sheet is a permanent log.
+    backupCursors: jsonb('backup_cursors'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   }

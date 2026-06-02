@@ -7,6 +7,8 @@ import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import type { SessionUser } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
 import { z } from 'zod';
+import { fromDateInput } from '@/lib/dates';
+import { triggerSync } from '@/lib/sheets/sync';
 
 export const runtime = 'nodejs';
 
@@ -121,7 +123,7 @@ export async function POST(req: NextRequest) {
       leadSourceCommissionId: body.leadSourceCommissionId ?? null,
       leadSourceId,
       amount: String(body.amount),
-      paidDate: body.paidDate ? new Date(body.paidDate) : new Date(),
+      paidDate: body.paidDate ? fromDateInput(body.paidDate) ?? new Date() : new Date(),
       method: body.method ?? null,
       confirmationNumber: body.confirmationNumber ?? null,
       notes: body.notes ?? null,
@@ -150,6 +152,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true, payment: row });
   } catch (e) { return apiError(e); }
 }

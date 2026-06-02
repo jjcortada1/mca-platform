@@ -8,6 +8,7 @@ import { requirePermission } from '@/lib/auth/context';
 import { upsertFunderSchema } from '@/lib/validation/schemas';
 import { validateTierIds } from '@/lib/funders/repository';
 import { apiError } from '@/lib/api/errors';
+import { triggerSync } from '@/lib/sheets/sync';
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -70,6 +71,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     if (body.restrictedIndustries.length) {
       await db.insert(funderRestrictedIndustries).values(body.restrictedIndustries.map((i) => ({ funderId: params.id, industry: i })));
     }
+    triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }
@@ -78,6 +80,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   try {
     const ctx = await requirePermission('funders.edit');
     await db.delete(funders).where(and(eq(funders.id, params.id), eq(funders.companyId, ctx.companyId)));
+    triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }

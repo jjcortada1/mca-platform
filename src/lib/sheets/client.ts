@@ -125,6 +125,63 @@ export async function writeTab(token: string, spreadsheetId: string, tab: string
   }
 }
 
+/**
+ * Read the first row of a tab (the header row, if any). Returns null if the
+ * tab is empty. Used to detect whether we need to seed the header before
+ * appending data rows.
+ */
+export async function readFirstRow(token: string, spreadsheetId: string, tab: string): Promise<string[] | null> {
+  const range = `${tab}!1:1`;
+  const res = await fetch(
+    `${SHEETS_BASE}/${spreadsheetId}/values/${encodeURIComponent(range)}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) return null;
+  const j = await res.json().catch(() => null);
+  const values = j?.values as string[][] | undefined;
+  if (!values || values.length === 0 || values[0].length === 0) return null;
+  return values[0];
+}
+
+/**
+ * APPEND rows to the end of a tab. Existing rows are NEVER touched — this is
+ * the foundation of the append-only backup model: once a row is written to
+ * the sheet, it stays there forever, even if the source record is later
+ * deleted from the CRM.
+ *
+ * If the tab is empty, `headerRow` is written first as row 1 so the data
+ * has column titles. If the tab already has any content, headerRow is
+ * ignored (we don't want to add a second header row mid-sheet).
+ */
+export async function appendTab(
+  token: string,
+  spreadsheetId: string,
+  tab: string,
+  headerRow: string[],
+  dataRows: (string | number)[][]
+): Promise<void> {
+  if (dataRows.length === 0) return;
+  // If tab is empty, write the header first so the sheet stays self-describing.
+  const existingHeader = await readFirstRow(token, spreadsheetId, tab);
+  let rowsToAppend = dataRows;
+  if (!existingHeader) {
+    rowsToAppend = [headerRow, ...dataRows];
+  }
+  const range = `${tab}!A1`;
+  const res = await fetch(
+    `${SHEETS_BASE}/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ range, majorDimension: 'ROWS', values: rowsToAppend }),
+    }
+  );
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`Append "${tab}" failed (${res.status}): ${t.slice(0, 200)}`);
+  }
+}
+
 /** Parse + validate a service account JSON string. */
 export function parseServiceAccount(jsonStr: string): ServiceAccount {
   let parsed: ServiceAccount;

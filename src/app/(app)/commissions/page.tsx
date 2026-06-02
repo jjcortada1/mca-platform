@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { computePaydown } from '@/lib/deals/paydown';
 import { exportCSV } from '@/lib/csv-export';
 import { Download } from 'lucide-react';
+import { formatCalendarDate, toDateInput } from '@/lib/dates';
 
 /* ---------- comma formatting helpers ---------- */
 // Display a numeric string with thousands separators while typing (keeps a
@@ -1176,7 +1177,7 @@ function LogPaymentInline({ commissionId, repId, onLogged }: { commissionId: str
             {payments.map((p) => (
               <div key={p.id} className="flex items-center justify-between text-xs bg-muted/30 rounded px-2 py-1.5">
                 <div className="flex items-center gap-3 tabular-nums">
-                  <span className="text-muted-foreground">{new Date(p.paidDate).toLocaleDateString()}</span>
+                  <span className="text-muted-foreground">{formatCalendarDate(p.paidDate)}</span>
                   <span className="font-medium text-emerald-700">{formatCurrency(Number(p.amount))}</span>
                   {p.method && <span className="uppercase text-[10px] text-muted-foreground">{p.method}</span>}
                   {p.confirmationNumber && <span className="text-muted-foreground">#{p.confirmationNumber}</span>}
@@ -1418,7 +1419,7 @@ function LogLSPaymentInline({ lsCommissionId, onLogged }: { lsCommissionId: stri
             {payments.map((p) => (
               <div key={p.id} className="flex items-center justify-between text-xs bg-muted/30 rounded px-2 py-1.5">
                 <div className="flex items-center gap-3 tabular-nums">
-                  <span className="text-muted-foreground">{new Date(p.paidDate).toLocaleDateString()}</span>
+                  <span className="text-muted-foreground">{formatCalendarDate(p.paidDate)}</span>
                   <span className="font-medium text-emerald-700">{formatCurrency(Number(p.amount))}</span>
                   {p.method && <span className="uppercase text-[10px] text-muted-foreground">{p.method}</span>}
                   {p.confirmationNumber && <span className="text-muted-foreground">#{p.confirmationNumber}</span>}

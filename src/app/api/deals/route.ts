@@ -5,6 +5,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import { upsertDealSchema } from '@/lib/validation/schemas';
 import { apiError } from '@/lib/api/errors';
+import { triggerSync } from '@/lib/sheets/sync';
 
 // Deal edits / deletions must reflect immediately in every dropdown across
 // the app. No caching of this endpoint.
@@ -55,6 +56,7 @@ export async function POST(req: NextRequest) {
       status: body.status ?? 'submitted',
       createdBy: ctx.user.id,
     }).returning();
+    triggerSync(ctx.companyId);
     return NextResponse.json({ deal: d });
   } catch (e) { return apiError(e); }
 }

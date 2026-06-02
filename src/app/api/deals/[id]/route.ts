@@ -5,6 +5,8 @@ import { and, eq } from 'drizzle-orm';
 import { requireTenantContext, requirePermission } from '@/lib/auth/context';
 import { upsertDealSchema } from '@/lib/validation/schemas';
 import { apiError } from '@/lib/api/errors';
+import { fromDateInput } from '@/lib/dates';
+import { triggerSync } from '@/lib/sheets/sync';
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -38,7 +40,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
     // Funding date: '' → null, string → Date
     if (updates.fundingDate === '') updates.fundingDate = null;
-    else if (updates.fundingDate != null) updates.fundingDate = new Date(updates.fundingDate);
+    else if (updates.fundingDate != null) updates.fundingDate = fromDateInput(String(updates.fundingDate)) ?? new Date();
 
     await db.update(deals).set(updates)
       .where(and(eq(deals.id, params.id), eq(deals.companyId, ctx.companyId)));
@@ -51,6 +53,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         .where(and(eq(dealCommissions.dealId, params.id), eq(dealCommissions.companyId, ctx.companyId)));
     }
 
+    triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }
@@ -101,6 +104,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
         .where(and(eq(commissionPayments.leadSourceCommissionId, id), eq(commissionPayments.companyId, ctx.companyId)));
     }
 
+    triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }

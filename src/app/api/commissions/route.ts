@@ -7,6 +7,7 @@ import { apiError } from '@/lib/api/errors';
 import { triggerSync } from '@/lib/sheets/sync';
 import { computeRepCommission, resolveAutoStatus } from '@/lib/commissions/calc';
 import { z } from 'zod';
+import { fromDateInput } from '@/lib/dates';
 
 export const runtime = 'nodejs';
 
@@ -150,7 +151,7 @@ export async function POST(req: NextRequest) {
       grossCommission: String(body.grossCommission),
       repSplitPct: String(body.repSplitPct),
       repCommissionAmount: String(totalRepCommission),
-      fundingDate: body.fundingDate ? new Date(body.fundingDate) : null,
+      fundingDate: body.fundingDate ? fromDateInput(body.fundingDate) ?? new Date() : null,
       earlyPayoffDiscount: body.earlyPayoffDiscount ?? null,
       notes: body.notes ?? null,
       syncState: 'pending' as const,

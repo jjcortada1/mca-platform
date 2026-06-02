@@ -8,6 +8,7 @@ import { apiError } from '@/lib/api/errors';
 import { triggerSync } from '@/lib/sheets/sync';
 import { computeLeadSourceCommission, resolveAutoStatus } from '@/lib/commissions/calc';
 import { z } from 'zod';
+import { fromDateInput } from '@/lib/dates';
 
 export const runtime = 'nodejs';
 
@@ -133,7 +134,7 @@ export async function POST(req: NextRequest) {
       flatAmount: body.flatAmount != null ? String(body.flatAmount) : null,
       grossCommission: body.grossCommission != null ? String(body.grossCommission) : null,
       brokerFee: body.brokerFee != null ? String(body.brokerFee) : null,
-      fundingDate: body.fundingDate ? new Date(body.fundingDate) : null,
+      fundingDate: body.fundingDate ? fromDateInput(body.fundingDate) ?? new Date() : null,
       commissionAmount: String(commissionAmount),
       notes: body.notes ?? null,
       syncState: 'pending' as const,

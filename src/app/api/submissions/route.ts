@@ -81,11 +81,13 @@ export async function GET() {
       })),
     }));
 
+    triggerSync(ctx.companyId);
     return NextResponse.json({ submissions: result });
   } catch (e) { return apiError(e); }
 }
 
 import { z } from 'zod';
+import { triggerSync } from '@/lib/sheets/sync';
 
 const manualSubmissionSchema = z.object({
   // Use an existing deal OR create one from name
@@ -168,6 +170,7 @@ export async function POST(req: Request) {
       notes: body.notes ?? null,
     });
 
+    triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true, submissionId });
   } catch (e) { return apiError(e); }
 }

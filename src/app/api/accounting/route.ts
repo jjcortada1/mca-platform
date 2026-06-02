@@ -7,6 +7,8 @@ import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import type { SessionUser } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
 import { z } from 'zod';
+import { fromDateInput } from '@/lib/dates';
+import { triggerSync } from '@/lib/sheets/sync';
 
 export const runtime = 'nodejs';
 
@@ -37,6 +39,7 @@ export async function GET() {
     // (no dealId) still show.
     const visible = rows.filter((r) => !r.e.dealId || r.dealDeleted === false);
 
+    triggerSync(ctx.companyId);
     return NextResponse.json({
       entries: visible.map((r) => ({ ...r.e, dealName: r.dealName, createdByName: r.createdByName })),
     });
@@ -71,13 +74,14 @@ export async function POST(req: NextRequest) {
       dealId: body.dealId ?? null,
       entryType: body.entryType,
       amount: String(body.amount),
-      entryDate: body.entryDate ? new Date(body.entryDate) : new Date(),
+      entryDate: body.entryDate ? fromDateInput(body.entryDate) ?? new Date() : new Date(),
       method: body.method ?? null,
       referenceNumber: body.referenceNumber ?? null,
       notes: body.notes ?? null,
       createdBy: ctx.user.id,
     }).returning();
 
+    triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true, entry: row });
   } catch (e) { return apiError(e); }
 }

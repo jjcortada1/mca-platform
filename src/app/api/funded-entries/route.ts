@@ -5,6 +5,7 @@ import { eq, and, desc, inArray } from 'drizzle-orm';
 import { requirePermission, requireTenantContext } from '@/lib/auth/context';
 import { fundedEntrySchema } from '@/lib/validation/schemas';
 import { apiError } from '@/lib/api/errors';
+import { fromDateInput } from '@/lib/dates';
 
 export async function GET() {
   try {
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
       dealInitials: body.dealInitials,
       amountFunded: String(body.amountFunded),
       fundedWith: body.fundedWith ?? null,
-      fundedDate: body.fundedDate ? new Date(body.fundedDate) : new Date(),
+      fundedDate: body.fundedDate ? fromDateInput(body.fundedDate) ?? new Date() : new Date(),
       notes: body.notes ?? null,
     }).returning();
     return NextResponse.json({ entry: e });

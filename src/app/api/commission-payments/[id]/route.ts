@@ -6,6 +6,8 @@ import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import type { SessionUser } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
 import { z } from 'zod';
+import { fromDateInput } from '@/lib/dates';
+import { triggerSync } from '@/lib/sheets/sync';
 
 export const runtime = 'nodejs';
 
@@ -92,7 +94,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     // Update the payment row itself.
     const updates: Record<string, unknown> = {};
     if (body.amount !== undefined) updates.amount = String(body.amount);
-    if (body.paidDate !== undefined) updates.paidDate = body.paidDate ? new Date(body.paidDate) : new Date();
+    if (body.paidDate !== undefined) updates.paidDate = body.paidDate ? fromDateInput(body.paidDate) ?? new Date() : new Date();
     if (body.method !== undefined) updates.method = body.method;
     if (body.confirmationNumber !== undefined) updates.confirmationNumber = body.confirmationNumber;
     if (body.notes !== undefined) updates.notes = body.notes;
@@ -112,6 +114,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       await db.update(commissionPayments).set(updates).where(eq(commissionPayments.id, params.id));
     }
 
+    triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }
@@ -160,6 +163,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
       }
     }
 
+    triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }

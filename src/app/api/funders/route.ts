@@ -9,6 +9,7 @@ import { requirePermission, requireTenantContext } from '@/lib/auth/context';
 import { upsertFunderSchema } from '@/lib/validation/schemas';
 import { validateTierIds } from '@/lib/funders/repository';
 import { apiError } from '@/lib/api/errors';
+import { triggerSync } from '@/lib/sheets/sync';
 
 // Force dynamic: funder edits must reflect immediately on submit/deal-shop pages.
 export const dynamic = 'force-dynamic';
@@ -49,6 +50,7 @@ export async function GET() {
       restrictedStates: states.filter((s) => s.funderId === f.id).map((s) => s.stateCode),
       restrictedIndustries: inds.filter((i) => i.funderId === f.id).map((i) => i.industry),
     }));
+    triggerSync(ctx.companyId);
     return NextResponse.json({ data: enriched, funders: enriched });
   } catch (e) {
     return apiError(e);
@@ -108,6 +110,7 @@ export async function POST(req: NextRequest) {
     if (body.restrictedIndustries.length) {
       await db.insert(funderRestrictedIndustries).values(body.restrictedIndustries.map((i) => ({ funderId: f.id, industry: i })));
     }
+    triggerSync(ctx.companyId);
     return NextResponse.json({ funder: f, data: f });
   } catch (e) {
     return apiError(e);

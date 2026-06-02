@@ -4,6 +4,7 @@ import { submissions } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
+import { triggerSync } from '@/lib/sheets/sync';
 
 export const runtime = 'nodejs';
 
@@ -25,6 +26,7 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
     if (!sub) return NextResponse.json({ error: 'Submission not found' }, { status: 404 });
 
     await db.delete(submissions).where(and(eq(submissions.id, params.id), eq(submissions.companyId, ctx.companyId)));
+    triggerSync(ctx.companyId);
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
 }
