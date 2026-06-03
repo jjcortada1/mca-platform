@@ -47,6 +47,22 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { href: '/info',         label: 'Info',           icon: BookOpen,    perm: 'info.view' },
 ];
 
+/** Default categories when nothing is saved — restores the original sections. */
+export const DEFAULT_CATEGORIES: { id: string; label: string; items: string[] }[] = [
+  {
+    id: 'workflow', label: 'Workflow',
+    items: ['/deal-shop', '/submit', '/funded-email', '/submissions', '/active-deals', '/funded-board', '/portfolio'],
+  },
+  {
+    id: 'commissions', label: 'Commissions',
+    items: ['/commissions', '/payments', '/accounting', '/preview'],
+  },
+  {
+    id: 'resources', label: 'Resources',
+    items: ['/funders', '/calculator', '/info'],
+  },
+];
+
 /**
  * Apply a saved order (href[]) to the master list. Items in the saved order
  * appear first in the saved sequence; items NOT in the saved order are
@@ -70,6 +86,62 @@ function applyOrder(items: NavItem[], savedOrder: string[] | null): NavItem[] {
     if (!seen.has(it.href)) result.push(it);
   }
   return result;
+}
+
+/**
+ * Resolve a final categorized sidebar from the saved config + master list.
+ *
+ * Priority order:
+ *   1. If admin saved categories, use those. Items not in any category get
+ *      appended to a final "Other" bucket (so new app releases auto-surface).
+ *   2. Else if admin saved a flat order, treat it as one un-labeled section.
+ *   3. Else use the hardcoded DEFAULT_CATEGORIES.
+ *
+ * The function ALSO filters each section's items down to ones the user
+ * actually has permission to see, dropping empty sections.
+ */
+function resolveCategories(
+  allItems: NavItem[],
+  savedCategories: { id: string; label: string; items: string[] }[] | null,
+  savedOrder: string[] | null,
+  canSee: (item: NavItem) => boolean,
+): { id: string; label: string; items: NavItem[] }[] {
+  const byHref = new Map(allItems.map((i) => [i.href, i]));
+
+  let raw: { id: string; label: string; items: string[] }[];
+  if (savedCategories && savedCategories.length) {
+    raw = savedCategories;
+  } else if (savedOrder && savedOrder.length) {
+    // Legacy flat-order tenants: render as a single un-labeled section.
+    raw = [{ id: 'menu', label: '', items: savedOrder }];
+  } else {
+    raw = DEFAULT_CATEGORIES;
+  }
+
+  // Track which items have been placed so we can append unplaced ones.
+  const placed = new Set<string>();
+  const resolved = raw.map((cat) => {
+    const items = cat.items
+      .map((h) => byHref.get(h))
+      .filter((i): i is NavItem => !!i)
+      .filter((i) => {
+        if (placed.has(i.href)) return false;
+        if (!canSee(i)) return false;
+        placed.add(i.href);
+        return true;
+      });
+    return { id: cat.id, label: cat.label, items };
+  });
+
+  // Anything we didn't place goes into an Other bucket so new nav items
+  // surface automatically when added in future releases.
+  const leftover = allItems.filter((i) => !placed.has(i.href) && canSee(i));
+  if (leftover.length) {
+    resolved.push({ id: '_other', label: 'Other', items: leftover });
+  }
+
+  // Drop empty sections (every item filtered out by permissions).
+  return resolved.filter((cat) => cat.items.length > 0);
 }
 
 /* ============================================================
@@ -222,10 +294,10 @@ function SidebarBody({
   const isAdmin = user.role === 'company_admin' || user.role === 'master_admin';
   const userInitial = (user.name || user.email || 'U').charAt(0).toUpperCase();
 
-  // Saved order from the company config. Null = use default order. Fetched
-  // once on mount (cheap single-row read, force-dynamic on the API). If the
-  // fetch fails we fall through to the default order silently.
+  // Saved config from the company. Categories take precedence over the
+  // flat order. Both null = default categories (Workflow/Commissions/Resources).
   const [savedOrder, setSavedOrder] = useState<string[] | null>(null);
+  const [savedCategories, setSavedCategories] = useState<{ id: string; label: string; items: string[] }[] | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetch('/api/settings/sidebar-order', { cache: 'no-store' })
@@ -233,18 +305,22 @@ function SidebarBody({
       .then((j) => {
         if (cancelled) return;
         const o = j?.data?.order;
+        const c = j?.data?.categories;
         if (Array.isArray(o)) setSavedOrder(o);
+        if (Array.isArray(c)) setSavedCategories(c);
       })
       .catch(() => { /* fall through to default order */ });
     return () => { cancelled = true; };
   }, []);
 
-  // Apply saved order to the master list, then filter by what this user
-  // can see based on their role + permissions. The flat list is intentional
-  // — the old section labels ("Workflow", "Commissions", "Resources") don't
-  // make sense once items can be freely reordered across categories.
-  const ordered = applyOrder(ALL_NAV_ITEMS, savedOrder);
-  const visibleNavItems = ordered.filter((it) => isAdmin || user.permissions.includes(it.perm));
+  // Build the resolved sections — each labeled section contains items the
+  // current user can see. Empty sections are dropped.
+  const visibleSections = resolveCategories(
+    ALL_NAV_ITEMS,
+    savedCategories,
+    savedOrder,
+    (item) => isAdmin || user.permissions.includes(item.perm),
+  );
 
   return (
     <>
@@ -283,27 +359,36 @@ function SidebarBody({
         )}
       </div>
 
-      {/* Nav — flat list, order controlled by Settings → Sidebar order */}
+      {/* Nav — categorized sections, order + labels controlled by
+          Settings → Sidebar order. Sections with no visible items are
+          dropped automatically. */}
       <nav className="flex-1 overflow-y-auto px-3 py-4">
-        {visibleNavItems.length > 0 && (
-          <div className="mb-5 space-y-0.5">
-            {visibleNavItems.map((item) => {
-              const active = pathname === item.href || pathname.startsWith(item.href + '/');
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={onNavigate}
-                  className={cn('nav-item', active ? 'nav-item-active' : 'nav-item-inactive')}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
+        {visibleSections.map((section) => (
+          <div key={section.id} className="mb-5">
+            {section.label && (
+              <div className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                {section.label}
+              </div>
+            )}
+            <div className="space-y-0.5">
+              {section.items.map((item) => {
+                const active = pathname === item.href || pathname.startsWith(item.href + '/');
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={onNavigate}
+                    className={cn('nav-item', active ? 'nav-item-active' : 'nav-item-inactive')}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
           </div>
-        )}
+        ))}
 
         {/* Personal: every user gets this, including reps + lead sources */}
         <div className="mb-5">

@@ -2334,77 +2334,148 @@ function FundedTemplateSection() {
 }
 
 /* ============================================================
-   SIDEBAR ORDER
-   Admin reorders the left nav. Order applies globally — every
-   user in the company sees the same order. New items added in
-   future releases auto-append at the end.
+   SIDEBAR ORDER — categorized
+   Admin defines sections (Workflow / Commissions / Resources or
+   whatever they want), and assigns nav items to sections. Order
+   syncs globally to every user in the company. New items added
+   in future releases auto-bucket into "Other" until placed.
    ============================================================ */
-import { ALL_NAV_ITEMS } from '@/components/sidebar';
+import { ALL_NAV_ITEMS, DEFAULT_CATEGORIES } from '@/components/sidebar';
+
+interface EditCategory { id: string; label: string; items: string[] }
 
 function SidebarOrderSection() {
   const toast = useToast();
-  // Items shown in the editor — initialized to the master list in default
-  // order, then reordered when we load the saved value. We work on the local
-  // copy so the admin can shuffle around without instant DB writes.
-  const [items, setItems] = useState<typeof ALL_NAV_ITEMS>(ALL_NAV_ITEMS);
+  // Editable categories — initial state filled from the saved config or
+  // default. Each category has a stable id, a label, and a list of nav
+  // item hrefs in order. Items not in any category get placed into the
+  // last category via the "Add item" picker; that's the only way the
+  // admin physically adds an item to the sidebar.
+  const [cats, setCats] = useState<EditCategory[]>(
+    DEFAULT_CATEGORIES.map((c) => ({ ...c, items: [...c.items] }))
+  );
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
+  // For the per-category "Add item" picker — which category is open + which
+  // item is currently selected in its dropdown.
+  const [pickerOpen, setPickerOpen] = useState<string | null>(null);
 
-  // Pull the saved order. If set, reorder local state to match.
   useEffect(() => {
     fetch('/api/settings/sidebar-order', { cache: 'no-store' })
       .then((r) => r.json())
       .then((j) => {
-        const saved = j?.data?.order as string[] | null;
-        if (Array.isArray(saved) && saved.length) {
-          const byHref = new Map(ALL_NAV_ITEMS.map((i) => [i.href, i]));
-          const seen = new Set<string>();
-          const ordered: typeof ALL_NAV_ITEMS = [];
-          for (const href of saved) {
-            const it = byHref.get(href);
-            if (it && !seen.has(href)) { ordered.push(it); seen.add(href); }
-          }
-          // Any items not in the saved order go at the bottom (covers new
-          // app features added since the admin last saved their order).
-          for (const it of ALL_NAV_ITEMS) if (!seen.has(it.href)) ordered.push(it);
-          setItems(ordered);
+        // Priority: saved categories → saved flat order → default categories.
+        const savedCats = j?.data?.categories as EditCategory[] | null;
+        const savedOrder = j?.data?.order as string[] | null;
+        if (Array.isArray(savedCats) && savedCats.length) {
+          setCats(savedCats.map((c) => ({
+            id: c.id, label: c.label, items: [...(c.items ?? [])],
+          })));
+        } else if (Array.isArray(savedOrder) && savedOrder.length) {
+          // Legacy flat-order tenants: bring everything into a single
+          // editable section the admin can split apart.
+          setCats([{ id: 'menu', label: 'Menu', items: [...savedOrder] }]);
         }
       })
       .finally(() => setLoaded(true));
   }, []);
 
-  function move(i: number, dir: -1 | 1) {
-    const j = i + dir;
-    if (j < 0 || j >= items.length) return;
-    const next = [...items];
-    [next[i], next[j]] = [next[j], next[i]];
-    setItems(next);
+  // Set of hrefs already placed in some category. Used to figure out which
+  // items are still available to add to a category.
+  const placedHrefs = new Set(cats.flatMap((c) => c.items));
+  const unplaced = ALL_NAV_ITEMS.filter((i) => !placedHrefs.has(i.href));
+
+  // ---- Category-level edits ---------------------------------------------
+  function addCategory() {
+    const id = `cat_${Math.random().toString(36).slice(2, 8)}`;
+    setCats([...cats, { id, label: 'New section', items: [] }]);
+  }
+  function removeCategory(idx: number) {
+    if (cats.length === 1) {
+      toast.error('Keep at least one section.');
+      return;
+    }
+    if (!confirm(`Delete "${cats[idx].label}"? Its items become Unassigned and will appear under "Other" until you move them.`)) return;
+    setCats(cats.filter((_, i) => i !== idx));
+  }
+  function renameCategory(idx: number, label: string) {
+    const next = [...cats];
+    next[idx] = { ...next[idx], label };
+    setCats(next);
+  }
+  function moveCategory(idx: number, dir: -1 | 1) {
+    const j = idx + dir;
+    if (j < 0 || j >= cats.length) return;
+    const next = [...cats];
+    [next[idx], next[j]] = [next[j], next[idx]];
+    setCats(next);
   }
 
+  // ---- Item-level edits -------------------------------------------------
+  function moveItem(catIdx: number, itemIdx: number, dir: -1 | 1) {
+    const j = itemIdx + dir;
+    const cat = cats[catIdx];
+    if (j < 0 || j >= cat.items.length) return;
+    const items = [...cat.items];
+    [items[itemIdx], items[j]] = [items[j], items[itemIdx]];
+    const next = [...cats];
+    next[catIdx] = { ...cat, items };
+    setCats(next);
+  }
+  function removeItem(catIdx: number, itemIdx: number) {
+    const cat = cats[catIdx];
+    const items = cat.items.filter((_, i) => i !== itemIdx);
+    const next = [...cats];
+    next[catIdx] = { ...cat, items };
+    setCats(next);
+  }
+  function moveItemToCategory(catIdx: number, itemIdx: number, targetCatId: string) {
+    if (cats[catIdx].id === targetCatId) return;
+    const href = cats[catIdx].items[itemIdx];
+    const next = cats.map((c) => {
+      if (c.id === cats[catIdx].id) return { ...c, items: c.items.filter((_, i) => i !== itemIdx) };
+      if (c.id === targetCatId) return { ...c, items: [...c.items, href] };
+      return c;
+    });
+    setCats(next);
+  }
+  function addItemToCategory(catIdx: number, href: string) {
+    // Defensive: remove from anywhere it already exists, then append.
+    const next = cats.map((c) => ({ ...c, items: c.items.filter((h) => h !== href) }));
+    next[catIdx] = { ...next[catIdx], items: [...next[catIdx].items, href] };
+    setCats(next);
+    setPickerOpen(null);
+  }
+
+  // ---- Save / reset -----------------------------------------------------
   async function save() {
     setSaving(true);
+    const payload = cats.map((c) => ({
+      id: c.id,
+      label: c.label.trim() || 'Section',
+      items: c.items,
+    }));
     const res = await fetch('/api/settings/sidebar-order', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order: items.map((i) => i.href) }),
+      body: JSON.stringify({ categories: payload, order: null }),
     });
     setSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      toast.error(j.error || 'Could not save order.');
+      toast.error(j.error || 'Could not save.');
       return;
     }
-    toast.success('Sidebar order saved. Refresh to see it in the menu.');
+    toast.success('Saved. Refresh to see the new sidebar.');
   }
-
   async function resetToDefault() {
-    if (!confirm('Reset the sidebar order back to the default for everyone in your company?')) return;
+    if (!confirm('Reset the sidebar to the default sections for everyone in your company?')) return;
     setResetting(true);
     const res = await fetch('/api/settings/sidebar-order', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order: null }),
+      body: JSON.stringify({ categories: null, order: null }),
     });
     setResetting(false);
     if (!res.ok) {
@@ -2412,68 +2483,169 @@ function SidebarOrderSection() {
       toast.error(j.error || 'Could not reset.');
       return;
     }
-    setItems(ALL_NAV_ITEMS);
-    toast.success('Reset to default order. Refresh to see the change.');
+    setCats(DEFAULT_CATEGORIES.map((c) => ({ ...c, items: [...c.items] })));
+    toast.success('Reset to default. Refresh to see the change.');
   }
 
   if (!loaded) return <div className="text-sm text-muted-foreground">Loading…</div>;
 
+  // Lookup for icons / labels on each item by href.
+  const itemByHref = new Map(ALL_NAV_ITEMS.map((i) => [i.href, i]));
+
   return (
-    <div className="space-y-5 max-w-2xl">
+    <div className="space-y-5 max-w-3xl">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Left navigation order</CardTitle>
+          <CardTitle className="text-base">Sidebar sections</CardTitle>
           <CardDescription>
-            Drag items up or down to reorder the left sidebar. The order is saved company-wide — every user (admins and reps) will see the same order. Each user still only sees the items their permissions allow.
+            Group menu items into categories. The order and the names you set apply company-wide — every user (admins and reps) sees the same sidebar. Each user only sees the items their permissions allow.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2">
-          {items.map((item, i) => {
-            const Icon = item.icon;
-            return (
-              <div
-                key={item.href}
-                className="flex items-center gap-2 p-2 rounded-md border border-border bg-card"
-              >
+        <CardContent className="space-y-3">
+          {cats.map((cat, catIdx) => (
+            <div key={cat.id} className="rounded-lg border border-border bg-card">
+              {/* Section header: rename + reorder + delete the whole category */}
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30 rounded-t-lg">
                 <div className="flex flex-col">
                   <button
-                    onClick={() => move(i, -1)}
-                    disabled={i === 0}
+                    onClick={() => moveCategory(catIdx, -1)}
+                    disabled={catIdx === 0}
                     className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
-                    title="Move up"
-                    aria-label={`Move ${item.label} up`}
+                    title="Move section up"
                   >▲</button>
                   <button
-                    onClick={() => move(i, 1)}
-                    disabled={i === items.length - 1}
+                    onClick={() => moveCategory(catIdx, 1)}
+                    disabled={catIdx === cats.length - 1}
                     className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
-                    title="Move down"
-                    aria-label={`Move ${item.label} down`}
+                    title="Move section down"
                   >▼</button>
                 </div>
-                <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium">{item.label}</div>
-                  <div className="text-[11px] text-muted-foreground font-mono truncate">{item.href}</div>
-                </div>
-                <div className="text-[11px] text-muted-foreground tabular-nums w-6 text-right">
-                  {i + 1}
-                </div>
+                <Input
+                  value={cat.label}
+                  onChange={(e) => renameCategory(catIdx, e.target.value)}
+                  placeholder="Section name"
+                  className="h-8 text-sm font-medium flex-1"
+                />
+                <Button variant="ghost" size="sm" onClick={() => removeCategory(catIdx)} title="Delete section">
+                  Delete
+                </Button>
               </div>
-            );
-          })}
+
+              {/* Items inside this section */}
+              <div className="p-2 space-y-1.5">
+                {cat.items.length === 0 && (
+                  <div className="text-xs text-muted-foreground px-2 py-1">No items yet — add some below.</div>
+                )}
+                {cat.items.map((href, itemIdx) => {
+                  const item = itemByHref.get(href);
+                  if (!item) {
+                    // Item was removed from the app — render a stub with a remove button.
+                    return (
+                      <div key={href} className="flex items-center gap-2 p-1.5 rounded border border-dashed border-border text-xs text-muted-foreground">
+                        <span className="flex-1 font-mono">{href} (no longer available)</span>
+                        <button onClick={() => removeItem(catIdx, itemIdx)} className="hover:text-destructive">✕</button>
+                      </div>
+                    );
+                  }
+                  const Icon = item.icon;
+                  return (
+                    <div key={href} className="flex items-center gap-2 p-1.5 rounded border border-border">
+                      <div className="flex flex-col">
+                        <button
+                          onClick={() => moveItem(catIdx, itemIdx, -1)}
+                          disabled={itemIdx === 0}
+                          className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
+                          title="Move up"
+                        >▲</button>
+                        <button
+                          onClick={() => moveItem(catIdx, itemIdx, 1)}
+                          disabled={itemIdx === cat.items.length - 1}
+                          className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
+                          title="Move down"
+                        >▼</button>
+                      </div>
+                      <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div className="text-sm font-medium flex-1 min-w-0 truncate">{item.label}</div>
+                      {/* Move to other section */}
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          if (e.target.value) moveItemToCategory(catIdx, itemIdx, e.target.value);
+                        }}
+                        className="h-7 rounded border border-input bg-card px-1 text-xs text-muted-foreground"
+                        title="Move to another section"
+                      >
+                        <option value="">Move to…</option>
+                        {cats.filter((c) => c.id !== cat.id).map((c) => (
+                          <option key={c.id} value={c.id}>{c.label}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => removeItem(catIdx, itemIdx)}
+                        title="Remove from sidebar"
+                        className="text-muted-foreground hover:text-destructive px-1 text-sm"
+                      >✕</button>
+                    </div>
+                  );
+                })}
+
+                {/* Add-item picker — pulls from items not yet in ANY category */}
+                {pickerOpen === cat.id ? (
+                  <div className="flex items-center gap-2 p-1.5 rounded border border-dashed border-border">
+                    <select
+                      autoFocus
+                      defaultValue=""
+                      onChange={(e) => {
+                        if (e.target.value) addItemToCategory(catIdx, e.target.value);
+                      }}
+                      className="h-8 rounded border border-input bg-card px-2 text-sm flex-1"
+                    >
+                      <option value="">Pick an item to add…</option>
+                      {unplaced.map((it) => (
+                        <option key={it.href} value={it.href}>{it.label}</option>
+                      ))}
+                    </select>
+                    <Button variant="ghost" size="sm" onClick={() => setPickerOpen(null)}>Cancel</Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPickerOpen(cat.id)}
+                    disabled={unplaced.length === 0}
+                    className="w-full mt-1"
+                  >
+                    + Add item to this section
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+
+          <Button variant="outline" onClick={addCategory} className="w-full">
+            + Add a new section
+          </Button>
+
+          {/* Show what items are not in any section yet, so the admin sees them. */}
+          {unplaced.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-xs text-amber-900">
+              <div className="font-semibold mb-1">Not yet placed in a section:</div>
+              <div>{unplaced.map((i) => i.label).join(', ')}</div>
+              <div className="text-amber-800/80 mt-1">These will show under &quot;Other&quot; in the sidebar until you assign them to a section.</div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
       <div className="flex items-center gap-3">
         <Button onClick={save} disabled={saving}>
-          {saving ? 'Saving…' : 'Save order'}
+          {saving ? 'Saving…' : 'Save changes'}
         </Button>
         <Button variant="outline" onClick={resetToDefault} disabled={resetting}>
           {resetting ? 'Resetting…' : 'Reset to default'}
         </Button>
         <span className="text-xs text-muted-foreground">
-          Users need to refresh their browser to see the new order.
+          Users need to refresh to see the change.
         </span>
       </div>
     </div>

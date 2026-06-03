@@ -29,6 +29,9 @@ interface Funder {
   minCreditTier: 'unknown' | 'under_550' | '550_599' | '600_649' | '650_plus';
   notes: string | null;
   isActive: boolean;
+  // When true, the email subject sent to this funder skips the invisible
+  // thread-breaker characters (Unicode). Use for legacy intake CRMs.
+  plainSubjectOnly?: boolean;
   // Multi-value submission emails — used when shopping deals to this funder.
   emails?: string[] | null;
   // Multi-value phones (display-only).
@@ -113,6 +116,7 @@ export default function FundersPage() {
       minCreditTier: editing.minCreditTier,
       notes: editing.notes,
       isActive: editing.isActive,
+      plainSubjectOnly: editing.plainSubjectOnly ?? false,
       // Submission emails (used for shopping)
       emails: (editing.emails ?? []).map((e) => e.trim()).filter(Boolean),
       contacts: editing.contacts.filter((c) => c.name.trim() || c.email?.trim()),
@@ -549,7 +553,7 @@ function FunderDrawer({
                 </select>
               </Field>
             </div>
-            <div className="flex gap-6 text-sm">
+            <div className="flex flex-col gap-2 text-sm">
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -565,6 +569,24 @@ function FunderDrawer({
                   onChange={(e) => update('isActive', e.target.checked)}
                 />
                 Active
+              </label>
+              {/* For funders whose intake CRMs garble Unicode (rendering
+                  zero-width chars as "?" in the subject). Turn this on for
+                  that specific funder only. Trade-off: emails to this funder
+                  will all share a Gmail thread on the sender's side. */}
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={funder.plainSubjectOnly ?? false}
+                  onChange={(e) => update('plainSubjectOnly', e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  Plain ASCII subject only
+                  <span className="block text-[11px] text-muted-foreground">
+                    Turn on if this funder&apos;s CRM shows &quot;?&quot; characters after the deal name.
+                  </span>
+                </span>
               </label>
             </div>
           </section>

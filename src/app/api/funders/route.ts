@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
       emails: body.emails && body.emails.length ? body.emails : null,
       notes: body.notes ?? null,
       isActive: body.isActive,
+      plainSubjectOnly: body.plainSubjectOnly ?? false,
     }).returning();
 
     if (body.contacts.length) {

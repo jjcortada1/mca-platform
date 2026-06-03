@@ -64,6 +64,9 @@ export const upsertFunderSchema = z.object({
   minCreditTier: creditTier.default('unknown'),
   notes: z.string().max(5000).optional().nullable(),
   isActive: z.boolean().default(true),
+  // Legacy-CRM compatibility flag: when true, subject sent to this funder
+  // is plain ASCII (no zero-width thread-breaker).
+  plainSubjectOnly: z.boolean().default(false).optional(),
   // funders.emails — submission emails used when shopping a deal. Multiple OK.
   emails: z.array(z.string().email()).default([]).optional(),
   // Legacy: array of tier UUIDs (no overrides). Still accepted.

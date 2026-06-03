@@ -171,7 +171,9 @@ export default function FundedEmailPage() {
   }
 
   return (
-    <div className="space-y-6">
+    // max-w-4xl so the form sits on a contained column on wide screens,
+    // and space-y-4 (was space-y-6) so the cards stack closer together.
+    <div className="space-y-4 max-w-4xl">
       <PageHeader
         title="Funded email"
         description="Send a single funded notification. Recipient picks from your saved contacts or type any email."
@@ -279,19 +281,24 @@ export default function FundedEmailPage() {
               Fill in each field. They&apos;ll appear in the email body one per line, in this order.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {tmpl.fields.map((f, i) => (
-              <Field key={i} label={f.label} hint={f.hint}>
-                <Input
-                  // Date fields get a native date picker. Everything else
-                  // is a regular text input. Type is set by the admin
-                  // template OR auto-detected when the label mentions "date".
-                  type={isDateField(f) ? 'date' : 'text'}
-                  value={values[i] ?? ''}
-                  onChange={(e) => setValues({ ...values, [i]: e.target.value })}
-                />
-              </Field>
-            ))}
+          <CardContent>
+            {/* 2-column grid on desktop, single column on narrow viewports.
+                Each field is its own grid cell so the page no longer scrolls
+                vertically through every input — they pack side-by-side. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {tmpl.fields.map((f, i) => (
+                <Field key={i} label={f.label} hint={f.hint}>
+                  <Input
+                    // Date fields get a native date picker. Everything else
+                    // is a regular text input. Type is set by the admin
+                    // template OR auto-detected when the label mentions "date".
+                    type={isDateField(f) ? 'date' : 'text'}
+                    value={values[i] ?? ''}
+                    onChange={(e) => setValues({ ...values, [i]: e.target.value })}
+                  />
+                </Field>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}

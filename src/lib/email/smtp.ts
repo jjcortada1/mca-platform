@@ -418,6 +418,15 @@ export interface BatchRecipient {
    * we fall back to the local-part of the first recipient address.
    */
   label?: string;
+  /**
+   * When true, skip the invisible Unicode thread-breaker in the subject for
+   * this recipient. Used for funders whose intake CRMs can't decode
+   * zero-width characters and render them as "?". The trade-off is that
+   * multiple emails to this funder land in the same Gmail thread on the
+   * sender's side — acceptable for the small number of funders where this
+   * compatibility matters.
+   */
+  plainSubject?: boolean;
 }
 
 export interface BatchSendResult {
@@ -493,8 +502,14 @@ export async function sendDealEmailBatch(
       // Gmail's same-subject conversation grouping without uglifying the subject.
       // We tag with the FUNDER ref (not individual address), so all addresses
       // for one funder share the same subject = one thread for that funder.
+      //
+      // Exception: if the caller flagged this recipient as plainSubject, skip
+      // the disambiguator entirely. Used for funders whose intake CRMs mangle
+      // zero-width Unicode and render it as "?" in the subject.
       const cleanSubject = buildSubject(base.dealName);
-      const subjectForSend = applyThreadBreaker(cleanSubject, `${r.ref}|${addresses[0]}`);
+      const subjectForSend = r.plainSubject
+        ? cleanSubject
+        : applyThreadBreaker(cleanSubject, `${r.ref}|${addresses[0]}`);
 
       // Build text + (optional) HTML body. When the sender has a signature we
       // send multipart. The logo is inlined as a CID attachment per message so

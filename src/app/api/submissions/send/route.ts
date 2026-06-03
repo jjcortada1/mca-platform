@@ -296,15 +296,15 @@ export async function POST(req: NextRequest) {
       fName: string;
       ref: string;
       addresses: string[]; // normalized, deduped
+      plainSubject: boolean; // skip Unicode thread-breaker for legacy CRMs
     };
     const toSend: Target[] = [];
     const results: Array<{ toEmails: string[]; funderName: string; success: boolean; error?: string }> = [];
 
     let refCounter = 0;
     for (const fi of fundersInput) {
-      const fName = fi.funderId
-        ? (dirFunders.find((f) => f.id === fi.funderId)?.name ?? 'Unknown')
-        : (fi.manualFunderName ?? (fi.toEmail ?? ''));
+      const dirFunder = fi.funderId ? dirFunders.find((f) => f.id === fi.funderId) : null;
+      const fName = dirFunder?.name ?? fi.manualFunderName ?? (fi.toEmail ?? '');
 
       const addresses = normalizeToEmails(fi);
 
@@ -323,7 +323,14 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      toSend.push({ fi, fName, ref: `r${refCounter++}`, addresses });
+      toSend.push({
+        fi,
+        fName,
+        ref: `r${refCounter++}`,
+        addresses,
+        // Funder row flagged for legacy-CRM compatibility → no Unicode in subject.
+        plainSubject: !!dirFunder?.plainSubjectOnly,
+      });
     }
 
     // Send all as isolated messages over a single pooled connection.
@@ -343,7 +350,14 @@ export async function POST(req: NextRequest) {
             attachments,
             signature,
           },
-          toSend.map((t) => ({ toEmails: t.addresses, ref: t.ref, label: t.fName }))
+          toSend.map((t) => ({
+            toEmails: t.addresses,
+            ref: t.ref,
+            label: t.fName,
+            // Funder-specific: skip the Unicode disambiguator so the subject
+            // is pure ASCII for CRMs that mangle zero-width characters.
+            plainSubject: t.plainSubject,
+          }))
         )
       : [];
     const byRef = new Map(sendResults.map((r) => [r.ref, r]));

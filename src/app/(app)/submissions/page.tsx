@@ -422,37 +422,40 @@ export default function SubmissionsPage() {
 
                 {isOpen && (
                   <CardContent className="border-t border-border">
-                    <div className="space-y-2 mt-4">
+                    <div className="space-y-1.5 mt-3">
                       {row.funders.map((sf) => {
                         const notesValue = localNotes[sf.id] ?? sf.notes ?? '';
                         return (
-                          <div key={sf.id} className="rounded border border-border p-3">
-                            <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
-                              <div className="min-w-0">
-                                <div className="font-medium text-sm">{sf.funderName}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  Submitted {formatDate(sf.submittedAt)}
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <select
-                                  value={sf.status}
-                                  onChange={(e) => updateFunder(sf.id, { status: e.target.value })}
-                                  className={cn(
-                                    'rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors',
-                                    sf.status === 'approved' && 'bg-emerald-50 border-emerald-300 text-emerald-700',
-                                    sf.status === 'declined' && 'bg-rose-50 border-rose-300 text-rose-700',
-                                    sf.status === 'no_response' && 'bg-card border-border text-foreground',
-                                  )}
-                                >
-                                  <option value="no_response">Pending</option>
-                                  <option value="approved">Approved</option>
-                                  <option value="declined">Declined</option>
-                                </select>
-                                <Button size="sm" variant="ghost" onClick={() => removeFunder(sf.id)}>Remove</Button>
+                          // Each funder is ONE compact row: funder name + status
+                          // dropdown + single-line offer input + remove button.
+                          // No more tall textarea / no more stacked layout —
+                          // everything sits side-by-side on a single line.
+                          <div key={sf.id} className="flex items-center gap-2 rounded border border-border px-2 py-1.5">
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium text-sm truncate">{sf.funderName}</div>
+                              <div className="text-[10px] text-muted-foreground">
+                                Submitted {formatDate(sf.submittedAt)}
                               </div>
                             </div>
-                            <Textarea
+                            <select
+                              value={sf.status}
+                              onChange={(e) => updateFunder(sf.id, { status: e.target.value })}
+                              className={cn(
+                                'rounded-md border px-2 py-1 text-xs font-medium transition-colors shrink-0',
+                                sf.status === 'approved' && 'bg-emerald-50 border-emerald-300 text-emerald-700',
+                                sf.status === 'declined' && 'bg-rose-50 border-rose-300 text-rose-700',
+                                sf.status === 'no_response' && 'bg-card border-border text-foreground',
+                              )}
+                            >
+                              <option value="no_response">Pending</option>
+                              <option value="approved">Approved</option>
+                              <option value="declined">Declined</option>
+                            </select>
+                            {/* Single-line offer input. Auto-saves on blur,
+                                same optimistic update pattern as the status
+                                select — no page refresh on typing. */}
+                            <input
+                              type="text"
                               value={notesValue}
                               onChange={(e) => setLocalNotes((p) => ({ ...p, [sf.id]: e.target.value }))}
                               onBlur={() => {
@@ -461,10 +464,16 @@ export default function SubmissionsPage() {
                                   updateFunder(sf.id, { notes: current });
                                 }
                               }}
-                              placeholder="Offer terms, response details, etc."
-                              rows={2}
-                              className="text-sm"
+                              placeholder="Offer / notes"
+                              className="flex-1 min-w-0 h-8 rounded-md border border-input bg-card px-2 text-xs"
                             />
+                            <button
+                              onClick={() => removeFunder(sf.id)}
+                              title="Remove funder from this submission"
+                              className="text-muted-foreground hover:text-destructive shrink-0 px-1.5 text-sm"
+                            >
+                              ✕
+                            </button>
                           </div>
                         );
                       })}

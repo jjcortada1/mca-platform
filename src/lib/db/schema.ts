@@ -82,6 +82,14 @@ export const companies = pgTable('companies', {
   // hardcoded order for EVERY user in the company (admin and rep alike) so
   // the menu looks the same for everyone. NULL = use the default order.
   sidebarOrder: jsonb('sidebar_order').$type<string[]>(),
+  // Sidebar categories — when set, takes precedence over the flat order
+  // above and groups items into named sections. Shape:
+  //   [{ id: string, label: string, items: string[] }]
+  // Each section's label is shown as a small header in the sidebar; items
+  // are hrefs that the user has permission to access. Items NOT in any
+  // section appear in an auto "Other" bucket at the bottom so future app
+  // releases that add new nav items show up without an admin re-edit.
+  sidebarCategories: jsonb('sidebar_categories').$type<{ id: string; label: string; items: string[] }[]>(),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -202,6 +210,12 @@ export const funders = pgTable(
     emails: jsonb('emails').$type<string[]>(),
     phones: jsonb('phones').$type<string[]>(),
     notes: text('notes'),
+    // ASCII-only subject mode. When true, the email subject sent to this
+    // funder skips the invisible thread-breaker characters. Some funder CRMs
+    // can't decode Unicode in subjects and render zero-width chars as "?".
+    // Default false; admin flips it on for the specific funders that have
+    // legacy intake systems.
+    plainSubjectOnly: boolean('plain_subject_only').notNull().default(false),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

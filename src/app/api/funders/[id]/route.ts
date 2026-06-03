@@ -29,6 +29,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       emails: body.emails && body.emails.length ? body.emails : null,
       notes: body.notes ?? null,
       isActive: body.isActive,
+      plainSubjectOnly: body.plainSubjectOnly ?? false,
       updatedAt: new Date(),
     }).where(and(eq(funders.id, params.id), eq(funders.companyId, ctx.companyId)));
 
