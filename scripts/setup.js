@@ -113,7 +113,12 @@ if (skipDb) {
 // ── Push schema ────────────────────────────────────────────
 console.log('\n→ Pushing database schema (drizzle-kit push)...');
 try {
-  execSync('npx drizzle-kit push --force', { stdio: 'inherit', cwd: ROOT, env: process.env });
+  execSync('./node_modules/.bin/drizzle-kit push --force', {
+    stdio: ['pipe', 'inherit', 'inherit'],
+    input: 'y\n'.repeat(20),
+    cwd: ROOT,
+    env: process.env,
+  });
 } catch (e) {
   console.error('\n  ✗ Schema push failed.');
   console.error('     Check that DATABASE_URL points to a reachable Postgres database.\n');
@@ -123,7 +128,7 @@ try {
 // ── Seed ───────────────────────────────────────────────────
 console.log('\n→ Seeding database...');
 try {
-  execSync('npx tsx src/lib/db/seed.ts', { stdio: 'inherit', cwd: ROOT, env: process.env });
+  execSync('./node_modules/.bin/tsx src/lib/db/seed.ts', { stdio: 'inherit', cwd: ROOT, env: process.env });
 } catch (e) {
   console.error('\n  ✗ Seed failed.');
   process.exit(1);
