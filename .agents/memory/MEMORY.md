@@ -1,0 +1,1 @@
+- [Next.js SWC corruption & firewall block](next-swc-corruption.md) — next@14.2.18 blocked by deployment firewall; partial npm installs corrupt @next/swc-* binaries causing SIGBUS; fix procedures inside.
