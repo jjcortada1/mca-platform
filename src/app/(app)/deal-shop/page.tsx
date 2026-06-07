@@ -7,6 +7,25 @@ import { Send, ChevronDown, ChevronRight, Mail, Phone, MapPin, Ban, FileText, Za
 import { cn } from '@/lib/utils';
 import type { MatchResult } from '@/lib/matching/engine';
 
+/**
+ * Human labels for short-form exclusion codes. Used by the deal-shop UI to
+ * render compact red badges next to each excluded funder so the reason is
+ * scannable at a glance — instead of long sentences.
+ *
+ * The full detailed reason text from the engine is kept on the tooltip
+ * (title attribute) so a user can hover for specifics like the exact
+ * revenue or credit threshold that failed.
+ */
+const EXCLUSION_LABELS = {
+  restricted_state: 'Restricted State',
+  restricted_industry: 'Restricted Industry',
+  credit_too_low: 'Credit Too Low',
+  revenue_too_low: 'Revenue Too Low',
+  positions_too_high: 'Position Count Too High',
+  reverse_unsupported: 'No Reverse Consol.',
+  inactive: 'Inactive',
+} as const;
+
 interface MatchResponse { matched: MatchResult[]; excluded: MatchResult[]; }
 
 interface FunderDetail {
@@ -484,11 +503,32 @@ export default function DealShopPage() {
                         <Card className="mt-1">
                           <CardContent className="p-0 divide-y divide-border/60">
                             {g.excluded.map((e) => (
-                              <div key={e.funderId} className="px-4 py-2 flex items-center justify-between text-xs">
-                                <span className="font-medium text-muted-foreground">{e.funderName}</span>
-                                <span className="text-muted-foreground/80 text-right ml-3 truncate max-w-[60%]">
-                                  {e.reasons.find((r) => !r.includes('OK')) ?? e.reasons[0]}
-                                </span>
+                              <div key={e.funderId} className="px-4 py-2 flex items-center justify-between gap-2 text-xs">
+                                <span className="font-medium text-muted-foreground truncate">{e.funderName}</span>
+                                {/* Compact short-form reason badges. The full
+                                    sentence-form text from the engine is kept
+                                    in the title attribute so a user can hover
+                                    to see e.g. "Min revenue $50,000, deal has
+                                    $42,000" instead of just "Revenue Too Low". */}
+                                <div className="flex flex-wrap gap-1 justify-end shrink-0 max-w-[70%]">
+                                  {(e.reasonCodes && e.reasonCodes.length > 0
+                                    ? e.reasonCodes
+                                    : ['restricted_state'] // never empty for an excluded row
+                                  ).map((code) => {
+                                    const label = EXCLUSION_LABELS[code as keyof typeof EXCLUSION_LABELS] ?? 'Restricted';
+                                    // Pull the matching detailed reason for the tooltip
+                                    const detail = e.reasons.find((r) => !r.includes('OK')) ?? '';
+                                    return (
+                                      <span
+                                        key={code}
+                                        title={detail}
+                                        className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-50 text-rose-700 border border-rose-200"
+                                      >
+                                        {label}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
                               </div>
                             ))}
                           </CardContent>

@@ -199,7 +199,7 @@ export default function ActiveDealsPage() {
     load();
   }
 
-  // Active Deals = pre-funded pipeline only. Funded deals live in /portfolio.
+  // Active Deals = pre-funded pipeline only. Funded deals live in /portfolio (labeled "Funded Deals" in the UI).
   const HIDDEN_FROM_ACTIVE = new Set(['funded', 'paid_off', 'closed']);
 
   const filtered = useMemo(() => {

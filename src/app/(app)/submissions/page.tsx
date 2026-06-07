@@ -18,6 +18,35 @@ interface SubmissionFunder {
   submittedAt: string;
 }
 
+/**
+ * Status priority for sorting funders within a submission.
+ *
+ *   Approved (0)  →  always on top
+ *   Declined (1)  →  middle
+ *   Pending  (2)  →  bottom (no_response status)
+ *
+ * Used inside each expanded submission card so when a rep marks a funder as
+ * approved, that funder jumps to the top of its submission without a page
+ * reload. The optimistic local-update path also re-sorts because the
+ * `row.funders` array is replaced on every status change.
+ *
+ * Within the same status bucket we order by submittedAt DESC (most recent
+ * first) so two approvals show newest at the top.
+ */
+const STATUS_PRIORITY: Record<SubmissionFunder['status'], number> = {
+  approved: 0,
+  declined: 1,
+  no_response: 2,
+};
+function sortFundersByStatus(funders: SubmissionFunder[]): SubmissionFunder[] {
+  return [...funders].sort((a, b) => {
+    const pa = STATUS_PRIORITY[a.status] ?? 99;
+    const pb = STATUS_PRIORITY[b.status] ?? 99;
+    if (pa !== pb) return pa - pb;
+    return new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime();
+  });
+}
+
 interface SubmissionRow {
   submissionId: string;
   dealId: string;
@@ -51,7 +80,7 @@ export default function SubmissionsPage() {
   // only one rep's submissions, or just the ones with no assignee.
   const [repFilter, setRepFilter] = useState<string>('all');
   // Sort: 'recent' (default), 'rep' alphabetical by rep name.
-  const [sortBy, setSortBy] = useState<'recent' | 'rep'>('recent');
+  const [sortBy, setSortBy] = useState<'recent' | 'rep' | 'status'>('recent');
   // Search across deal name / merchant name / funder names.
   const [search, setSearch] = useState('');
 
@@ -243,6 +272,22 @@ export default function SubmissionsPage() {
         if (an !== bn) return an.localeCompare(bn);
         return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
       });
+    } else if (sortBy === 'status') {
+      // Rank each submission card by its BEST funder status:
+      //   0 = has at least one Approved   (rises to top)
+      //   1 = has at least one Declined but no Approved
+      //   2 = only Pending
+      // Within the same bucket, sort by most recent activity.
+      const rank = (r: SubmissionRow): number => {
+        if (r.funders.some((f) => f.status === 'approved')) return 0;
+        if (r.funders.some((f) => f.status === 'declined')) return 1;
+        return 2;
+      };
+      out = [...out].sort((a, b) => {
+        const ra = rank(a), rb = rank(b);
+        if (ra !== rb) return ra - rb;
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
     }
     return out;
   }, [rows, repFilter, sortBy, search]);
@@ -352,11 +397,12 @@ export default function SubmissionsPage() {
             />
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as 'recent' | 'rep')}
+              onChange={(e) => setSortBy(e.target.value as 'recent' | 'rep' | 'status')}
               className="h-9 rounded-md border border-input bg-card px-2 text-sm"
               title="Sort"
             >
               <option value="recent">Most recent</option>
+              <option value="status">By status (approved first)</option>
               <option value="rep">By rep</option>
             </select>
           </div>
@@ -423,7 +469,12 @@ export default function SubmissionsPage() {
                 {isOpen && (
                   <CardContent className="border-t border-border">
                     <div className="space-y-1.5 mt-3">
-                      {row.funders.map((sf) => {
+                      {/* Funders sorted Approved → Declined → Pending. Changing
+                          a funder's status via the dropdown does an optimistic
+                          local update, which re-runs this sort — so the row
+                          jumps to its new position immediately without a
+                          full reload. */}
+                      {sortFundersByStatus(row.funders).map((sf) => {
                         const notesValue = localNotes[sf.id] ?? sf.notes ?? '';
                         return (
                           // Each funder is ONE compact row: funder name + status

@@ -92,7 +92,7 @@ export default function PortfolioPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Portfolio" description="Live view of every funded deal — balance, paydown, and renewal status update automatically." />
+      <PageHeader title="Funded Deals" description="Live view of every funded deal — balance, paydown, and renewal status update automatically." />
 
       {/* Portfolio totals */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">

@@ -37,7 +37,7 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { href: '/submissions',  label: 'Submissions',    icon: Inbox,       perm: 'submissions.view' },
   { href: '/active-deals', label: 'Active Deals',   icon: Briefcase,   perm: 'active_deals.view' },
   { href: '/funded-board', label: 'Funded Board',   icon: TrendingUp,  perm: 'active_deals.view' },
-  { href: '/portfolio',    label: 'Portfolio',      icon: TrendingUp,  perm: 'active_deals.view' },
+  { href: '/portfolio',    label: 'Funded Deals',   icon: TrendingUp,  perm: 'active_deals.view' },
   { href: '/commissions',  label: 'Commissions',    icon: DollarSign,  perm: 'commissions.view' },
   { href: '/payments',     label: 'Payments',       icon: DollarSign,  perm: 'commissions.manage' },
   { href: '/accounting',   label: 'Accounting',     icon: DollarSign,  perm: 'commissions.manage' },
