@@ -1,0 +1,2082 @@
+[
+  {
+    "tier": "1A",
+    "name": "Credibly",
+    "emails": [
+      "portal"
+    ],
+    "contacts": [
+      {
+        "n": "Cody",
+        "p": "(248) 633-1223"
+      }
+    ],
+    "maxPos": 1,
+    "minCr": 600,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Trucking"
+    ],
+    "pref": false,
+    "note": "will buyout a 2nd"
+  },
+  {
+    "tier": "1A",
+    "name": "FinTap",
+    "emails": [
+      "submissions@fintap.com",
+      "asharaby@fintap.com"
+    ],
+    "contacts": [
+      {
+        "n": "Avraham",
+        "p": "(443) 416-2765"
+      }
+    ],
+    "maxPos": 1,
+    "minCr": 600,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Auto sales",
+      "Adult material",
+      "Financial",
+      "Firearms",
+      "Cannabis"
+    ],
+    "pref": false,
+    "note": "will buyout a 2nd, 3rd, and 4th"
+  },
+  {
+    "tier": "1A",
+    "name": "Getbakd",
+    "emails": [
+      "submissions@backd.com",
+      "daviddawson@backd.com"
+    ],
+    "contacts": [],
+    "maxPos": 1,
+    "minCr": 600,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": "will buyout a 2nd"
+  },
+  {
+    "tier": "1A",
+    "name": "IOU",
+    "emails": [
+      "cjerrum@ioufinancial.com"
+    ],
+    "contacts": [
+      {
+        "n": "Christian",
+        "p": "(470) 922-3922"
+      }
+    ],
+    "maxPos": 1,
+    "minCr": 650,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [
+      "CA",
+      "HI",
+      "MA",
+      "NV",
+      "ND",
+      "RI",
+      "VT"
+    ],
+    "good": [],
+    "badInd": [
+      "Trucking",
+      "Auto sales",
+      "Car service",
+      "Bail bonds"
+    ],
+    "pref": false,
+    "note": "will buyout a 2nd"
+  },
+  {
+    "tier": "1A",
+    "name": "Rapid",
+    "emails": [
+      "submissions@rapidadvance.com",
+      "Richcermak@rapidfinance.com"
+    ],
+    "contacts": [
+      {
+        "n": "Ben",
+        "p": "(240) 514-1146"
+      }
+    ],
+    "maxPos": 1,
+    "minCr": 600,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [
+      "CA"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": "will buyout a 2nd"
+  },
+  {
+    "tier": "1A",
+    "name": "Wall",
+    "emails": [
+      "ISO@wallfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Mike",
+        "p": "516-780-5194"
+      }
+    ],
+    "maxPos": 1,
+    "minCr": 600,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "TX"
+    ],
+    "good": [],
+    "badInd": [
+      "Non profit",
+      "collections",
+      "casino",
+      "finance",
+      "jewelry",
+      "adult entertainment",
+      "check cashing",
+      "firearms",
+      "staffing"
+    ],
+    "pref": false,
+    "note": "will buyout a 2nd"
+  },
+  {
+    "tier": "1B",
+    "name": "BizFund",
+    "emails": [
+      "steven.g@bizfund.com"
+    ],
+    "contacts": [
+      {
+        "n": "Steven",
+        "p": "(646) 915-6365"
+      }
+    ],
+    "maxPos": 3,
+    "minCr": 600,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Trucking",
+      "Auto sales"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "1B",
+    "name": "FinTap",
+    "emails": [
+      "submissions@fintap.com",
+      "asharaby@fintap.com"
+    ],
+    "contacts": [
+      {
+        "n": "Avraham",
+        "p": "(443) 416-2765"
+      }
+    ],
+    "maxPos": 3,
+    "minCr": 600,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Auto sales",
+      "Adult material",
+      "Financial",
+      "Firearms",
+      "Cannabis"
+    ],
+    "pref": false,
+    "note": "will buyout a 2nd, 3rd, and 4th"
+  },
+  {
+    "tier": "1B",
+    "name": "Hogen",
+    "emails": [
+      "subs@hogencapital.com",
+      "charlie@hogencapital.com"
+    ],
+    "contacts": [],
+    "maxPos": 3,
+    "minCr": 600,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [],
+    "good": [
+      "CA",
+      "NY"
+    ],
+    "badInd": [],
+    "pref": true,
+    "note": ""
+  },
+  {
+    "tier": "1B",
+    "name": "IOU",
+    "emails": [
+      "cjerrum@ioufinancial.com"
+    ],
+    "contacts": [
+      {
+        "n": "Christian",
+        "p": "(470) 922-3922"
+      }
+    ],
+    "maxPos": 2,
+    "minCr": 650,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [
+      "CA"
+    ],
+    "good": [],
+    "badInd": [
+      "Trucking"
+    ],
+    "pref": false,
+    "note": "will buyout a 2nd or 3rd"
+  },
+  {
+    "tier": "1B",
+    "name": "Kapitus",
+    "emails": [
+      "newcontracts@kapitus.com"
+    ],
+    "contacts": [
+      {
+        "n": "Jennaro",
+        "p": "732-841-7194"
+      }
+    ],
+    "maxPos": 2,
+    "minCr": 600,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": "will buyout a 2nd"
+  },
+  {
+    "tier": "1B",
+    "name": "LG",
+    "emails": [
+      "JJ@lgfunding.com",
+      "submissions@lgfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "JJ",
+        "p": "(212) 444-9859"
+      }
+    ],
+    "maxPos": 3,
+    "minCr": 600,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": true,
+    "note": ""
+  },
+  {
+    "tier": "1B",
+    "name": "Newco",
+    "emails": [
+      "submissions@newcocapitalgroup.com",
+      "Rebekah@newcocapitalgroup.com",
+      "sara@newcocapitalgroup.com"
+    ],
+    "contacts": [
+      {
+        "n": "LOC",
+        "p": "(914) 407-3225"
+      }
+    ],
+    "maxPos": 3,
+    "minCr": 0,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Lawyer",
+      "Bail bonds",
+      "Check cashing",
+      "Non for profit",
+      "Pawn Shops"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "1B",
+    "name": "Path2Cap",
+    "emails": [
+      "submissions@path2cap.com"
+    ],
+    "contacts": [
+      {
+        "n": "AZ",
+        "p": "(347) 295-9537"
+      }
+    ],
+    "maxPos": 3,
+    "minCr": 600,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [
+      "CA",
+      "NY"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": true,
+    "note": ""
+  },
+  {
+    "tier": "1B",
+    "name": "PDM",
+    "emails": [
+      "submissions@pdmcapital.com",
+      "charlie@pdmcapital.com"
+    ],
+    "contacts": [
+      {
+        "n": "Charlie",
+        "p": "(917) 731-0890"
+      }
+    ],
+    "maxPos": 3,
+    "minCr": 600,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [
+      "TX",
+      "CA"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": true,
+    "note": ""
+  },
+  {
+    "tier": "1B",
+    "name": "Radiance",
+    "emails": [
+      "subs@radiancefunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Shimon",
+        "p": "(516) 509-9788"
+      }
+    ],
+    "maxPos": 3,
+    "minCr": 0,
+    "maxNSF": 4,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Trucking",
+      "Travel agent",
+      "Auto sales",
+      "Non profit",
+      "Oi",
+      "Gas",
+      "Real estate",
+      "Car service",
+      "Solar",
+      "Law firms"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "1B",
+    "name": "Simply",
+    "emails": [
+      "submissions@simplyfunding.com",
+      "ryanc@simplyfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Ryan",
+        "p": "(609) 517-5420"
+      }
+    ],
+    "maxPos": 3,
+    "minCr": 600,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [
+      "TX",
+      "AK",
+      "HI"
+    ],
+    "good": [],
+    "badInd": [
+      "Trucking",
+      "Auto sales",
+      "Lawyers",
+      "Non-profit",
+      "Solar"
+    ],
+    "pref": true,
+    "note": ""
+  },
+  {
+    "tier": "1B",
+    "name": "Wall Street",
+    "emails": [
+      "ISO@wallfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Mike",
+        "p": "516-780-5194"
+      }
+    ],
+    "maxPos": 2,
+    "minCr": 600,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "TX"
+    ],
+    "good": [],
+    "badInd": [
+      "Non profit",
+      "collections",
+      "casino",
+      "finance",
+      "jewelry",
+      "adult entertainment",
+      "check cashing",
+      "firearms",
+      "staffing"
+    ],
+    "pref": false,
+    "note": "will buyout a 2nd"
+  },
+  {
+    "tier": "LD",
+    "name": "Capybara",
+    "emails": [
+      "deals@capybarausa.com",
+      "cbianco@capybarausa.com"
+    ],
+    "contacts": [
+      {
+        "n": "Doug",
+        "p": "(347) 680-0293"
+      }
+    ],
+    "maxPos": 2,
+    "minCr": 600,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "CA",
+      "TX"
+    ],
+    "good": [],
+    "badInd": [
+      "Auto sales"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "LD",
+    "name": "Cedar",
+    "emails": [
+      "andrew@cedaradvance.com",
+      "simon@cedaradvance.com"
+    ],
+    "contacts": [],
+    "maxPos": 2,
+    "minCr": 600,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "CA"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "LD",
+    "name": "Legend",
+    "emails": [
+      "Apps@legendfunding.com",
+      "dcaro@legendfunding.com"
+    ],
+    "contacts": [],
+    "maxPos": 2,
+    "minCr": 490,
+    "maxNSF": 5,
+    "minRev": 20000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Adult entertainment",
+      "Gambling",
+      "Auto sales",
+      "Bail bonds",
+      "Check cashing",
+      "Financial services",
+      "Travel agencies",
+      "Law firms",
+      "Pawn shops",
+      "Publicly traded",
+      "Religious organazations",
+      "Collection agencies"
+    ],
+    "pref": false,
+    "note": "will buyout a 2nd, 3rd"
+  },
+  {
+    "tier": "LD",
+    "name": "LG",
+    "emails": [
+      "JJ@lgfunding.com",
+      "submissions@lgfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "JJ",
+        "p": "(212) 444-9859"
+      }
+    ],
+    "maxPos": 2,
+    "minCr": 600,
+    "maxNSF": 5,
+    "minRev": 500000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": true,
+    "note": ""
+  },
+  {
+    "tier": "LD",
+    "name": "Newco",
+    "emails": [
+      "submissions@newcocapitalgroup.com",
+      "Rebekah@newcocapitalgroup.com",
+      "sara@newcocapitalgroup.com"
+    ],
+    "contacts": [
+      {
+        "n": "LOC",
+        "p": "(914) 407-3225"
+      }
+    ],
+    "maxPos": 3,
+    "minCr": 0,
+    "maxNSF": 3,
+    "minRev": 500000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "LD",
+    "name": "Path2Cap",
+    "emails": [
+      "submissions@path2cap.com"
+    ],
+    "contacts": [
+      {
+        "n": "AZ",
+        "p": "(347) 295-9537"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 600,
+    "maxNSF": 5,
+    "minRev": 500000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": true,
+    "note": ""
+  },
+  {
+    "tier": "LD",
+    "name": "Prosperity",
+    "emails": [
+      "uw@prosperityfundinggroup.com"
+    ],
+    "contacts": [
+      {
+        "n": "Danni",
+        "p": "(917) 618-1735"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 600,
+    "maxNSF": 5,
+    "minRev": 500000,
+    "bad": [
+      "TX"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": true,
+    "note": ""
+  },
+  {
+    "tier": "LD",
+    "name": "Reliance",
+    "emails": [
+      "uw@reliancef.com",
+      "carl@reliancef.com"
+    ],
+    "contacts": [
+      {
+        "n": "Carl",
+        "p": "(773) 717-6630"
+      }
+    ],
+    "maxPos": 2,
+    "minCr": 600,
+    "maxNSF": 5,
+    "minRev": 100000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "LD",
+    "name": "Square",
+    "emails": [
+      "uw@squareadvance.com",
+      "elliot@squareadvance.com"
+    ],
+    "contacts": [
+      {
+        "n": "Zack",
+        "p": "(216) 372-5175"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 600,
+    "maxNSF": 5,
+    "minRev": 500000,
+    "bad": [
+      "TX"
+    ],
+    "good": [],
+    "badInd": [
+      "Solar"
+    ],
+    "pref": true,
+    "note": ""
+  },
+  {
+    "tier": "LD",
+    "name": "Trupath",
+    "emails": [
+      "submissions@trupathlend.com",
+      "irving@trupathlend.com"
+    ],
+    "contacts": [
+      {
+        "n": "Irving",
+        "p": "(718) 316-6894"
+      }
+    ],
+    "maxPos": 2,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [
+      "TX"
+    ],
+    "badInd": [
+      "Auto sales",
+      "Solar",
+      "Bail bonds"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "LD",
+    "name": "Ufs",
+    "emails": [
+      "irving@ufsfunding.com",
+      "subs@ufsfunding.com",
+      "autosubs@ufsfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Irving",
+        "p": "(718) 316-6894"
+      }
+    ],
+    "maxPos": 2,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "CA",
+      "TX",
+      "NY"
+    ],
+    "good": [],
+    "badInd": [
+      "Auto sales",
+      "Solar",
+      "Bail bonds"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "LD",
+    "name": "Velocity",
+    "emails": [
+      "Yitz@velocitycg.com",
+      "carlosbrown@velocitycg.com",
+      "subs@velocitycg.com"
+    ],
+    "contacts": [
+      {
+        "n": "Yitz",
+        "p": "(954) 553-1977"
+      }
+    ],
+    "maxPos": 2,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Auto sales"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "LD",
+    "name": "W Funding",
+    "emails": [
+      "uw@wfundinggroup.com"
+    ],
+    "contacts": [],
+    "maxPos": 99,
+    "minCr": 600,
+    "maxNSF": 5,
+    "minRev": 500000,
+    "bad": [],
+    "good": [
+      "TX"
+    ],
+    "badInd": [],
+    "pref": true,
+    "note": ""
+  },
+  {
+    "tier": "LD",
+    "name": "Wall Street",
+    "emails": [
+      "ISO@wallfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Mike",
+        "p": "516-780-5194"
+      }
+    ],
+    "maxPos": 2,
+    "minCr": 600,
+    "maxNSF": 3,
+    "minRev": 500000,
+    "bad": [
+      "TX"
+    ],
+    "good": [],
+    "badInd": [
+      "Trucking"
+    ],
+    "pref": false,
+    "note": "will buyout a 2nd"
+  },
+  {
+    "tier": "2A",
+    "name": "Aurum",
+    "emails": [
+      "subs@aurumfundingsource.com",
+      "submissions@path2cap.com"
+    ],
+    "contacts": [
+      {
+        "n": "Aron",
+        "p": "(908) 864-2532"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [
+      "CA",
+      "NY"
+    ],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "2A",
+    "name": "FinTap",
+    "emails": [
+      "submissions@fintap.com",
+      "asharaby@fintap.com"
+    ],
+    "contacts": [
+      {
+        "n": "Avraham",
+        "p": "(443) 416-2765"
+      }
+    ],
+    "maxPos": 4,
+    "minCr": 600,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": true,
+    "note": "will buyout a 2nd, 3rd, and 4th"
+  },
+  {
+    "tier": "2A",
+    "name": "Funding Futures",
+    "emails": [
+      "deals@mcadeals.com"
+    ],
+    "contacts": [
+      {
+        "n": "Isaac",
+        "p": "(516) 320-8393"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "TX",
+      "NY"
+    ],
+    "good": [],
+    "badInd": [
+      "Cannabis",
+      "Bail bonds",
+      "Trucking",
+      "Farming",
+      "Investments",
+      "Auto Sales"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "2A",
+    "name": "LG",
+    "emails": [
+      "JJ@lgfunding.com",
+      "submissions@lgfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "JJ",
+        "p": "(212) 444-9859"
+      }
+    ],
+    "maxPos": 3,
+    "minCr": 600,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": true,
+    "note": ""
+  },
+  {
+    "tier": "2A",
+    "name": "Path2Cap",
+    "emails": [
+      "submissions@path2cap.com"
+    ],
+    "contacts": [
+      {
+        "n": "AZ",
+        "p": "(347) 295-9537"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "CA",
+      "NY"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": true,
+    "note": ""
+  },
+  {
+    "tier": "2A",
+    "name": "Prosperity",
+    "emails": [
+      "uw@prosperityfundinggroup.com"
+    ],
+    "contacts": [
+      {
+        "n": "Danni",
+        "p": "(917) 618-1735"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": true,
+    "note": ""
+  },
+  {
+    "tier": "2A",
+    "name": "Square",
+    "emails": [
+      "uw@squareadvance.com",
+      "elliot@squareadvance.com"
+    ],
+    "contacts": [
+      {
+        "n": "Zack",
+        "p": "(216) 372-5175"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "TX"
+    ],
+    "good": [],
+    "badInd": [
+      "Solar"
+    ],
+    "pref": true,
+    "note": ""
+  },
+  {
+    "tier": "2A",
+    "name": "Trupath",
+    "emails": [
+      "submissions@trupathlend.com",
+      "irving@trupathlend.com"
+    ],
+    "contacts": [
+      {
+        "n": "Irving",
+        "p": "(718) 316-6894"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [
+      "TX"
+    ],
+    "badInd": [
+      "Auto sales",
+      "Solar",
+      "Bail bonds"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "2A",
+    "name": "UFS",
+    "emails": [
+      "irving@ufsfunding.com",
+      "subs@ufsfunding.com",
+      "autosubs@ufsfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Irving",
+        "p": "(718) 316-6894"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "CA",
+      "TX",
+      "NY"
+    ],
+    "good": [],
+    "badInd": [
+      "Auto sales",
+      "Solar",
+      "Bail bonds"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "2A",
+    "name": "W funding",
+    "emails": [
+      "uw@wfundinggroup.com"
+    ],
+    "contacts": [],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [
+      "TX"
+    ],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3A",
+    "name": "Avion",
+    "emails": [
+      "uw@avionfunding.com",
+      "michael@avionfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Rob",
+        "p": "(848) 245-6373"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "UT",
+      "VA"
+    ],
+    "good": [],
+    "badInd": [
+      "Auto sales"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3A",
+    "name": "BizFund",
+    "emails": [
+      "steven.g@bizfund.com"
+    ],
+    "contacts": [
+      {
+        "n": "Steven",
+        "p": "(646) 915-6365"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Trucking"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3A",
+    "name": "Dependance",
+    "emails": [
+      "uw@dependancep.com"
+    ],
+    "contacts": [
+      {
+        "n": "Mark",
+        "p": "(347) 992-6954"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "TX"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3A",
+    "name": "Dlp",
+    "emails": [
+      "Submissions@dlpfunding.com",
+      "sara@dlpfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Sara",
+        "p": "(619) 386-5369"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "VA",
+      "UT",
+      "TX"
+    ],
+    "good": [],
+    "badInd": [
+      "Trucking",
+      "Auto sales"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3A",
+    "name": "Forest",
+    "emails": [
+      "steve@forestcapitalgrp.com"
+    ],
+    "contacts": [
+      {
+        "n": "Steve",
+        "p": "(718) 869-4400"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3A",
+    "name": "Merk",
+    "emails": [
+      "Nathan@merkfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Nathan",
+        "p": "(917) 789-2998"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "VA",
+      "HI"
+    ],
+    "good": [],
+    "badInd": [
+      "Law Firms",
+      "Auto Sales",
+      "Factored Trucking",
+      "Cannabis",
+      "Non-Profit"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3A",
+    "name": "Pinnacle",
+    "emails": [
+      "submissions@pbffunding.com",
+      "jamesk@pbffunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "James",
+        "p": "(443) 769-5489"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "CA",
+      "UT"
+    ],
+    "good": [],
+    "badInd": [
+      "Cannabis",
+      "Auto sales"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3A",
+    "name": "Reliance",
+    "emails": [
+      "uw@reliancef.com",
+      "carl@reliancef.com"
+    ],
+    "contacts": [
+      {
+        "n": "Carl",
+        "p": "(773) 717-6630"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 100000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3A",
+    "name": "Shine",
+    "emails": [
+      "saul@shinecapitalgroup.com"
+    ],
+    "contacts": [
+      {
+        "n": "Saul",
+        "p": "(732) 688-8889"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Auto sales"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3A",
+    "name": "Swift",
+    "emails": [
+      "submissions@swiftfundingsource.com",
+      "hal@swiftfundingsource.com"
+    ],
+    "contacts": [
+      {
+        "n": "Hal",
+        "p": "732-962-2509"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Trucking"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3A",
+    "name": "Velocity",
+    "emails": [
+      "Yitz@velocitycg.com",
+      "carlosbrown@velocitycg.com",
+      "subs@velocitycg.com"
+    ],
+    "contacts": [
+      {
+        "n": "Yitz",
+        "p": "(954) 553-1977"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Auto sales"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3B",
+    "name": "Cashflow",
+    "emails": [
+      "Subs@cflowcapital.com",
+      "Abe@cflowcapital.com"
+    ],
+    "contacts": [],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 0,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3B",
+    "name": "Epic",
+    "emails": [
+      "Subs@epic-advance.com",
+      "mark@epic-advance.com"
+    ],
+    "contacts": [
+      {
+        "n": "Mark",
+        "p": "(647) 864-9397"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Auto sales"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3B",
+    "name": "Guardian",
+    "emails": [
+      "uw@guardiancapitalgrp.com"
+    ],
+    "contacts": [],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 40000,
+    "bad": [
+      "ND"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3B",
+    "name": "Highland Hill",
+    "emails": [
+      "Submissions@highlandhillcap.com",
+      "Brendan@highlandhillcap.com"
+    ],
+    "contacts": [
+      {
+        "n": "Brendan",
+        "p": "(412) 897-2929"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "CA",
+      "VA",
+      "TX"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3B",
+    "name": "Lotus",
+    "emails": [
+      "subs@lotusfundinggrp.com"
+    ],
+    "contacts": [],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "TX",
+      "NY",
+      "CA"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3B",
+    "name": "Meged",
+    "emails": [
+      "subs@megedfunding.com",
+      "abe@megedfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Dave",
+        "p": "(732) 730-4556"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "PR"
+    ],
+    "good": [],
+    "badInd": [
+      "Auto sales",
+      "Check Cashing"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "3B",
+    "name": "Mynt",
+    "emails": [
+      "uw@myntadvance.com",
+      "iso@myntadvance.com"
+    ],
+    "contacts": [
+      {
+        "n": "Brianna",
+        "p": "(646) 248-3303"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 50000,
+    "bad": [
+      "TX"
+    ],
+    "good": [],
+    "badInd": [
+      "Auto sales",
+      "Trucking"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "HR",
+    "name": "Barclays",
+    "emails": [
+      "Deals@barclaysadvance.com",
+      "Alex@barclaysadvance.com"
+    ],
+    "contacts": [
+      {
+        "n": "Arieh",
+        "p": "(954) 461-3396"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 99,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Casino",
+      "Law",
+      "Finance"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "HR",
+    "name": "bmt",
+    "emails": [
+      "meir@bmtcapitalgroup.com",
+      "admin@bmtcapitalgroup.com"
+    ],
+    "contacts": [
+      {
+        "n": "Meir",
+        "p": "(973) 405-7381"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 99,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "HR",
+    "name": "Diesel",
+    "emails": [
+      "submissions@dieselfunding.com"
+    ],
+    "contacts": [],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 99,
+    "minRev": 25000,
+    "bad": [
+      "CA",
+      "NY",
+      "UT",
+      "VA"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "HR",
+    "name": "eminent",
+    "emails": [
+      "alex@eminentfunding.com",
+      "deals@eminentfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Alex",
+        "p": "(332) 900-1005"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 99,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "HR",
+    "name": "Fundpro",
+    "emails": [
+      "barnie@fundprollc.com"
+    ],
+    "contacts": [
+      {
+        "n": "Barney",
+        "p": "(773) 510-9183"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 99,
+    "minRev": 75000,
+    "bad": [
+      "NY",
+      "UT",
+      "CT",
+      "PR"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "HR",
+    "name": "High Octane",
+    "emails": [
+      "submissions@highoctanefunding.com"
+    ],
+    "contacts": [],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 99,
+    "minRev": 25000,
+    "bad": [],
+    "good": [
+      "CA",
+      "NY",
+      "UT",
+      "VA"
+    ],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "HR",
+    "name": "Hightower",
+    "emails": [
+      "submissions@hightowercapitalgrp.com"
+    ],
+    "contacts": [
+      {
+        "n": "Steve",
+        "p": "(201) 424-9566"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 99,
+    "minRev": 25000,
+    "bad": [
+      "TX"
+    ],
+    "good": [],
+    "badInd": [
+      "Trucking"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "HR",
+    "name": "Jw capital",
+    "emails": [
+      "Subs@jwcapitalsource.com"
+    ],
+    "contacts": [
+      {
+        "n": "Josh",
+        "p": "(848) 261-1400"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 99,
+    "minRev": 25000,
+    "bad": [
+      "TX"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "HR",
+    "name": "Major Capital",
+    "emails": [
+      "admin@majorcapitalfund.com"
+    ],
+    "contacts": [
+      {
+        "n": "Meir",
+        "p": "(718) 770-7273"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 99,
+    "minRev": 50000,
+    "bad": [
+      "CA",
+      "TX"
+    ],
+    "good": [],
+    "badInd": [
+      "Law firms",
+      "Legal services",
+      "Auto sales"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "HR",
+    "name": "mny",
+    "emails": [
+      "subs@mnycapital.com",
+      "jacob@mnycapital.com"
+    ],
+    "contacts": [
+      {
+        "n": "Jacob",
+        "p": "(646) 598-9380"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 99,
+    "minRev": 25000,
+    "bad": [
+      "HI",
+      "PR",
+      "TX"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "HR",
+    "name": "Ultra",
+    "emails": [
+      "underwriting@ultra-funding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Manny",
+        "p": "(631) 552-6050"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 99,
+    "minRev": 25000,
+    "bad": [
+      "TX",
+      "NY",
+      "CA",
+      "ND"
+    ],
+    "good": [],
+    "badInd": [
+      "Cannabis"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "HR",
+    "name": "wynwood",
+    "emails": [
+      "submissions@wynwoodcapitalgroup.com",
+      "joe@wynwoodcapitalgroup.com"
+    ],
+    "contacts": [
+      {
+        "n": "Josh",
+        "p": "(347) 930-7108"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 99,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "RA",
+    "name": "GFE",
+    "emails": [
+      "underwriting@globalfundingexperts.com",
+      "Matt@ezrevenuefinance.com",
+      "underwriting@ezrevenuefinance.com"
+    ],
+    "contacts": [
+      {
+        "n": "Matt",
+        "p": "718-905-9228"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "HI",
+      "PR"
+    ],
+    "good": [],
+    "badInd": [
+      "Bail Bond Services",
+      "Check Cashing",
+      "Debt Collection Agencies",
+      "Transportation",
+      "Auto sales"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "RA",
+    "name": "Highland Hill",
+    "emails": [
+      "Submissions@highlandhillcap.com",
+      "Brendan@highlandhillcap.com"
+    ],
+    "contacts": [
+      {
+        "n": "Brendan",
+        "p": "(412) 897-2929"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "CA",
+      "VA",
+      "TX"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "RA",
+    "name": "Nexi",
+    "emails": [
+      "submissions@GoNexi.com",
+      "dean@gonexi.com"
+    ],
+    "contacts": [
+      {
+        "n": "Dean",
+        "p": "(305) 987-8447"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "No trucking",
+      "Nail salons",
+      "Strip clubs",
+      "Cannabis",
+      "Auto sales",
+      "Bail bonds"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "RB",
+    "name": "Diesel",
+    "emails": [
+      "submissions@dieselfunding.com"
+    ],
+    "contacts": [],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "CA",
+      "NY",
+      "UT",
+      "VA"
+    ],
+    "good": [],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "RB",
+    "name": "DLP",
+    "emails": [
+      "Submissions@dlpfunding.com",
+      "sara@dlpfunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Sara",
+        "p": "(619) 386-5369"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [
+      "VA",
+      "UT",
+      "TX"
+    ],
+    "good": [],
+    "badInd": [
+      "Trucking",
+      "Auto sales"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "RB",
+    "name": "High Octane",
+    "emails": [
+      "submissions@highoctanefunding.com"
+    ],
+    "contacts": [],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [
+      "CA",
+      "NY",
+      "UT",
+      "VA"
+    ],
+    "badInd": [],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "RB",
+    "name": "QFS",
+    "emails": [
+      "josh@qfscapital.com",
+      "submissions@qfscapital.com"
+    ],
+    "contacts": [
+      {
+        "n": "Josh",
+        "p": "(754) 946-4888"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 5,
+    "minRev": 25000,
+    "bad": [],
+    "good": [],
+    "badInd": [
+      "Auto sales",
+      "Lawyers",
+      "Jewelry"
+    ],
+    "pref": false,
+    "note": ""
+  },
+  {
+    "tier": "RB",
+    "name": "Silverline",
+    "emails": [
+      "submissions@silverlinefunding.com",
+      "contracts@silverlinefunding.com"
+    ],
+    "contacts": [
+      {
+        "n": "Contact",
+        "p": "(718) 500-3177"
+      }
+    ],
+    "maxPos": 99,
+    "minCr": 0,
+    "maxNSF": 3,
+    "minRev": 25000,
+    "bad": [
+      "HI",
+      "PR",
+      "AK"
+    ],
+    "good": [],
+    "badInd": [
+      "Auto sales",
+      "nail salons",
+      "Digital Marketing"
+    ],
+    "pref": false,
+    "note": ""
+  }
+]
