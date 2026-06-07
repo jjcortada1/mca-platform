@@ -348,6 +348,45 @@ export const submissions = pgTable(
   (t) => ({ companyIdx: index('submissions_company_idx').on(t.companyId) })
 );
 
+/**
+ * Multi-offer tracking per deal. One deal can collect many offers from
+ * different funders / iterations; the rep can mark one as "accepted" which
+ * makes it the canonical offer for funding-detail display elsewhere.
+ *
+ * Backward-compatible with the legacy single-offer columns on `deals`
+ * (offerAmount, offerNotes) — those stay; new code prefers this table when
+ * any rows exist, and falls back to the legacy columns otherwise.
+ */
+export const dealOffers = pgTable(
+  'deal_offers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    dealId: uuid('deal_id').notNull().references(() => deals.id, { onDelete: 'cascade' }),
+    // All money/numeric fields nullable so partial offers can be saved as
+    // they come in (some funders send factor + term first, then payment).
+    fundingAmount: numeric('funding_amount', { precision: 14, scale: 2 }),
+    factorRate: numeric('factor_rate', { precision: 6, scale: 4 }),
+    // Term — independent count + mode so a 90-day daily deal vs 12-week deal
+    // both store cleanly. termMode: 'days' | 'weeks' | 'months'.
+    termCount: integer('term_count'),
+    termMode: varchar('term_mode', { length: 16 }),
+    fees: numeric('fees', { precision: 14, scale: 2 }),
+    paymentAmount: numeric('payment_amount', { precision: 14, scale: 2 }),
+    // Free-text per-offer notes (e.g. "Yellowstone, $5k commission, 2nd position OK")
+    notes: text('notes'),
+    // Which funder sent this offer (optional — may be entered before tagging)
+    funderId: uuid('funder_id').references(() => funders.id, { onDelete: 'set null' }),
+    // The rep can mark one offer as accepted. The deal's legacy offer fields
+    // get auto-updated from this row so existing dashboards keep working.
+    isAccepted: boolean('is_accepted').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    dealIdx: index('deal_offers_deal_idx').on(t.dealId),
+  })
+);
+
 export const submissionFunders = pgTable(
   'submission_funders',
   {

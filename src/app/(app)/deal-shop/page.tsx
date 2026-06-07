@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Card, CardContent, Badge, PageHeader, Field } from '@/components/ui/primitives';
 import { US_STATES } from '@/lib/constants';
 import { Send, ChevronDown, ChevronRight, Mail, Phone, MapPin, Ban, FileText, Zap, Search } from 'lucide-react';
@@ -49,6 +49,12 @@ interface MatchOption {
 
 export default function DealShopPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // If the user came from /active-deals → "Shop this deal", we get a deal id
+  // in the URL. Used to pull existing submissions for the deal so we can
+  // surface them as an "Already Submitted" bucket and mark recommended
+  // funders that have already seen this file.
+  const dealId = searchParams?.get('dealId') ?? null;
 
   // Editable options loaded from server
   const [creditRanges, setCreditRanges] = useState<MatchOption[]>([]);
@@ -73,6 +79,31 @@ export default function DealShopPage() {
   const [activeTier, setActiveTier] = useState<string>('all');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedFunders, setSelectedFunders] = useState<Set<string>>(new Set());
+
+  // Already-submitted funders for the current deal (loaded only if dealId present).
+  // Map: funderId → { status, submittedAt } — keyed by funder so we can do O(1)
+  // lookups while rendering the recommended/excluded buckets.
+  const [alreadySubmitted, setAlreadySubmitted] = useState<Map<string, { funderName: string; status: string; submittedAt: string }>>(new Map());
+
+  // Pull this deal's existing submissions when dealId param is present.
+  // No-op (empty map) when the user navigates to /deal-shop directly without
+  // a deal context — the "Already Submitted" bucket simply doesn't render.
+  useEffect(() => {
+    if (!dealId) {
+      setAlreadySubmitted(new Map());
+      return;
+    }
+    fetch(`/api/deals/${dealId}/submissions`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => {
+        const m = new Map<string, { funderName: string; status: string; submittedAt: string }>();
+        for (const s of (j.data ?? [])) {
+          m.set(s.funderId, { funderName: s.funderName, status: s.status, submittedAt: s.submittedAt });
+        }
+        setAlreadySubmitted(m);
+      })
+      .catch(() => setAlreadySubmitted(new Map()));
+  }, [dealId]);
 
   // Load match options + funder details once
   useEffect(() => {
@@ -414,6 +445,50 @@ export default function DealShopPage() {
 
               {/* Results table */}
               <div className="space-y-4 min-w-0">
+                {/* Already-submitted bucket — only when the user navigated
+                    here with a deal context (?dealId=). Shows EVERY funder
+                    this deal has already been sent to so the user doesn't
+                    accidentally re-shop the same funder. Server-side dedupe
+                    still applies as a backstop. */}
+                {dealId && alreadySubmitted.size > 0 && (
+                  <Card className="border-blue-200 bg-blue-50/30">
+                    <CardContent className="p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Send className="h-3.5 w-3.5 text-blue-700" />
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-blue-900">
+                          Already submitted ({alreadySubmitted.size})
+                        </h3>
+                      </div>
+                      <div className="space-y-1">
+                        {Array.from(alreadySubmitted.values())
+                          .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime())
+                          .map((s) => {
+                            // Match the per-funder status look to the rest of the app.
+                            const statusLabel =
+                              s.status === 'approved' ? 'Approved' :
+                              s.status === 'declined' ? 'Declined' :
+                              'Pending';
+                            const statusTone =
+                              s.status === 'approved' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' :
+                              s.status === 'declined' ? 'bg-rose-100 text-rose-800 border-rose-200' :
+                              'bg-amber-100 text-amber-800 border-amber-200';
+                            return (
+                              <div key={s.funderName + s.submittedAt} className="flex items-center justify-between gap-2 text-xs py-1">
+                                <span className="font-medium text-foreground truncate flex-1">{s.funderName}</span>
+                                <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium border', statusTone)}>
+                                  {statusLabel}
+                                </span>
+                                <span className="text-muted-foreground tabular-nums text-[10px] w-20 text-right shrink-0">
+                                  {new Date(s.submittedAt).toLocaleDateString()}
+                                </span>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 {filteredGroups.map((g) => (
                   <div key={g.tier}>
                     {activeTier === 'all' && (
@@ -446,22 +521,34 @@ export default function DealShopPage() {
                               const extraCount = shoppingEmails.length > 1 ? shoppingEmails.length - 1 : 0;
                               const isExpanded = expanded.has(m.funderId);
                               const isSelected = selectedFunders.has(m.funderId);
+                              // Cross-reference against already-submitted list for THIS deal.
+                              // If found, render a small "Already submitted" pill and gray
+                              // the row so the user is much less likely to re-select it.
+                              const sub = alreadySubmitted.get(m.funderId);
                               return (
                                 <>
-                                  <tr key={m.funderId} className={cn('hover:bg-muted/30', isSelected && 'bg-primary/5')}>
+                                  <tr key={m.funderId} className={cn('hover:bg-muted/30', isSelected && 'bg-primary/5', sub && 'opacity-60')}>
                                     <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                                       <input
                                         type="checkbox"
                                         checked={isSelected}
                                         onChange={() => toggleFunderSel(m.funderId)}
                                         className="h-4 w-4 rounded border-border cursor-pointer accent-[var(--primary,#2563eb)]"
-                                        title="Select to shop this funder"
+                                        title={sub ? 'Already submitted to this funder — selecting will be blocked server-side' : 'Select to shop this funder'}
                                       />
                                     </td>
                                     <td className="px-2 py-2.5 cursor-pointer" onClick={() => toggleExpand(m.funderId)}>
                                       <div className="flex items-center gap-2">
                                         <div className="h-2 w-2 rounded-full bg-emerald-500" />
                                         <span className="font-medium">{m.funderName}</span>
+                                        {sub && (
+                                          <span
+                                            className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200"
+                                            title={`Submitted ${new Date(sub.submittedAt).toLocaleDateString()} — status: ${sub.status}`}
+                                          >
+                                            Already sent
+                                          </span>
+                                        )}
                                       </div>
                                     </td>
                                     <td className="px-3 py-2.5 cursor-pointer" onClick={() => toggleExpand(m.funderId)}>

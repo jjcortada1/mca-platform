@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, Button, Input, Field, PageHeader, Badge, MoneyInput } from '@/components/ui/primitives';
 import { formatCurrency, cn } from '@/lib/utils';
-import { Calculator, RotateCcw, Sparkles } from 'lucide-react';
+import { Calculator, RotateCcw, Sparkles, Lock, Unlock } from 'lucide-react';
 
 type Tab = 'fwd' | 'rev';
 type Freq = 'daily' | 'weekly';
@@ -243,6 +243,17 @@ function ReverseCalc() {
   const [termWeeks, setTermWeeks] = useState(20);
   const [autoSync, setAutoSync] = useState(true); // when one slider moves, recalc one of the others
 
+  // Lock controls — when ON, Suggest Clean cannot change that variable.
+  // Per the spec the user can also "lock" Funding Amount and Payment Amount,
+  // which here are the observed `deposit` and `payment` inputs. Locking those
+  // is decorative because Suggest Clean never modifies them anyway — but the
+  // lock toggles still render so the lock UI feels complete.
+  const [lockFactor, setLockFactor] = useState(false);
+  const [lockFee, setLockFee] = useState(false);
+  const [lockTerm, setLockTerm] = useState(false);
+  const [lockDeposit, setLockDeposit] = useState(false);
+  const [lockPayment, setLockPayment] = useState(false);
+
   const dep = deposit === '' ? 0 : deposit;
   const pmt = payment === '' ? 0 : payment;
 
@@ -261,16 +272,36 @@ function ReverseCalc() {
     ? (termBusinessDays > 0 ? predictedPayback / termBusinessDays : 0)
     : (termWeeks > 0 ? predictedPayback / termWeeks : 0);
 
-  // Match quality — purely how closely THIS structure reproduces the observed
-  // payment for the given deposit. A structure that exactly recreates the funded
-  // deal scores 100, regardless of whether the factor/fee/term are "round".
-  // (Roundness is only used to *suggest* candidates, never to score them.)
-  const cleanScore = useMemo(() => {
+  // Match Quality — payment-driven per spec. Payment accuracy is dominant
+  // (90% of the score); funding-amount roundness/realism contributes the
+  // remaining 10%. Other variables (factor/term/fee) feed INTO the payment
+  // calculation so they're implicitly weighted via their effect on the
+  // predicted payment — no need to score them separately.
+  //
+  // Heavily penalize large payment variance per spec: if predicted payment
+  // is more than 5% off entered, the score drops fast (no chance of showing
+  // "Strong" when the structure clearly doesn't reproduce the observed payment).
+  const matchDetail = useMemo(() => {
     if (!dep || !pmt) return null;
-    const paymentDelta = pmt > 0 ? Math.abs(predictedPaymentAmount - pmt) / pmt : 1;
-    const score = Math.max(0, 100 - paymentDelta * 100);
-    return Math.round(score);
-  }, [dep, pmt, predictedPaymentAmount]);
+    const dollarDiff = predictedPaymentAmount - pmt;
+    const pctDiff = pmt > 0 ? (dollarDiff / pmt) * 100 : 0;
+    const absPct = Math.abs(pctDiff);
+    // Steep payment-driven score: exact match = 100; 5% off ≈ 75;
+    // 10% off ≈ 50; 25% off ≈ 0. Power curve so small errors are
+    // visible but the score collapses fast for big errors.
+    let paymentScore: number;
+    if (absPct <= 0.5) paymentScore = 100;
+    else if (absPct >= 25) paymentScore = 0;
+    else paymentScore = Math.max(0, 100 - Math.pow(absPct / 5, 1.4) * 25);
+    // Funding realism (round numbers — 10% weight).
+    const nearest10k = Math.round(estFunded / 10000) * 10000;
+    const fundingDelta = estFunded > 0 ? Math.abs(estFunded - nearest10k) / estFunded : 1;
+    const fundingScore = fundingDelta < 0.01 ? 100 : fundingDelta < 0.025 ? 90 : fundingDelta < 0.05 ? 75 : 60;
+    const score = Math.round(paymentScore * 0.9 + fundingScore * 0.1);
+    return { score, dollarDiff, pctDiff, paymentScore: Math.round(paymentScore) };
+  }, [dep, pmt, predictedPaymentAmount, estFunded]);
+
+  const cleanScore = matchDetail?.score ?? null;
 
   // When user changes deposit/payment, try to find a sensible default
   useEffect(() => {
@@ -334,10 +365,13 @@ function ReverseCalc() {
 
   function snapToClean() {
     if (!dep || !pmt) return;
-    // Candidate structures: common fees first (2/3/5/7/10), common factors + terms.
-    const cleanFactors = [1.25, 1.30, 1.35, 1.40, 1.45, 1.49, 1.50];
-    const cleanFees = [2, 3, 5, 7, 10, 12, 15];
-    const cleanTerms = [10, 12, 16, 20, 24, 30, 40, 52];
+    // Candidate space: when a variable is locked, the candidate list for that
+    // variable becomes a single-element array containing the current value.
+    // This guarantees Suggest Clean cannot change a locked field while still
+    // letting it optimize whatever is unlocked.
+    const cleanFactors = lockFactor ? [factorRate] : [1.25, 1.30, 1.35, 1.40, 1.45, 1.49, 1.50];
+    const cleanFees = lockFee ? [feePct] : [2, 3, 5, 7, 10, 12, 15];
+    const cleanTerms = lockTerm ? [termWeeks] : [10, 12, 16, 20, 24, 30, 40, 52];
 
     const candidates: { factor: number; fee: number; termWeeks: number; score: number; predictedPayment: number; impliedFunded: number; rank: number }[] = [];
     for (const factor of cleanFactors) {
@@ -345,7 +379,9 @@ function ReverseCalc() {
         for (const t of cleanTerms) {
           const s = scoreStructure(factor, fee, t);
           // Only keep structures that reproduce the payment reasonably well.
-          if (s.score < 80) continue;
+          // Lower threshold when variables are locked (fewer candidates exist).
+          const minScore = (lockFactor || lockFee || lockTerm) ? 60 : 80;
+          if (s.score < minScore) continue;
           // Final rank = payment accuracy + realism (round funded + common fee).
           const rank = s.score + roundnessBonus(s.impliedFunded) + (FEE_PRIORITY[fee] ?? 0);
           candidates.push({ factor, fee, termWeeks: t, ...s, rank });
@@ -362,9 +398,10 @@ function ReverseCalc() {
     }
     setSuggestions(top.map(({ factor, fee, termWeeks, score, predictedPayment, impliedFunded }) => ({ factor, fee, termWeeks, score, predictedPayment, impliedFunded })));
     if (top[0]) {
-      setFactorRate(top[0].factor);
-      setFeePct(top[0].fee);
-      setTermWeeks(top[0].termWeeks);
+      // Only apply changes to UNLOCKED variables — locked stays put.
+      if (!lockFactor) setFactorRate(top[0].factor);
+      if (!lockFee) setFeePct(top[0].fee);
+      if (!lockTerm) setTermWeeks(top[0].termWeeks);
     }
   }
 
@@ -391,23 +428,33 @@ function ReverseCalc() {
               Enter what you can see — the bank deposit and the payment going out. Then adjust the sliders to find the most likely MCA structure.
             </div>
 
-            <Field label="Deposit seen" hint="Net wired to merchant">
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                Deposit seen
+                <LockToggle locked={lockDeposit} onToggle={() => setLockDeposit((v) => !v)} title="Lock funding amount" />
+              </div>
               <MoneyInput
                 value={deposit}
                 onValueChange={setDeposit}
                 decimals={2}
                 placeholder="95,000.00"
               />
-            </Field>
+              <div className="text-xs text-muted-foreground">Net wired to merchant</div>
+            </div>
 
-            <Field label="Payment amount" hint={`Per ${freq === 'daily' ? 'business day' : 'week'}`}>
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                Payment amount
+                <LockToggle locked={lockPayment} onToggle={() => setLockPayment((v) => !v)} title="Lock payment amount" />
+              </div>
               <MoneyInput
                 value={payment}
                 onValueChange={setPayment}
                 decimals={2}
                 placeholder={freq === 'daily' ? '710.00' : '3,550.00'}
               />
-            </Field>
+              <div className="text-xs text-muted-foreground">Per {freq === 'daily' ? 'business day' : 'week'}</div>
+            </div>
 
             <Field label="Payment frequency">
               <div className="grid grid-cols-2 gap-2">
@@ -477,38 +524,59 @@ function ReverseCalc() {
               </div>
             )}
 
-            <Slider
-              label="Factor rate"
-              value={factorRate}
-              min={1.10}
-              max={1.55}
-              step={0.005}
-              onChange={setFactorRate}
-              format={(v) => v.toFixed(3)}
-              cleanValues={[1.30, 1.35, 1.40, 1.45, 1.49]}
-            />
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium text-muted-foreground">Factor rate</div>
+                <LockToggle locked={lockFactor} onToggle={() => setLockFactor((v) => !v)} title="Lock factor rate" />
+              </div>
+              <Slider
+                label=""
+                value={factorRate}
+                min={1.10}
+                max={1.55}
+                step={0.005}
+                onChange={setFactorRate}
+                format={(v) => v.toFixed(3)}
+                cleanValues={[1.30, 1.35, 1.40, 1.45, 1.49]}
+                disabled={lockFactor}
+              />
+            </div>
 
-            <Slider
-              label="Origination fee %"
-              value={feePct}
-              min={0}
-              max={15}
-              step={0.5}
-              onChange={setFeePct}
-              format={(v) => `${v.toFixed(1)}%`}
-              cleanValues={[3, 5, 7, 10]}
-            />
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium text-muted-foreground">Origination fee %</div>
+                <LockToggle locked={lockFee} onToggle={() => setLockFee((v) => !v)} title="Lock origination fee" />
+              </div>
+              <Slider
+                label=""
+                value={feePct}
+                min={0}
+                max={15}
+                step={0.5}
+                onChange={setFeePct}
+                format={(v) => `${v.toFixed(1)}%`}
+                cleanValues={[3, 5, 7, 10]}
+                disabled={lockFee}
+              />
+            </div>
 
-            <Slider
-              label="Term (weeks)"
-              value={termWeeks}
-              min={4}
-              max={60}
-              step={1}
-              onChange={setTermWeeks}
-              format={(v) => `${v} wks (${v * BUSINESS_DAYS_PER_WEEK} days)`}
-              cleanValues={[10, 12, 16, 20, 24, 30, 40]}
-            />
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium text-muted-foreground">Term (weeks)</div>
+                <LockToggle locked={lockTerm} onToggle={() => setLockTerm((v) => !v)} title="Lock term" />
+              </div>
+              <Slider
+                label=""
+                value={termWeeks}
+                min={4}
+                max={60}
+                step={1}
+                onChange={setTermWeeks}
+                format={(v) => `${v} wks (${v * BUSINESS_DAYS_PER_WEEK} days)`}
+                cleanValues={[10, 12, 16, 20, 24, 30, 40]}
+                disabled={lockTerm}
+              />
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -541,22 +609,65 @@ function ReverseCalc() {
           </CardContent>
         </Card>
 
-        {/* Match quality detail */}
-        {cleanScore !== null && pmt > 0 && (
+        {/* Match quality detail — explicit entered vs calculated breakdown */}
+        {cleanScore !== null && pmt > 0 && matchDetail && (
           <Card>
-            <CardContent className="p-4 space-y-2 text-xs">
-              <div className="text-sm font-semibold mb-1">Match assessment</div>
+            <CardContent className="p-4 space-y-3 text-xs">
+              <div className="text-sm font-semibold">Match assessment</div>
+
+              {/* Payment-by-payment comparison. This is the dominant driver
+                  of Match Quality per spec — large variance here forces a
+                  low score even if other variables look reasonable. */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded border border-border p-2">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Entered payment</div>
+                  <div className="text-sm font-semibold tabular-nums">{formatCurrency(pmt)}</div>
+                  <div className="text-[10px] text-muted-foreground">
+                    per {freq === 'daily' ? 'business day' : 'week'}
+                  </div>
+                </div>
+                <div className="rounded border border-border p-2">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Calculated payment</div>
+                  <div className="text-sm font-semibold tabular-nums">{formatCurrency(predictedPaymentAmount)}</div>
+                  <div className="text-[10px] text-muted-foreground">
+                    from factor × funded ÷ term
+                  </div>
+                </div>
+              </div>
+
+              {/* Explicit $ + % difference. Sign preserved so user can see
+                  whether the structure over- or under-pays vs reality. */}
+              <div className="flex items-center justify-between gap-3 rounded border border-border p-2">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Difference</div>
+                  <div className={cn(
+                    'text-sm font-semibold tabular-nums',
+                    Math.abs(matchDetail.pctDiff) < 1 ? 'text-emerald-700'
+                      : Math.abs(matchDetail.pctDiff) < 5 ? 'text-foreground'
+                      : Math.abs(matchDetail.pctDiff) < 15 ? 'text-amber-700'
+                      : 'text-rose-700'
+                  )}>
+                    {matchDetail.dollarDiff >= 0 ? '+' : ''}{formatCurrency(matchDetail.dollarDiff)}
+                    {' '}({matchDetail.pctDiff >= 0 ? '+' : ''}{matchDetail.pctDiff.toFixed(1)}%)
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Match score</div>
+                  <div className="text-lg font-bold tabular-nums">{cleanScore}<span className="text-xs text-muted-foreground">/100</span></div>
+                </div>
+              </div>
+
               {cleanScore >= 75 ? (
                 <div className="text-emerald-700">
-                  ✓ Strong match — predicted payment is close to observed and assumptions are clean MCA values.
+                  ✓ Strong match — predicted payment is close to entered and assumptions are clean MCA values.
                 </div>
               ) : cleanScore >= 50 ? (
                 <div className="text-amber-700">
-                  ~ Plausible match — try adjusting the sliders or click <strong>Snap to clean</strong> to find a more typical structure.
+                  ~ Plausible match — adjust the sliders or click <strong>Snap to clean</strong> for a more typical structure.
                 </div>
               ) : (
                 <div className="text-rose-700">
-                  ✗ Weak match — the predicted payment is far from observed. Try a different factor rate, term, or fee%.
+                  ✗ Weak match — predicted payment is far from entered. Try a different factor rate, term, or fee%.
                 </div>
               )}
             </CardContent>
@@ -625,6 +736,7 @@ function Slider({
   onChange,
   format,
   cleanValues,
+  disabled,
 }: {
   label: string;
   value: number;
@@ -634,20 +746,33 @@ function Slider({
   onChange: (v: number) => void;
   format: (v: number) => string;
   cleanValues?: number[];
+  disabled?: boolean;
 }) {
   const pct = ((value - min) / (max - min)) * 100;
   const isClean = cleanValues?.some((c) => Math.abs(c - value) < step / 2);
   return (
-    <div>
-      <div className="flex items-baseline justify-between mb-1.5">
-        <div className="text-xs font-medium text-muted-foreground">{label}</div>
-        <div className={cn(
-          'text-sm font-semibold tabular-nums',
-          isClean ? 'text-emerald-600' : 'text-foreground'
-        )}>
-          {format(value)} {isClean && <span className="text-[10px] ml-1">★</span>}
+    <div className={disabled ? 'opacity-50' : ''}>
+      {label && (
+        <div className="flex items-baseline justify-between mb-1.5">
+          <div className="text-xs font-medium text-muted-foreground">{label}</div>
+          <div className={cn(
+            'text-sm font-semibold tabular-nums',
+            isClean ? 'text-emerald-600' : 'text-foreground'
+          )}>
+            {format(value)} {isClean && <span className="text-[10px] ml-1">★</span>}
+          </div>
         </div>
-      </div>
+      )}
+      {!label && (
+        <div className="flex items-baseline justify-end mb-1.5">
+          <div className={cn(
+            'text-sm font-semibold tabular-nums',
+            isClean ? 'text-emerald-600' : 'text-foreground'
+          )}>
+            {format(value)} {isClean && <span className="text-[10px] ml-1">★</span>}
+          </div>
+        </div>
+      )}
       <div className="relative h-1.5 bg-muted rounded-full">
         <div
           className="absolute h-full bg-primary rounded-full transition-all"
@@ -672,9 +797,45 @@ function Slider({
           step={step}
           value={value}
           onChange={(e) => onChange(parseFloat(e.target.value))}
-          className="absolute inset-0 w-full opacity-0 cursor-pointer"
+          disabled={disabled}
+          className="absolute inset-0 w-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
         />
       </div>
     </div>
+  );
+}
+
+/**
+ * Small lock icon toggle used next to each calculator field. When locked,
+ * Suggest Clean treats that field as fixed and only optimizes the
+ * unlocked variables. The Slider component dims and disables when its
+ * field is locked, so the user can see at a glance which inputs are
+ * being held constant.
+ */
+function LockToggle({
+  locked,
+  onToggle,
+  title,
+}: {
+  locked: boolean;
+  onToggle: () => void;
+  title: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={title}
+      aria-label={title}
+      aria-pressed={locked}
+      className={cn(
+        'h-5 w-5 rounded-full flex items-center justify-center text-[10px] transition-colors',
+        locked
+          ? 'bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200'
+          : 'bg-transparent text-muted-foreground/50 border border-transparent hover:text-foreground hover:border-border'
+      )}
+    >
+      {locked ? '🔒' : '🔓'}
+    </button>
   );
 }
