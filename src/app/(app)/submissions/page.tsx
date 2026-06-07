@@ -67,6 +67,15 @@ export default function SubmissionsPage() {
   const [editing, setEditing] = useState<Record<string, { status: string; notes: string }>>({});
   const [showManualAdd, setShowManualAdd] = useState(false);
   const [funderList, setFunderList] = useState<{ id: string; name: string }[]>([]);
+  // Full company rep roster — loaded once for the inline "assign to rep"
+  // dropdown that surfaces next to unassigned deals on the submissions list.
+  // We can't reuse the existing repOptions memo because that only contains
+  // reps that already have submissions; for assignment we need EVERY rep.
+  const [allReps, setAllReps] = useState<{ id: string; name: string }[]>([]);
+  // Track which row's "Assign to…" dropdown is open. null = none. Storing
+  // by submission row deal id so two different rows can have independent
+  // open/close state.
+  const [assignPickerOpen, setAssignPickerOpen] = useState<string | null>(null);
   const [manualForm, setManualForm] = useState({
     dealName: '',
     dealId: '',         // when set, attach to this existing deal instead of name-matching
@@ -116,6 +125,61 @@ export default function SubmissionsPage() {
     }
   }
 
+  /**
+   * Load every user in the company so the inline "Assign to rep" dropdown
+   * on unassigned submissions can show the full roster (not just reps that
+   * already have a submission). Lead-source users are excluded — they own
+   * deals via leadSourceId, not assignedRepId.
+   */
+  async function loadReps() {
+    try {
+      const res = await fetch('/api/users');
+      const json = await res.json();
+      const list = (json.data ?? json.users ?? []) as { id: string; name: string | null; email: string; role: string }[];
+      const reps = list
+        .filter((u) => u.role !== 'lead_source')
+        .map((u) => ({ id: u.id, name: u.name || u.email }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setAllReps(reps);
+    } catch {
+      // ignore — pill stays read-only as "Unassigned"
+    }
+  }
+
+  /**
+   * Assign a rep to the deal behind a submission row.
+   *
+   * PATCHes the deal directly (not the submission) because rep ownership is
+   * a property of the deal. After a successful save, optimistically updates
+   * the local row's assignedRepId/assignedRepName so the pill swaps to the
+   * rep's name without a full /api/submissions refetch.
+   *
+   * If the user picked "Unassign" (repId === ''), we send null so the
+   * server clears the column.
+   */
+  async function assignRep(dealId: string, repId: string) {
+    const repName = repId
+      ? (allReps.find((r) => r.id === repId)?.name ?? null)
+      : null;
+    // Optimistic local update — close the picker immediately so the UI
+    // doesn't feel laggy.
+    setRows((prev) => prev.map((row) =>
+      row.dealId === dealId
+        ? { ...row, assignedRepId: repId || null, assignedRepName: repName }
+        : row
+    ));
+    setAssignPickerOpen(null);
+    const res = await fetch(`/api/deals/${dealId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignedRepId: repId || null }),
+    });
+    if (!res.ok) {
+      // Roll back by reloading the truth from the server.
+      load();
+    }
+  }
+
   async function deleteSubmission(submissionId: string, dealName: string) {
     if (!confirm(`Delete submission for "${dealName}"? This removes all funder rows for it. The deal itself is NOT deleted.`)) return;
     const res = await fetch(`/api/submissions/${submissionId}`, { method: 'DELETE' });
@@ -160,7 +224,7 @@ export default function SubmissionsPage() {
     }
   }
 
-  useEffect(() => { load(); loadFunders(); }, []);
+  useEffect(() => { load(); loadFunders(); loadReps(); }, []);
 
   // Track per-row notes locally (controlled inputs) — autosaved on blur.
   const [localNotes, setLocalNotes] = useState<Record<string, string>>({});
@@ -439,12 +503,48 @@ export default function SubmissionsPage() {
                     <div>
                       <div className="font-medium flex items-center gap-2">
                         {row.dealName}
-                        {/* Assigned rep pill — quickly answers "whose deal is this?"
-                            without expanding the row. Falls back to "Unassigned" so
-                            stray rows don't slip by unnoticed. */}
-                        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                          {row.assignedRepName ?? 'Unassigned'}
-                        </span>
+                        {/* Assigned rep pill — quickly answers "whose deal is
+                            this?" without expanding the row. When NO rep is
+                            assigned, clicking the pill opens an inline picker
+                            so the user can assign one without leaving the
+                            page. When a rep IS assigned, the pill is purely
+                            informational (use the Active Deals editor to
+                            change an existing assignment). */}
+                        {row.assignedRepId ? (
+                          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                            {row.assignedRepName}
+                          </span>
+                        ) : (
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation(); // don't toggle row expand
+                              setAssignPickerOpen(assignPickerOpen === row.dealId ? null : row.dealId);
+                            }}
+                            className="text-[10px] font-medium uppercase tracking-wider text-amber-800 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded cursor-pointer hover:bg-amber-200 transition-colors"
+                            title="Click to assign a rep"
+                          >
+                            Unassigned · assign
+                          </span>
+                        )}
+                        {/* Inline rep picker — renders right next to the pill
+                            so the assignment flow is one click + one select. */}
+                        {assignPickerOpen === row.dealId && (
+                          <select
+                            autoFocus
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              if (e.target.value) assignRep(row.dealId, e.target.value);
+                            }}
+                            onBlur={() => setAssignPickerOpen(null)}
+                            defaultValue=""
+                            className="h-6 text-[11px] rounded border border-input bg-card px-1 max-w-[160px]"
+                          >
+                            <option value="">Pick a rep…</option>
+                            {allReps.map((r) => (
+                              <option key={r.id} value={r.id}>{r.name}</option>
+                            ))}
+                          </select>
+                        )}
                       </div>
                       <div className="text-xs text-muted-foreground mt-0.5">
                         {row.merchantName && <>{row.merchantName} • </>}

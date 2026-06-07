@@ -31,7 +31,13 @@ interface NavItem {
  * user in the company.
  */
 export const ALL_NAV_ITEMS: NavItem[] = [
-  { href: '/deal-shop',    label: 'Shop Deals',     icon: ShoppingBag, perm: 'deals.shop' },
+  // /deal-shop is the unified shop+submit entry: criteria/funder discovery,
+  // already-submitted visibility, and a "Continue to send →" handoff that
+  // feeds into the /submit action page. The Submit Deal item is kept in the
+  // master list so existing custom sidebar configs that reference it still
+  // resolve, but it's no longer in the default categories — most users only
+  // need the merged "Shop & Submit" entry.
+  { href: '/deal-shop',    label: 'Shop & Submit',  icon: ShoppingBag, perm: 'deals.shop' },
   { href: '/submit',       label: 'Submit Deal',    icon: Send,        perm: 'deals.submit' },
   { href: '/funded-email', label: 'Funded Email',   icon: Send,        perm: 'deals.submit' },
   { href: '/submissions',  label: 'Submissions',    icon: Inbox,       perm: 'submissions.view' },
@@ -47,11 +53,14 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { href: '/info',         label: 'Info',           icon: BookOpen,    perm: 'info.view' },
 ];
 
-/** Default categories when nothing is saved — restores the original sections. */
+/** Default categories when nothing is saved — restores the original sections.
+ *  /submit is intentionally omitted from the default Workflow section since
+ *  /deal-shop is the merged entry; the user can still reach Submit Deal by
+ *  navigating from Shop & Submit or by re-adding it in Settings → Sidebar order. */
 export const DEFAULT_CATEGORIES: { id: string; label: string; items: string[] }[] = [
   {
     id: 'workflow', label: 'Workflow',
-    items: ['/deal-shop', '/submit', '/funded-email', '/submissions', '/active-deals', '/funded-board', '/portfolio'],
+    items: ['/deal-shop', '/funded-email', '/submissions', '/active-deals', '/funded-board', '/portfolio'],
   },
   {
     id: 'commissions', label: 'Commissions',

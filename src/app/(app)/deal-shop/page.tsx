@@ -201,7 +201,11 @@ export default function DealShopPage() {
     } catch {
       // ignore
     }
-    router.push('/submit?shop=1');
+    // Carry over the deal context if we have one — submit will pre-fill the
+    // deal name and auto-CC the rep assigned to that deal.
+    const qs = new URLSearchParams({ shop: '1' });
+    if (dealId) qs.set('dealId', dealId);
+    router.push(`/submit?${qs.toString()}`);
   }
 
   function toggleFunderSel(id: string) {

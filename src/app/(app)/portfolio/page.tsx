@@ -147,20 +147,36 @@ export default function PortfolioPage() {
           No funded deals yet. When a deal in Active Deals is marked &quot;Funded,&quot; it appears here.
         </CardContent></Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {portfolio.map(({ deal, p }) => (
-            <FundedDealCard
-              key={deal.id}
-              deal={deal}
-              p={p}
-              onUpdated={(patched) => {
-                // Optimistic local update on save — refreshes the card without
-                // a full /api/deals refetch.
-                setDeals((arr) => arr.map((d) => d.id === deal.id ? { ...d, ...patched } : d));
-              }}
-            />
-          ))}
-        </div>
+        <Card className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-muted/40 border-b border-border">
+                <th className="w-8 px-2 py-2"></th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Deal</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Status</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 hidden md:table-cell">Funded</th>
+                <th className="text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Funded $</th>
+                <th className="text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 hidden lg:table-cell">Payback $</th>
+                <th className="text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 hidden lg:table-cell">Term</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 w-40">% Paid</th>
+                <th className="text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Balance</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 hidden xl:table-cell">Renewal</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/60">
+              {portfolio.map(({ deal, p }) => (
+                <FundedDealRow
+                  key={deal.id}
+                  deal={deal}
+                  p={p}
+                  onUpdated={(patched) => {
+                    setDeals((arr) => arr.map((d) => d.id === deal.id ? { ...d, ...patched } : d));
+                  }}
+                />
+              ))}
+            </tbody>
+          </table>
+        </Card>
       )}
     </div>
   );
@@ -190,7 +206,30 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'em
  * Funding-detail entry only lives here on Funded Deals — Active Deals no
  * longer has these fields per the spec.
  */
-function FundedDealCard({
+/**
+ * Funded-deal table row + expand panel.
+ *
+ * Layout follows the syndication-style dense table the user supplied:
+ * collapsed row shows the high-signal columns (deal, status, funded date,
+ * funded $, payback $, term, % paid with progress bar, balance, renewal
+ * badge). Click the row to expand for full details + editor.
+ *
+ * Two expand-panel modes:
+ *
+ *   • Detail mode  — when the deal has full paydown structure (funded
+ *     amount, factor, term, fundingDate). Shows the live paydown breakdown
+ *     (payments, payoff date, daily/weekly payment amount, refi eligibility)
+ *     plus an Edit button to switch to editor mode.
+ *
+ *   • Editor mode  — for cards without complete paydown info, OR when the
+ *     user clicks Edit. Inputs for: funded amount, fee %, factor, term mode
+ *     + count, funding date, amount collected. Save persists via PATCH
+ *     /api/deals/:id.
+ *
+ * Funding-detail entry only lives here on Funded Deals — Active Deals no
+ * longer has these fields per the spec.
+ */
+function FundedDealRow({
   deal,
   p,
   onUpdated,
@@ -201,8 +240,11 @@ function FundedDealCard({
 }) {
   const m = DEAL_STATUS_META[deal.status] ?? { label: deal.status, tone: 'gray' };
   const merchant = `${deal.merchantFirstName ?? ''} ${deal.merchantLastName ?? ''}`.trim();
-  // Auto-edit mode for cards that don't have a paydown structure yet — the
-  // user needs to enter funding details so this card stops being a placeholder.
+
+  // Auto-expand cards that don't have a paydown structure yet so the user
+  // immediately sees the editor prompt and can fill in the funding details
+  // (otherwise the row looks normal but offers nothing useful).
+  const [expanded, setExpanded] = useState(!p.hasStructure);
   const [editing, setEditing] = useState(!p.hasStructure);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState({
@@ -218,7 +260,6 @@ function FundedDealCard({
   async function save() {
     setSaving(true);
     const body: Record<string, unknown> = { ...draft };
-    // Empty strings → null so the DB doesn't choke on "" for numeric columns.
     for (const k of ['fundedAmount', 'feePct', 'factorRate', 'termCount', 'amountCollected'] as const) {
       if (body[k] === '') body[k] = null;
     }
@@ -235,106 +276,194 @@ function FundedDealCard({
     }
   }
 
+  // % Paid bar color — green when refi eligible, blue otherwise, gray if
+  // no structure (shows as empty bar so the column doesn't look broken).
+  const pctColor = !p.hasStructure ? 'bg-muted-foreground/20'
+    : p.renewalEligible ? 'bg-teal-500'
+    : 'bg-primary';
+
+  // Display values — fall back to em-dash for missing/unstructured cells so
+  // the table doesn't render literal "NaN" or "$0" for a deal that hasn't
+  // had its funding details entered yet.
+  const fundedDisplay = p.hasStructure ? formatCurrency(p.fundedAmount, { compact: true }) : '—';
+  const paybackDisplay = p.hasStructure ? formatCurrency(p.totalPayback, { compact: true }) : '—';
+  const balanceDisplay = p.hasStructure ? formatCurrency(p.remainingBalance, { compact: true }) : '—';
+  const termDisplay = p.hasStructure
+    ? `${p.termCount} ${p.termMode === 'daily' ? 'd' : 'w'}`
+    : '—';
+  const fundedDateDisplay = p.fundingDate
+    ? p.fundingDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' })
+    : '—';
+  const pctText = p.hasStructure ? `${p.pctPaidIn.toFixed(1)}%` : '—';
+
   return (
-    <Card className="overflow-hidden">
-      <CardContent className="p-4 space-y-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="font-semibold truncate">{deal.name}</div>
-            {merchant && <div className="text-xs text-muted-foreground truncate">{merchant}</div>}
-          </div>
-          <span className={cn('shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border', TONE_CLASS[m.tone] ?? TONE_CLASS.gray)}>
+    <>
+      <tr
+        className={cn('transition-colors cursor-pointer',
+          expanded ? 'bg-muted/40' : 'hover:bg-muted/30',
+          !p.hasStructure && 'bg-amber-50/40'
+        )}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <td className="px-2 py-2 text-muted-foreground text-center text-xs">
+          {expanded ? '▾' : '▸'}
+        </td>
+        <td className="px-3 py-2 min-w-[180px]">
+          <div className="font-medium truncate">{deal.name}</div>
+          {merchant && <div className="text-[11px] text-muted-foreground truncate">{merchant}</div>}
+        </td>
+        <td className="px-3 py-2">
+          <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap', TONE_CLASS[m.tone] ?? TONE_CLASS.gray)}>
             {m.label}
           </span>
-        </div>
-
-        {!editing && p.hasStructure && (
-          <>
-            <div className="flex items-end justify-between">
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Balance</div>
-                <div className="text-xl font-semibold tabular-nums">{formatCurrency(p.remainingBalance)}</div>
-              </div>
-              <div className="text-right">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Paid in</div>
-                <div className={cn('text-lg font-semibold tabular-nums', p.renewalEligible ? 'text-teal-700' : 'text-foreground')}>{p.pctPaidIn}%</div>
-              </div>
+        </td>
+        <td className="px-3 py-2 text-xs text-muted-foreground tabular-nums whitespace-nowrap hidden md:table-cell">
+          {fundedDateDisplay}
+        </td>
+        <td className="px-3 py-2 text-right tabular-nums font-medium whitespace-nowrap">{fundedDisplay}</td>
+        <td className="px-3 py-2 text-right tabular-nums text-muted-foreground whitespace-nowrap hidden lg:table-cell">{paybackDisplay}</td>
+        <td className="px-3 py-2 text-right tabular-nums text-muted-foreground text-xs whitespace-nowrap hidden lg:table-cell">{termDisplay}</td>
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden min-w-[60px]">
+              <div className={cn('h-full rounded-full transition-all', pctColor)} style={{ width: `${Math.min(100, p.pctPaidIn)}%` }} />
             </div>
-
-            <div>
-              <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div className={cn('h-full rounded-full', p.renewalEligible ? 'bg-teal-500' : 'bg-primary')} style={{ width: `${Math.min(100, p.pctPaidIn)}%` }} />
-              </div>
-              <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
-                <span>{p.paymentsMade}/{p.paymentsTotal} payments</span>
-                <span>{p.renewalEligible ? <span className="text-teal-700 font-medium">Refi ready</span> : `refi ${p.renewalDate ? p.renewalDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—'}`}</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border text-xs">
-              <div><div className="text-[10px] text-muted-foreground">Funded</div><div className="tabular-nums font-medium">{formatCurrency(p.fundedAmount, { compact: true })}</div></div>
-              <div><div className="text-[10px] text-muted-foreground">Payback</div><div className="tabular-nums font-medium">{formatCurrency(p.totalPayback, { compact: true })}</div></div>
-              <div><div className="text-[10px] text-muted-foreground">{p.termMode === 'daily' ? 'Daily' : 'Weekly'}</div><div className="tabular-nums font-medium">{formatCurrency(p.paymentAmount, { compact: true })}</div></div>
-            </div>
-            <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-              <span>Funded {p.fundingDate ? p.fundingDate.toLocaleDateString() : '—'} · Payoff ~{p.payoffDate ? p.payoffDate.toLocaleDateString() : '—'}</span>
-              <button onClick={() => setEditing(true)} className="text-foreground hover:text-primary font-medium underline-offset-2 hover:underline">Edit</button>
-            </div>
-          </>
-        )}
-
-        {!editing && !p.hasStructure && (
-          // Funded but no paydown details yet — direct prompt to fill them in.
-          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-            Funding details not entered yet. <button onClick={() => setEditing(true)} className="font-semibold underline">Add them</button> to enable paydown tracking.
+            <span className={cn('text-xs tabular-nums font-medium w-12 text-right', p.renewalEligible && 'text-teal-700')}>{pctText}</span>
           </div>
-        )}
+        </td>
+        <td className="px-3 py-2 text-right tabular-nums font-semibold whitespace-nowrap">{balanceDisplay}</td>
+        <td className="px-3 py-2 hidden xl:table-cell">
+          {p.renewalEligible
+            ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-teal-100 text-teal-800 border border-teal-200">Refi ready</span>
+            : p.renewalDate
+              ? <span className="text-[11px] text-muted-foreground tabular-nums">{p.renewalDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+              : <span className="text-[11px] text-muted-foreground">—</span>}
+        </td>
+      </tr>
 
-        {editing && (
-          <div className="space-y-2 pt-1 border-t border-border">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Funding details</div>
-            <div className="grid grid-cols-2 gap-2">
-              <Field label="Funded amount ($)">
-                <Input inputMode="decimal" value={String(draft.fundedAmount ?? '')} onChange={(e) => setDraft({ ...draft, fundedAmount: e.target.value })} placeholder="50000" />
-              </Field>
-              <Field label="Fee (%)">
-                <Input inputMode="decimal" value={String(draft.feePct ?? '')} onChange={(e) => setDraft({ ...draft, feePct: e.target.value })} placeholder="5" />
-              </Field>
-              <Field label="Factor rate">
-                <Input inputMode="decimal" value={String(draft.factorRate ?? '')} onChange={(e) => setDraft({ ...draft, factorRate: e.target.value })} placeholder="1.40" />
-              </Field>
-              <Field label="Term type">
-                <select value={draft.termMode ?? 'weekly'} onChange={(e) => setDraft({ ...draft, termMode: e.target.value })} className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm">
-                  <option value="weekly">Weekly</option>
-                  <option value="daily">Daily</option>
-                </select>
-              </Field>
-              <Field label="# of payments">
-                <Input inputMode="numeric" value={String(draft.termCount ?? '')} onChange={(e) => setDraft({ ...draft, termCount: e.target.value })} placeholder="26" />
-              </Field>
-              <Field label="Funding date">
-                <Input type="date" value={draft.fundingDate ?? ''} onChange={(e) => setDraft({ ...draft, fundingDate: e.target.value })} />
-              </Field>
-              <Field label="Amount collected ($)">
-                <Input inputMode="decimal" value={String(draft.amountCollected ?? '')} onChange={(e) => setDraft({ ...draft, amountCollected: e.target.value })} placeholder="auto if blank" />
-              </Field>
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              {p.hasStructure && (
-                <button onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+      {expanded && (
+        <tr className="bg-muted/20">
+          <td colSpan={10} className="px-4 py-4">
+            <div className="space-y-3">
+              {!editing && p.hasStructure && (
+                <>
+                  {/* Detail panel — grid of high-detail fields that don't fit
+                      in the collapsed row. Echoes the syndication-style columns
+                      the user mentioned (principal, payback, payoff date,
+                      payment amount/frequency, etc). */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                    <Detail label="Funded amount" value={formatCurrency(p.fundedAmount)} />
+                    <Detail label="Factor rate" value={p.factorRate.toFixed(3)} />
+                    <Detail label="Total payback" value={formatCurrency(p.totalPayback)} />
+                    <Detail label="Amount collected" value={formatCurrency(p.amountCollected)} />
+                    <Detail label="Remaining balance" value={formatCurrency(p.remainingBalance)} />
+                    <Detail
+                      label={p.termMode === 'daily' ? 'Daily payment' : 'Weekly payment'}
+                      value={formatCurrency(p.paymentAmount)}
+                    />
+                    <Detail
+                      label="Payments made"
+                      value={`${p.paymentsMade} / ${p.paymentsTotal}`}
+                    />
+                    <Detail
+                      label="Est. payoff"
+                      value={p.payoffDate ? p.payoffDate.toLocaleDateString() : '—'}
+                    />
+                    <Detail
+                      label="% Paid in"
+                      value={`${p.pctPaidIn.toFixed(2)}%`}
+                      tone={p.renewalEligible ? 'teal' : undefined}
+                    />
+                    <Detail
+                      label="Renewal eligibility"
+                      value={p.renewalEligible
+                        ? 'Eligible now'
+                        : p.renewalDate
+                          ? `~${p.renewalDate.toLocaleDateString()}`
+                          : '—'}
+                      tone={p.renewalEligible ? 'teal' : undefined}
+                    />
+                    <Detail
+                      label="Funded date"
+                      value={p.fundingDate ? p.fundingDate.toLocaleDateString() : '—'}
+                    />
+                    <Detail
+                      label="Term"
+                      value={`${p.termCount} ${p.termMode === 'daily' ? 'business days' : 'weeks'}`}
+                    />
+                  </div>
+                  <div className="flex justify-end">
+                    <button onClick={() => setEditing(true)} className="text-xs font-medium text-primary hover:underline">
+                      Edit funding details
+                    </button>
+                  </div>
+                </>
               )}
-              <button
-                onClick={save}
-                disabled={saving}
-                className="h-8 px-3 rounded-md bg-foreground text-background text-xs font-medium hover:opacity-90 disabled:opacity-50"
-              >
-                {saving ? 'Saving…' : 'Save'}
-              </button>
+
+              {!editing && !p.hasStructure && (
+                <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                  Funding details not entered yet. <button onClick={() => setEditing(true)} className="font-semibold underline">Add them</button> to enable paydown tracking.
+                </div>
+              )}
+
+              {editing && (
+                <div className="space-y-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Funding details</div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                    <Field label="Funded amount ($)">
+                      <Input inputMode="decimal" value={String(draft.fundedAmount ?? '')} onChange={(e) => setDraft({ ...draft, fundedAmount: e.target.value })} placeholder="50000" />
+                    </Field>
+                    <Field label="Fee (%)">
+                      <Input inputMode="decimal" value={String(draft.feePct ?? '')} onChange={(e) => setDraft({ ...draft, feePct: e.target.value })} placeholder="5" />
+                    </Field>
+                    <Field label="Factor rate">
+                      <Input inputMode="decimal" value={String(draft.factorRate ?? '')} onChange={(e) => setDraft({ ...draft, factorRate: e.target.value })} placeholder="1.40" />
+                    </Field>
+                    <Field label="Term type">
+                      <select value={draft.termMode ?? 'weekly'} onChange={(e) => setDraft({ ...draft, termMode: e.target.value })} className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm">
+                        <option value="weekly">Weekly</option>
+                        <option value="daily">Daily</option>
+                      </select>
+                    </Field>
+                    <Field label="# of payments">
+                      <Input inputMode="numeric" value={String(draft.termCount ?? '')} onChange={(e) => setDraft({ ...draft, termCount: e.target.value })} placeholder="26" />
+                    </Field>
+                    <Field label="Funding date">
+                      <Input type="date" value={draft.fundingDate ?? ''} onChange={(e) => setDraft({ ...draft, fundingDate: e.target.value })} />
+                    </Field>
+                    <Field label="Amount collected ($)">
+                      <Input inputMode="decimal" value={String(draft.amountCollected ?? '')} onChange={(e) => setDraft({ ...draft, amountCollected: e.target.value })} placeholder="auto if blank" />
+                    </Field>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-1">
+                    {p.hasStructure && (
+                      <button onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+                    )}
+                    <button
+                      onClick={save}
+                      disabled={saving}
+                      className="h-8 px-3 rounded-md bg-foreground text-background text-xs font-medium hover:opacity-90 disabled:opacity-50"
+                    >
+                      {saving ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/** Small label/value pair used in the funded-deal expand detail grid. */
+function Detail({ label, value, tone }: { label: string; value: string; tone?: 'teal' }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</div>
+      <div className={cn('tabular-nums font-medium mt-0.5', tone === 'teal' ? 'text-teal-700' : 'text-foreground')}>{value}</div>
+    </div>
   );
 }
 
