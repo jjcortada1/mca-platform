@@ -78,6 +78,10 @@ export default function DealShopPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTier, setActiveTier] = useState<string>('all');
+  // Same idea but for the no-match manual picker fallback. Tracks which
+  // tier chip is active so the broker can scope the manual list to just
+  // one tier when they already know they want to shop "A-Paper only."
+  const [activeManualTier, setActiveManualTier] = useState<string>('all');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedFunders, setSelectedFunders] = useState<Set<string>>(new Set());
 
@@ -412,6 +416,36 @@ export default function DealShopPage() {
     setSelectedFunders(new Set());
   }
 
+  /**
+   * Toggle every matched funder in a single tier on/off in one click.
+   *
+   * Behavior: if EVERY matched funder in this tier is already selected,
+   * deselect them all (toggle off). Otherwise add them all to the
+   * selection (without disturbing selections from other tiers). This lets
+   * the broker shop a whole tier in one click — "select all A-Paper" —
+   * instead of having to check every row individually.
+   *
+   * Source data:
+   *   • `tier` set to a tierGroup.tier value → uses the match engine's
+   *     matched list filtered to that tier.
+   *   • When no match has run, `manualFunderIds` is supplied (the no-match
+   *     fallback view computes its own tier groups from funderMap and
+   *     calls this with the funder ids it wants).
+   */
+  function toggleSelectTier(funderIds: string[]) {
+    if (funderIds.length === 0) return;
+    setSelectedFunders((prev) => {
+      const next = new Set(prev);
+      const allAlreadyIn = funderIds.every((id) => next.has(id));
+      if (allAlreadyIn) {
+        for (const id of funderIds) next.delete(id);
+      } else {
+        for (const id of funderIds) next.add(id);
+      }
+      return next;
+    });
+  }
+
   // Group results by tier. Each result is already a (funder, tier) pair —
   // matched independently per tier — so a funder can show up under both
   // "A-Paper" (with one verdict) and "Subprime" (with a different verdict).
@@ -437,6 +471,39 @@ export default function DealShopPage() {
   const filteredGroups = activeTier === 'all' ? tierGroups : tierGroups.filter((g) => g.tier === activeTier);
   const totalMatched = results?.matched.length ?? 0;
   const totalExcluded = results?.excluded.length ?? 0;
+
+  /**
+   * Group ALL active funders by tier for the no-match manual picker.
+   *
+   * Unlike the match-engine tier groups (which are scoped to the match
+   * results), this iterates the full funderMap so the broker can sort all
+   * known funders by tier even before running a match. A funder belonging
+   * to multiple tiers appears in each — same convention as the match view.
+   * An "Untiered" bucket captures funders with no tier assignment.
+   */
+  const manualTierGroups = useMemo(() => {
+    if (results) return [];
+    const map = new Map<string, FunderDetail[]>();
+    for (const f of funderMap.values()) {
+      const tiers = (f.tiers ?? []).filter((t) => t && t.name);
+      if (tiers.length === 0) {
+        if (!map.has('Untiered')) map.set('Untiered', []);
+        map.get('Untiered')!.push(f);
+      } else {
+        for (const t of tiers) {
+          if (!map.has(t.name)) map.set(t.name, []);
+          map.get(t.name)!.push(f);
+        }
+      }
+    }
+    return Array.from(map.entries())
+      .map(([tier, funders]) => ({ tier, funders: funders.sort((a, b) => a.name.localeCompare(b.name)) }))
+      .sort((a, b) => a.tier.localeCompare(b.tier));
+  }, [results, funderMap]);
+
+  const filteredManualGroups = activeManualTier === 'all'
+    ? manualTierGroups
+    : manualTierGroups.filter((g) => g.tier === activeManualTier);
 
   function toggleExpand(id: string) {
     const next = new Set(expanded);
@@ -790,40 +857,88 @@ export default function DealShopPage() {
               )}
             </div>
 
-            {/* Tier filter — horizontal chip row instead of side rail so
-                the funder list gets the full right-column width. */}
+            {/* Tier filter + tier-select chips.
+                Each chip is a split control:
+                  • Left half (label + count badges) filters the view to
+                    only show that tier.
+                  • Right half (✓ button) selects/deselects every matched
+                    funder in that tier in one click. Lets the broker
+                    "shop everyone in A-Paper" without ticking each row.
+                The "All tiers" chip's right button selects every matched
+                funder across all tiers (same as the header "Select all"). */}
             <div className="flex flex-wrap gap-1.5">
-              <button
-                onClick={() => setActiveTier('all')}
-                className={cn(
-                  'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors',
-                  activeTier === 'all'
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
-                )}
-              >
-                All tiers
-                <span className={cn('tabular-nums px-1 rounded text-[10px]',
-                  activeTier === 'all' ? 'bg-primary-foreground/20' : 'bg-muted')}>{totalMatched + totalExcluded}</span>
-              </button>
-              {tierGroups.map((g) => (
+              <div className={cn(
+                'inline-flex items-stretch rounded-full border overflow-hidden text-xs font-medium transition-colors',
+                activeTier === 'all'
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
+              )}>
                 <button
-                  key={g.tier}
-                  onClick={() => setActiveTier(g.tier)}
+                  onClick={() => setActiveTier('all')}
+                  className="flex items-center gap-1.5 pl-2.5 pr-2 py-1"
+                  title="Filter to show all tiers"
+                >
+                  All tiers
+                  <span className={cn('tabular-nums px-1 rounded text-[10px]',
+                    activeTier === 'all' ? 'bg-primary-foreground/20' : 'bg-muted')}>{totalMatched + totalExcluded}</span>
+                </button>
+                <button
+                  onClick={selectAllMatched}
+                  title={`Select all ${totalMatched} matched funders`}
                   className={cn(
-                    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors max-w-[180px]',
-                    activeTier === g.tier
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
+                    'px-2 border-l flex items-center justify-center text-sm',
+                    activeTier === 'all'
+                      ? 'border-primary-foreground/30 hover:bg-primary-foreground/15'
+                      : 'border-border hover:bg-muted'
                   )}
                 >
-                  <span className="truncate">{g.tier}</span>
-                  <span className="flex items-center gap-0.5 shrink-0">
-                    {g.matched.length > 0 && <Badge variant="success" className="text-[9px]">{g.matched.length}</Badge>}
-                    {g.excluded.length > 0 && <Badge variant="default" className="text-[9px]">{g.excluded.length}</Badge>}
-                  </span>
+                  ✓
                 </button>
-              ))}
+              </div>
+              {tierGroups.map((g) => {
+                const tierIds = g.matched.map((m) => m.funderId);
+                const allInTierSelected = tierIds.length > 0 && tierIds.every((id) => selectedFunders.has(id));
+                return (
+                  <div
+                    key={g.tier}
+                    className={cn(
+                      'inline-flex items-stretch rounded-full border overflow-hidden text-xs font-medium transition-colors max-w-[240px]',
+                      activeTier === g.tier
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
+                    )}
+                  >
+                    <button
+                      onClick={() => setActiveTier(g.tier)}
+                      title={`Filter to ${g.tier} only`}
+                      className="flex items-center gap-1.5 pl-2.5 pr-2 py-1 min-w-0"
+                    >
+                      <span className="truncate">{g.tier}</span>
+                      <span className="flex items-center gap-0.5 shrink-0">
+                        {g.matched.length > 0 && <Badge variant="success" className="text-[9px]">{g.matched.length}</Badge>}
+                        {g.excluded.length > 0 && <Badge variant="default" className="text-[9px]">{g.excluded.length}</Badge>}
+                      </span>
+                    </button>
+                    {tierIds.length > 0 && (
+                      <button
+                        onClick={() => toggleSelectTier(tierIds)}
+                        title={allInTierSelected
+                          ? `Deselect all ${tierIds.length} funders in ${g.tier}`
+                          : `Select all ${tierIds.length} matched funders in ${g.tier}`}
+                        className={cn(
+                          'px-2 border-l flex items-center justify-center text-sm',
+                          activeTier === g.tier
+                            ? 'border-primary-foreground/30 hover:bg-primary-foreground/15'
+                            : 'border-border hover:bg-muted',
+                          allInTierSelected && (activeTier === g.tier ? 'bg-primary-foreground/15' : 'bg-emerald-50 text-emerald-700')
+                        )}
+                      >
+                        {allInTierSelected ? '✓' : '+'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             <div>
@@ -1017,11 +1132,14 @@ export default function DealShopPage() {
       {/* Manual funder picker — shown when no match has been run (criteria
           incomplete). Lets the broker who already knows where to shop just
           pick funders directly without entering deal info. The same
-          selectedFunders state drives the send form on the left. */}
+          selectedFunders state drives the send form on the left.
+
+          Tier chips work exactly like the matched view: left half filters
+          to that tier, right half selects/deselects every funder in it. */}
       {!results && (
         <Card>
-          <CardContent className="p-3">
-            <div className="flex items-baseline justify-between mb-2">
+          <CardContent className="p-3 space-y-3">
+            <div className="flex items-baseline justify-between">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/80">
                 Active funders ({funderMap.size})
               </h3>
@@ -1029,52 +1147,145 @@ export default function DealShopPage() {
                 Enter criteria for matching · or pick directly
               </span>
             </div>
+
             {funderMap.size === 0 ? (
               <div className="text-xs text-muted-foreground py-6 text-center">
                 No funders configured yet. Add some in the <a href="/funders" className="text-primary hover:underline">Funders</a> tab.
               </div>
             ) : (
-              <div className="divide-y divide-border/60 max-h-[calc(100vh-220px)] overflow-y-auto">
-                {Array.from(funderMap.values())
-                  .sort((a, b) => a.name.localeCompare(b.name))
-                  .map((f) => {
-                    const shoppingEmails: string[] = (f.emails ?? []).filter(Boolean);
-                    const primary = f.contacts?.find((c) => c.email);
-                    const displayEmail = shoppingEmails[0] ?? primary?.email ?? null;
-                    const isSelected = selectedFunders.has(f.id);
-                    const sub = alreadySubmitted.get(f.id);
-                    return (
-                      <label
-                        key={f.id}
+              <>
+                {/* Tier chip row — same split-control UX as the matched
+                    view. Empty tier rosters get no chip. */}
+                {manualTierGroups.length > 1 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    <div className={cn(
+                      'inline-flex items-stretch rounded-full border overflow-hidden text-xs font-medium transition-colors',
+                      activeManualTier === 'all'
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
+                    )}>
+                      <button
+                        onClick={() => setActiveManualTier('all')}
+                        className="flex items-center gap-1.5 pl-2.5 pr-2 py-1"
+                        title="Show all funders, grouped by tier"
+                      >
+                        All tiers
+                        <span className={cn('tabular-nums px-1 rounded text-[10px]',
+                          activeManualTier === 'all' ? 'bg-primary-foreground/20' : 'bg-muted')}>{funderMap.size}</span>
+                      </button>
+                      <button
+                        onClick={() => toggleSelectTier(Array.from(funderMap.keys()))}
+                        title={`Select all ${funderMap.size} active funders`}
                         className={cn(
-                          'flex items-center gap-2 py-1.5 px-2 cursor-pointer hover:bg-muted/30 rounded',
-                          isSelected && 'bg-primary/5',
-                          sub && 'opacity-60'
+                          'px-2 border-l flex items-center justify-center text-sm',
+                          activeManualTier === 'all'
+                            ? 'border-primary-foreground/30 hover:bg-primary-foreground/15'
+                            : 'border-border hover:bg-muted'
                         )}
                       >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleFunderSel(f.id)}
-                          className="h-4 w-4 rounded border-border accent-[var(--primary,#2563eb)]"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium truncate flex items-center gap-1.5">
-                            {f.name}
-                            {sub && (
-                              <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-blue-100 text-blue-800">
-                                Already sent
-                              </span>
-                            )}
-                          </div>
-                          {displayEmail && (
-                            <div className="text-[10px] text-muted-foreground font-mono truncate">{displayEmail}</div>
+                        ✓
+                      </button>
+                    </div>
+                    {manualTierGroups.map((g) => {
+                      const tierIds = g.funders.map((f) => f.id);
+                      const allInTierSelected = tierIds.length > 0 && tierIds.every((id) => selectedFunders.has(id));
+                      return (
+                        <div
+                          key={g.tier}
+                          className={cn(
+                            'inline-flex items-stretch rounded-full border overflow-hidden text-xs font-medium transition-colors max-w-[240px]',
+                            activeManualTier === g.tier
+                              ? 'bg-primary text-primary-foreground border-primary'
+                              : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
                           )}
+                        >
+                          <button
+                            onClick={() => setActiveManualTier(g.tier)}
+                            title={`Filter to ${g.tier} only`}
+                            className="flex items-center gap-1.5 pl-2.5 pr-2 py-1 min-w-0"
+                          >
+                            <span className="truncate">{g.tier}</span>
+                            <span className={cn('tabular-nums px-1 rounded text-[9px]',
+                              activeManualTier === g.tier ? 'bg-primary-foreground/20' : 'bg-muted')}>
+                              {g.funders.length}
+                            </span>
+                          </button>
+                          <button
+                            onClick={() => toggleSelectTier(tierIds)}
+                            title={allInTierSelected
+                              ? `Deselect all ${tierIds.length} funders in ${g.tier}`
+                              : `Select all ${tierIds.length} funders in ${g.tier}`}
+                            className={cn(
+                              'px-2 border-l flex items-center justify-center text-sm',
+                              activeManualTier === g.tier
+                                ? 'border-primary-foreground/30 hover:bg-primary-foreground/15'
+                                : 'border-border hover:bg-muted',
+                              allInTierSelected && (activeManualTier === g.tier ? 'bg-primary-foreground/15' : 'bg-emerald-50 text-emerald-700')
+                            )}
+                          >
+                            {allInTierSelected ? '✓' : '+'}
+                          </button>
                         </div>
-                      </label>
-                    );
-                  })}
-              </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="max-h-[calc(100vh-260px)] overflow-y-auto space-y-3">
+                  {filteredManualGroups.map((g) => (
+                    <div key={g.tier}>
+                      {/* Only render the tier header when "all tiers" is
+                          active. When the user has filtered to a single
+                          tier the header is redundant with the chip. */}
+                      {activeManualTier === 'all' && (
+                        <div className="flex items-baseline gap-2 mb-1 px-1">
+                          <h4 className="text-[10px] font-semibold uppercase tracking-wider text-foreground/70">{g.tier}</h4>
+                          <span className="text-[10px] text-muted-foreground">{g.funders.length}</span>
+                        </div>
+                      )}
+                      <div className="divide-y divide-border/60 rounded border border-border/60 overflow-hidden">
+                        {g.funders.map((f) => {
+                          const shoppingEmails: string[] = (f.emails ?? []).filter(Boolean);
+                          const primary = f.contacts?.find((c) => c.email);
+                          const displayEmail = shoppingEmails[0] ?? primary?.email ?? null;
+                          const isSelected = selectedFunders.has(f.id);
+                          const sub = alreadySubmitted.get(f.id);
+                          return (
+                            <label
+                              key={`${g.tier}-${f.id}`}
+                              className={cn(
+                                'flex items-center gap-2 py-1.5 px-2 cursor-pointer hover:bg-muted/30',
+                                isSelected && 'bg-primary/5',
+                                sub && 'opacity-60'
+                              )}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleFunderSel(f.id)}
+                                className="h-4 w-4 rounded border-border accent-[var(--primary,#2563eb)]"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium truncate flex items-center gap-1.5">
+                                  {f.name}
+                                  {sub && (
+                                    <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-blue-100 text-blue-800">
+                                      Already sent
+                                    </span>
+                                  )}
+                                </div>
+                                {displayEmail && (
+                                  <div className="text-[10px] text-muted-foreground font-mono truncate">{displayEmail}</div>
+                                )}
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </CardContent>
         </Card>
