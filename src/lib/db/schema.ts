@@ -318,6 +318,14 @@ export const deals = pgTable(
     // Total collected so far (drives the paydown tracker). Defaults handled in app.
     amountCollected: numeric('amount_collected', { precision: 14, scale: 2 }),
     renewalNotes: text('renewal_notes'),
+    // Funded-deal sub-status — only meaningful when status='funded'. Lets the
+    // user mark a funded deal as 'active' (paying normally), 'refi_eligible'
+    // (ready to renew), 'payment_issues' (struggling), or 'default' (stopped
+    // paying). On the Funded Deals page this replaces the broad "Funded"
+    // status badge with the more useful sub-state. Default 'active' so
+    // legacy funded deals don't need a migration. Additive — null treated
+    // as 'active' in the UI.
+    fundedSubStatus: varchar('funded_sub_status', { length: 24 }),
     // Soft-delete flag. When true, the deal is treated as gone everywhere —
     // hidden from dropdowns, lists, commission views, accounting, etc. We
     // soft-delete instead of hard-delete so historical audit data is

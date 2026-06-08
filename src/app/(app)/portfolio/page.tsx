@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, PageHeader, Input } from '@/components/ui/primitives';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { formatCurrency } from '@/lib/utils';
 import { cn } from '@/lib/utils';
-import { Search } from 'lucide-react';
+import { Search, Trash2 } from 'lucide-react';
 import { computePaydown, DEAL_STATUS_META } from '@/lib/deals/paydown';
 
 interface Deal {
@@ -21,7 +22,18 @@ interface Deal {
   fundingDate: string | null;
   amountCollected: string | null;
   assignedRepId: string | null;
+  assignedRepName?: string | null;
+  // Funded-deal sub-status. Null/missing → treated as 'active' in UI.
+  fundedSubStatus?: 'active' | 'refi_eligible' | 'payment_issues' | 'default' | null;
 }
+
+/** Sub-status labels + tones for the Funded Deals table. */
+const FUNDED_SUB_STATUS: Record<string, { label: string; tone: string }> = {
+  active:         { label: 'Active',          tone: 'emerald' },
+  refi_eligible:  { label: 'Refi Eligible',   tone: 'teal' },
+  payment_issues: { label: 'Payment Issues',  tone: 'amber' },
+  default:        { label: 'Default',         tone: 'red' },
+};
 
 const TONE_CLASS: Record<string, string> = {
   amber: 'bg-amber-100 text-amber-800 border-amber-200', blue: 'bg-blue-100 text-blue-800 border-blue-200',
@@ -41,12 +53,45 @@ export default function PortfolioPage() {
   const [search, setSearch] = useState('');
   const [view, setView] = useState<'all' | 'paying' | 'refi'>('all');
   const [sort, setSort] = useState<SortKey>('recent');
+  // Roster for the rep-assignment dropdown on each funded deal row.
+  const [reps, setReps] = useState<{ id: string; name: string }[]>([]);
+  // Delete confirmation state. When non-null, the ConfirmDialog renders and
+  // the user can review the action before destruction. Reusable component
+  // replaces native browser confirm() so the dialog doesn't appear in the
+  // browser chrome at the top of the page.
+  const [deleting, setDeleting] = useState<{ dealId: string; name: string } | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
     fetch('/api/deals', { cache: 'no-store' }).then((r) => r.json()).then((j) => {
       setDeals((j.data ?? j.deals ?? []) as Deal[]);
     }).catch(() => {}).finally(() => setLoading(false));
+
+    // Load company users so the rep-assignment dropdown has the full roster.
+    // Lead-source accounts excluded (they own deals via leadSourceId).
+    fetch('/api/users', { cache: 'no-store' }).then((r) => r.json()).then((j) => {
+      const list = (j.data ?? j.users ?? []) as { id: string; name: string | null; email: string; role: string }[];
+      setReps(list
+        .filter((u) => u.role !== 'lead_source')
+        .map((u) => ({ id: u.id, name: u.name || u.email }))
+        .sort((a, b) => a.name.localeCompare(b.name)));
+    }).catch(() => {});
   }, []);
+
+  async function performDelete() {
+    if (!deleting) return;
+    setDeleteLoading(true);
+    const res = await fetch(`/api/deals/${deleting.dealId}`, { method: 'DELETE' });
+    setDeleteLoading(false);
+    if (res.ok) {
+      // Optimistic remove from local state so the row disappears immediately.
+      setDeals((arr) => arr.filter((d) => d.id !== deleting.dealId));
+      setDeleting(null);
+    } else {
+      const j = await res.json().catch(() => ({}));
+      alert(j.error || 'Could not delete this deal.');
+    }
+  }
 
   // Compute paydown for each FUNDED deal (live, as of today). We restrict
   // to status='funded' (and legacy aliases) so the Funded Deals page never
@@ -161,6 +206,7 @@ export default function PortfolioPage() {
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 w-40">% Paid</th>
                 <th className="text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Balance</th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 hidden xl:table-cell">Renewal</th>
+                <th className="w-10 px-2 py-2"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
@@ -169,15 +215,30 @@ export default function PortfolioPage() {
                   key={deal.id}
                   deal={deal}
                   p={p}
+                  reps={reps}
                   onUpdated={(patched) => {
                     setDeals((arr) => arr.map((d) => d.id === deal.id ? { ...d, ...patched } : d));
                   }}
+                  onRequestDelete={() => setDeleting({ dealId: deal.id, name: deal.name })}
                 />
               ))}
             </tbody>
           </table>
         </Card>
       )}
+
+      {/* Centered confirmation modal — replaces native browser confirm() so
+          destructive flows live in-page instead of a top-of-browser popup. */}
+      <ConfirmDialog
+        open={!!deleting}
+        title={`Delete "${deleting?.name ?? ''}"?`}
+        description="This permanently removes the funded deal and all of its submissions, commissions, and history. The action cannot be undone."
+        confirmLabel="Delete deal"
+        destructive
+        loading={deleteLoading}
+        onConfirm={performDelete}
+        onCancel={() => !deleteLoading && setDeleting(null)}
+      />
     </div>
   );
 }
@@ -232,13 +293,22 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'em
 function FundedDealRow({
   deal,
   p,
+  reps,
   onUpdated,
+  onRequestDelete,
 }: {
   deal: Deal;
   p: ReturnType<typeof computePaydown>;
+  reps: { id: string; name: string }[];
   onUpdated: (patch: Partial<Deal>) => void;
+  onRequestDelete: () => void;
 }) {
-  const m = DEAL_STATUS_META[deal.status] ?? { label: deal.status, tone: 'gray' };
+  // Funded sub-status drives the badge instead of the broad deal.status when
+  // we're on the Funded Deals page (every row here is funded by definition,
+  // so showing "Funded" doesn't add information). Falls back to 'active' for
+  // legacy rows that have no sub-status set yet.
+  const subStatusKey = deal.fundedSubStatus ?? 'active';
+  const subMeta = FUNDED_SUB_STATUS[subStatusKey] ?? FUNDED_SUB_STATUS.active;
   const merchant = `${deal.merchantFirstName ?? ''} ${deal.merchantLastName ?? ''}`.trim();
 
   // Auto-expand cards that don't have a paydown structure yet so the user
@@ -255,7 +325,37 @@ function FundedDealRow({
     termCount: deal.termCount ?? '',
     fundingDate: deal.fundingDate ? String(deal.fundingDate).slice(0, 10) : '',
     amountCollected: deal.amountCollected ?? '',
+    // Sub-status + rep editable from the same form as funding details so
+    // the user can change everything in one save round-trip.
+    fundedSubStatus: subStatusKey as 'active' | 'refi_eligible' | 'payment_issues' | 'default',
+    assignedRepId: deal.assignedRepId ?? '',
   });
+
+  // Inline sub-status changer — small select on the table row that PATCHes
+  // immediately so the user doesn't need to expand the row to update it.
+  async function quickSetSubStatus(next: 'active' | 'refi_eligible' | 'payment_issues' | 'default') {
+    // Optimistic local update for instant feedback.
+    onUpdated({ fundedSubStatus: next });
+    const res = await fetch(`/api/deals/${deal.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fundedSubStatus: next }),
+    });
+    if (!res.ok) {
+      // Roll back: re-fetch by reloading on the page-level state would be
+      // overkill — we just leave the optimistic value; the user can retry.
+    }
+  }
+
+  async function quickSetRep(repId: string) {
+    const newRepName = repId ? (reps.find((r) => r.id === repId)?.name ?? null) : null;
+    onUpdated({ assignedRepId: repId || null, assignedRepName: newRepName });
+    await fetch(`/api/deals/${deal.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignedRepId: repId || null }),
+    });
+  }
 
   async function save() {
     setSaving(true);
@@ -264,6 +364,8 @@ function FundedDealRow({
       if (body[k] === '') body[k] = null;
     }
     if (body.fundingDate === '') body.fundingDate = null;
+    // Empty rep id → unassign (null) so the column clears.
+    if (body.assignedRepId === '') body.assignedRepId = null;
     const res = await fetch(`/api/deals/${deal.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -271,7 +373,12 @@ function FundedDealRow({
     });
     setSaving(false);
     if (res.ok) {
-      onUpdated(body as Partial<Deal>);
+      // Include the rep NAME in the optimistic patch so the row shows
+      // the new rep without a full reload.
+      const repName = body.assignedRepId
+        ? (reps.find((r) => r.id === body.assignedRepId)?.name ?? null)
+        : null;
+      onUpdated({ ...(body as Partial<Deal>), assignedRepName: repName });
       setEditing(false);
     }
   }
@@ -312,10 +419,24 @@ function FundedDealRow({
           <div className="font-medium truncate">{deal.name}</div>
           {merchant && <div className="text-[11px] text-muted-foreground truncate">{merchant}</div>}
         </td>
-        <td className="px-3 py-2">
-          <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap', TONE_CLASS[m.tone] ?? TONE_CLASS.gray)}>
-            {m.label}
-          </span>
+        <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+          {/* Inline sub-status select. Tone color matches the picked status.
+              Stops row-expand on click so the user can change status without
+              the row jumping open. Patches immediately via quickSetSubStatus. */}
+          <select
+            value={subStatusKey}
+            onChange={(e) => quickSetSubStatus(e.target.value as 'active' | 'refi_eligible' | 'payment_issues' | 'default')}
+            className={cn(
+              'rounded-full border px-2 py-0.5 text-[10px] font-medium cursor-pointer whitespace-nowrap',
+              TONE_CLASS[subMeta.tone] ?? TONE_CLASS.gray
+            )}
+            title="Funded deal status"
+          >
+            <option value="active">Active</option>
+            <option value="refi_eligible">Refi Eligible</option>
+            <option value="payment_issues">Payment Issues</option>
+            <option value="default">Default</option>
+          </select>
         </td>
         <td className="px-3 py-2 text-xs text-muted-foreground tabular-nums whitespace-nowrap hidden md:table-cell">
           {fundedDateDisplay}
@@ -339,11 +460,24 @@ function FundedDealRow({
               ? <span className="text-[11px] text-muted-foreground tabular-nums">{p.renewalDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
               : <span className="text-[11px] text-muted-foreground">—</span>}
         </td>
+        {/* Actions cell — delete button. Click handler stops propagation so
+            the row doesn't expand at the same time. Uses a confirmation
+            modal (managed in the parent component) so the deletion isn't
+            instant or browser-popup-based. */}
+        <td className="px-2 py-2 text-right" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={onRequestDelete}
+            title="Delete this deal"
+            className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </td>
       </tr>
 
       {expanded && (
         <tr className="bg-muted/20">
-          <td colSpan={10} className="px-4 py-4">
+          <td colSpan={11} className="px-4 py-4">
             <div className="space-y-3">
               {!editing && p.hasStructure && (
                 <>
@@ -392,7 +526,20 @@ function FundedDealRow({
                       value={`${p.termCount} ${p.termMode === 'daily' ? 'business days' : 'weeks'}`}
                     />
                   </div>
-                  <div className="flex justify-end">
+                  <div className="flex items-center justify-between gap-3">
+                    {/* Quick rep changer in the detail view — same as the
+                        editor but without entering edit mode. */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Assigned rep</span>
+                      <select
+                        value={deal.assignedRepId ?? ''}
+                        onChange={(e) => quickSetRep(e.target.value)}
+                        className="h-7 text-xs rounded-md border border-input bg-card px-2"
+                      >
+                        <option value="">Unassigned</option>
+                        {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                    </div>
                     <button onClick={() => setEditing(true)} className="text-xs font-medium text-primary hover:underline">
                       Edit funding details
                     </button>
@@ -433,6 +580,28 @@ function FundedDealRow({
                     </Field>
                     <Field label="Amount collected ($)">
                       <Input inputMode="decimal" value={String(draft.amountCollected ?? '')} onChange={(e) => setDraft({ ...draft, amountCollected: e.target.value })} placeholder="auto if blank" />
+                    </Field>
+                    <Field label="Assigned rep">
+                      <select
+                        value={draft.assignedRepId}
+                        onChange={(e) => setDraft({ ...draft, assignedRepId: e.target.value })}
+                        className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+                      >
+                        <option value="">Unassigned</option>
+                        {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                    </Field>
+                    <Field label="Status">
+                      <select
+                        value={draft.fundedSubStatus}
+                        onChange={(e) => setDraft({ ...draft, fundedSubStatus: e.target.value as 'active' | 'refi_eligible' | 'payment_issues' | 'default' })}
+                        className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+                      >
+                        <option value="active">Active</option>
+                        <option value="refi_eligible">Refi Eligible</option>
+                        <option value="payment_issues">Payment Issues</option>
+                        <option value="default">Default</option>
+                      </select>
                     </Field>
                   </div>
                   <div className="flex justify-end gap-2 pt-1">

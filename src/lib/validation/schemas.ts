@@ -143,6 +143,9 @@ export const upsertDealSchema = z.object({
   fundingDate: z.string().optional().nullable(),
   amountCollected: z.coerce.number().nonnegative().optional().nullable(),
   renewalNotes: z.string().max(10000).optional().nullable(),
+  // Funded-deal sub-status — only meaningful when status='funded'. The
+  // Funded Deals page exposes this as a small select on each row.
+  fundedSubStatus: z.enum(['active', 'refi_eligible', 'payment_issues', 'default']).optional().nullable(),
 });
 
 /* ---------- Submissions ---------- */

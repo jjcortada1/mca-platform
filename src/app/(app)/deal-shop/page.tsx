@@ -1,9 +1,10 @@
 'use client';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Button, Card, CardContent, Badge, PageHeader, Field } from '@/components/ui/primitives';
+import { Button, Card, CardContent, Badge, PageHeader, Field, Input } from '@/components/ui/primitives';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { US_STATES } from '@/lib/constants';
-import { Send, ChevronDown, ChevronRight, Mail, Phone, MapPin, Ban, FileText, Zap, Search } from 'lucide-react';
+import { Send, ChevronDown, ChevronRight, Mail, Phone, MapPin, Ban, FileText, Zap, Search, X, Paperclip } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { MatchResult } from '@/lib/matching/engine';
 
@@ -105,6 +106,181 @@ export default function DealShopPage() {
       .catch(() => setAlreadySubmitted(new Map()));
   }, [dealId]);
 
+  /* ========================================================================
+     SEND FORM STATE (inline submit, replaces /submit page handoff)
+     The form lives at the bottom of the page and is the only way to ship
+     a deal to selected funders. We collect: deal name, notes, attachments,
+     rep selector (auto-CCs the rep's email), additional CC, and trigger
+     /api/submissions/send. SMTP banner shows the configured sender.
+     ======================================================================== */
+  const [dealName, setDealName] = useState('');
+  const [dealNameLocked, setDealNameLocked] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [assignedRepId, setAssignedRepId] = useState('');
+  const [reps, setReps] = useState<{ id: string; name: string; email: string }[]>([]);
+  // Additional CC addresses entered manually. Rep CC auto-pulls from the
+  // selected rep's email and is rendered as a removable chip.
+  const [extraCc, setExtraCc] = useState<string[]>([]);
+  const [ccInput, setCcInput] = useState('');
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [sending, setSending] = useState(false);
+  const [sendResults, setSendResults] = useState<{ funderName: string; toEmails: string[]; success: boolean; message: string }[] | null>(null);
+  const [smtpConfigured, setSmtpConfigured] = useState<boolean | null>(null);
+  const [fromEmail, setFromEmail] = useState<string | null>(null);
+  // Post-send "view submissions?" confirmation. Replaces the native
+  // browser confirm() popup that used to fire at the top of the page.
+  const [showPostSendConfirm, setShowPostSendConfirm] = useState(false);
+
+  // Load company users for the rep dropdown + auto-fill rep email into CC.
+  useEffect(() => {
+    fetch('/api/users')
+      .then((r) => r.json())
+      .then((j) => {
+        const list = (j.data ?? j.users ?? []) as { id: string; name: string | null; email: string; role: string }[];
+        setReps(list
+          .filter((u) => u.role !== 'lead_source')
+          .map((u) => ({ id: u.id, name: u.name || u.email, email: u.email }))
+          .sort((a, b) => a.name.localeCompare(b.name)));
+      }).catch(() => {});
+    // SMTP status — informs the user where emails will send from.
+    fetch('/api/settings/smtp-status')
+      .then((r) => r.json())
+      .then((j) => {
+        const d = j?.data ?? j;
+        setSmtpConfigured(!!d?.hasConfig);
+        setFromEmail(d?.from ?? d?.user ?? null);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Auto-fill from existing deal: name + rep
+  useEffect(() => {
+    if (!dealId) return;
+    fetch(`/api/deals/${dealId}`)
+      .then((r) => r.json())
+      .then((j) => {
+        const d = j?.data ?? j?.deal ?? j;
+        if (d?.name) {
+          setDealName(d.name);
+          setDealNameLocked(true);
+        }
+        if (d?.assignedRepId) setAssignedRepId(d.assignedRepId);
+      })
+      .catch(() => {});
+  }, [dealId]);
+
+  // Computed CC list: rep's email (if rep selected) + manual entries, deduped.
+  const ccList = useMemo(() => {
+    const set = new Set<string>();
+    const repEmail = assignedRepId ? reps.find((r) => r.id === assignedRepId)?.email : null;
+    if (repEmail) set.add(repEmail.toLowerCase());
+    for (const e of extraCc) if (e) set.add(e.toLowerCase());
+    return Array.from(set);
+  }, [assignedRepId, reps, extraCc]);
+
+  function addCc() {
+    const v = ccInput.trim();
+    if (!v || !v.includes('@')) return;
+    if (extraCc.includes(v)) { setCcInput(''); return; }
+    setExtraCc([...extraCc, v]);
+    setCcInput('');
+  }
+  function removeCc(email: string) {
+    setExtraCc(extraCc.filter((e) => e !== email));
+  }
+  function onFilePick(files: FileList | null) {
+    if (!files) return;
+    setAttachments((prev) => {
+      const next = [...prev];
+      for (const f of Array.from(files)) {
+        if (!next.find((x) => x.name === f.name && x.size === f.size)) next.push(f);
+      }
+      return next;
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  /**
+   * Send the deal to the currently selected funders.
+   *
+   * Builds the FunderSubmission array from selectedFunders + the loaded
+   * funder details (we need the email addresses per funder). Manual funders
+   * (no funderId) aren't supported in this inline flow — they live on the
+   * full /submit page if anyone needs to add one. Server is the authority
+   * on duplicate-detection + ASCII subject mode + plain-subject funders.
+   */
+  async function sendNow() {
+    if (selectedFunders.size === 0) return;
+    if (smtpConfigured === false) {
+      alert('Email is not configured yet. Set up SMTP first.');
+      return;
+    }
+    if (!dealName.trim() && !dealId) {
+      alert('Enter a deal name first.');
+      return;
+    }
+    setSending(true);
+    setSendResults(null);
+
+    // Build the funder targets from the selectedFunders set.
+    const targets: { funderId: string; toEmails: string[] }[] = [];
+    for (const fid of Array.from(selectedFunders)) {
+      const f = funderMap.get(fid);
+      if (!f) continue;
+      const addrs = (f.emails ?? []).filter((e) => e && e.includes('@'));
+      // Fallback to a primary contact if no shopping emails are set.
+      if (addrs.length === 0) {
+        const primary = f.contacts?.find((c) => c.email);
+        if (primary?.email) addrs.push(primary.email);
+      }
+      if (addrs.length > 0) targets.push({ funderId: fid, toEmails: addrs });
+    }
+    if (targets.length === 0) {
+      alert('None of the selected funders have a submission email configured.');
+      setSending(false);
+      return;
+    }
+
+    const fd = new FormData();
+    if (dealId) fd.append('dealId', dealId);
+    fd.append('dealName', dealName.trim());
+    fd.append('bodyNotes', notes);
+    fd.append('funders', JSON.stringify(targets));
+    if (assignedRepId) fd.append('assignedRepId', assignedRepId);
+    fd.append('ccEmails', JSON.stringify(ccList));
+    for (let i = 0; i < attachments.length; i++) {
+      fd.append(`attachment_${i}`, attachments[i]);
+    }
+
+    try {
+      const res = await fetch('/api/submissions/send', { method: 'POST', body: fd });
+      const json = await res.json();
+      if (!res.ok) {
+        alert(json.error || 'Send failed.');
+        setSending(false);
+        return;
+      }
+      const rs = (json.results ?? []).map((r: { funderName?: string; toEmails?: string[]; toEmail?: string; success: boolean; error?: string }) => ({
+        funderName: r.funderName ?? (Array.isArray(r.toEmails) ? r.toEmails.join(', ') : r.toEmail ?? ''),
+        toEmails: r.toEmails ?? (r.toEmail ? [r.toEmail] : []),
+        success: r.success,
+        message: r.error || (r.success ? 'Sent' : 'Failed'),
+      }));
+      setSendResults(rs);
+
+      const okCount = rs.filter((r: { success: boolean }) => r.success).length;
+      if (okCount > 0 && rs.every((r: { success: boolean }) => r.success)) {
+        // Replace the old `confirm()` browser popup with an in-page modal.
+        setShowPostSendConfirm(true);
+      }
+    } catch (err) {
+      alert('Network error: ' + (err as Error).message);
+    } finally {
+      setSending(false);
+    }
+  }
+
   // Load match options + funder details once
   useEffect(() => {
     fetch('/api/settings/match-options')
@@ -190,24 +366,6 @@ export default function DealShopPage() {
     }
   }
 
-  function toSubmit() {
-    // Carry the selected funders to the submit page so they're pre-selected.
-    // If none are explicitly ticked, default to ALL matched funders.
-    const ids = selectedFunders.size > 0
-      ? Array.from(selectedFunders)
-      : (results?.matched.map((m) => m.funderId) ?? []);
-    try {
-      sessionStorage.setItem('shopSelectedFunderIds', JSON.stringify(ids));
-    } catch {
-      // ignore
-    }
-    // Carry over the deal context if we have one — submit will pre-fill the
-    // deal name and auto-CC the rep assigned to that deal.
-    const qs = new URLSearchParams({ shop: '1' });
-    if (dealId) qs.set('dealId', dealId);
-    router.push(`/submit?${qs.toString()}`);
-  }
-
   function toggleFunderSel(id: string) {
     setSelectedFunders((prev) => {
       const next = new Set(prev);
@@ -273,18 +431,8 @@ export default function DealShopPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Shop Deals"
-        description="Match a deal profile to qualifying funders, then submit."
-        actions={
-          results && totalMatched > 0 ? (
-            <Button onClick={toSubmit} className="gap-2">
-              <Send className="h-4 w-4" />
-              {selectedFunders.size > 0
-                ? `Shop ${selectedFunders.size} selected →`
-                : 'Submit deal →'}
-            </Button>
-          ) : undefined
-        }
+        title="Shop & Submit"
+        description="Enter deal criteria, see matching funders, select the ones you want, then send — all on one page."
       />
 
       {/* Centered intake card */}
@@ -633,6 +781,205 @@ export default function DealShopPage() {
           </div>
         )
       )}
+
+      {/* ===================================================================
+          SEND TO SELECTED FUNDERS (inline submit)
+          Lives at the bottom of the page so the flow reads naturally:
+          enter criteria → see matches → pick funders → write notes & send.
+          Becomes interactive only when at least one funder is checked,
+          and stays passive otherwise so it doesn't dominate the page when
+          the user is still discovering funders.
+          =================================================================== */}
+      {results && (
+        <Card className="border-primary/30">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold">
+                  Send to selected funders
+                  {selectedFunders.size > 0 && (
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">
+                      ({selectedFunders.size} funder{selectedFunders.size === 1 ? '' : 's'} selected)
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Each funder receives a separate email. Add notes + attachments below.
+                </p>
+              </div>
+              {fromEmail && (
+                <span className="text-[11px] text-muted-foreground hidden sm:block">
+                  From: <strong className="text-foreground">{fromEmail}</strong>
+                </span>
+              )}
+            </div>
+
+            {smtpConfigured === false && (
+              <div className="text-xs bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">
+                ⚠️ Email is not configured yet. Set up SMTP in Settings before sending.
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Field label="Deal name">
+                <Input
+                  value={dealName}
+                  onChange={(e) => setDealName(e.target.value)}
+                  disabled={dealNameLocked}
+                  placeholder="Acme Pizza – 2nd position"
+                />
+                {dealNameLocked && (
+                  <div className="text-[10px] text-muted-foreground mt-1">Locked to existing deal</div>
+                )}
+              </Field>
+              <Field label="Assigned rep (auto-CCs their email)">
+                <select
+                  value={assignedRepId}
+                  onChange={(e) => setAssignedRepId(e.target.value)}
+                  className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+                >
+                  <option value="">— Unassigned —</option>
+                  {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+              </Field>
+            </div>
+
+            <Field label="Notes (appears at the top of the email body)">
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={3}
+                placeholder="$45k 1st position, 14 month tib, 660 fico…"
+                className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm resize-y"
+              />
+            </Field>
+
+            <Field label="Additional CC (press Enter to add)">
+              <div className="space-y-1.5">
+                <Input
+                  value={ccInput}
+                  onChange={(e) => setCcInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCc(); } }}
+                  placeholder="someone@example.com"
+                  type="email"
+                />
+                {ccList.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {ccList.map((email) => {
+                      const isRep = !!(assignedRepId && reps.find((r) => r.id === assignedRepId)?.email.toLowerCase() === email);
+                      return (
+                        <span key={email} className={cn(
+                          'inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono',
+                          isRep ? 'bg-blue-100 text-blue-900' : 'bg-muted text-foreground'
+                        )}>
+                          {isRep && <span className="text-[9px] uppercase font-sans font-semibold">rep</span>}
+                          {email}
+                          {!isRep && (
+                            <button
+                              onClick={() => removeCc(email)}
+                              className="hover:text-destructive"
+                              title="Remove"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </Field>
+
+            <Field label="Attachments (optional)">
+              <div className="space-y-1.5">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  onChange={(e) => onFilePick(e.target.files)}
+                  className="hidden"
+                  id="deal-shop-attach"
+                />
+                <label
+                  htmlFor="deal-shop-attach"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-input bg-card text-xs font-medium cursor-pointer hover:bg-muted/30"
+                >
+                  <Paperclip className="h-3.5 w-3.5" />
+                  Add files
+                </label>
+                {attachments.length > 0 && (
+                  <div className="space-y-1">
+                    {attachments.map((f, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 text-xs bg-muted/30 rounded px-2 py-1">
+                        <span className="truncate">{f.name}</span>
+                        <span className="text-muted-foreground tabular-nums">{(f.size / 1024).toFixed(0)} KB</span>
+                        <button
+                          onClick={() => setAttachments(attachments.filter((_, x) => x !== i))}
+                          className="text-muted-foreground hover:text-destructive shrink-0"
+                          title="Remove"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Field>
+
+            <Button
+              onClick={sendNow}
+              disabled={sending || selectedFunders.size === 0 || smtpConfigured === false}
+              size="lg"
+              className="w-full"
+            >
+              <Send className="h-4 w-4 mr-2" />
+              {sending
+                ? 'Sending…'
+                : selectedFunders.size === 0
+                  ? 'Select funders above to enable send'
+                  : `Send to ${selectedFunders.size} funder${selectedFunders.size === 1 ? '' : 's'}`}
+            </Button>
+
+            {/* Inline send results — appears below the form, NOT at the top
+                of the page. Color-coded per row. */}
+            {sendResults && (
+              <div className="space-y-1.5 pt-2 border-t border-border">
+                <div className="text-xs font-semibold mb-1">Send results</div>
+                {sendResults.map((r, i) => (
+                  <div
+                    key={i}
+                    className={cn(
+                      'flex items-center justify-between py-1.5 px-2.5 rounded border-l-4 text-xs',
+                      r.success ? 'border-emerald-500 bg-emerald-50' : 'border-rose-500 bg-rose-50'
+                    )}
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{r.funderName}</div>
+                      <div className="text-[10px] text-muted-foreground font-mono truncate">{r.toEmails.join(', ')}</div>
+                    </div>
+                    <div className={cn('shrink-0 ml-2 text-[11px] font-medium', r.success ? 'text-emerald-700' : 'text-rose-700')}>
+                      {r.success ? '✓ Sent' : `✗ ${r.message}`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Post-send confirmation — replaces the old browser-top confirm popup */}
+      <ConfirmDialog
+        open={showPostSendConfirm}
+        title="All emails sent successfully"
+        description="Want to head over to the Submissions page to track responses?"
+        confirmLabel="View Submissions"
+        cancelLabel="Stay here"
+        onConfirm={() => router.push('/submissions')}
+        onCancel={() => setShowPostSendConfirm(false)}
+      />
     </div>
   );
 }
