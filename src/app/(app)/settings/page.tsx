@@ -9,6 +9,7 @@ import { useToast } from '@/components/toast';
 import {
   Palette, Mail, Send, FileText, DollarSign, Layers, ListChecks,
   Users as UsersIcon, GitBranch, Database, ShieldCheck, Menu as MenuIcon,
+  Trash2,
 } from 'lucide-react';
 
 type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar';
@@ -775,6 +776,10 @@ function UsersSection() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<(AppUser & { password?: string }) | null>(null);
   const [leadSourceList, setLeadSourceList] = useState<{ id: string; name: string }[]>([]);
+  // Delete confirmation state. When non-null the modal is open. Standard
+  // confirm-before-destroy pattern used everywhere in the app.
+  const [deleting, setDeleting] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -843,6 +848,40 @@ function UsersSection() {
     load();
   }
 
+  /**
+   * Delete a user (rep / admin / lead source login) from the company.
+   *
+   * Server-side guards already enforce:
+   *   • Cannot delete yourself.
+   *   • Cannot delete the last active admin.
+   *   • Company admins cannot delete master_admins.
+   * On any of those, the server returns an error message we surface to the
+   * user via toast. The optimistic local update removes the row only when
+   * the API call succeeds.
+   *
+   * Note on deal ownership: deleting a rep cascades `assignedRepId → NULL`
+   * on every deal they owned (via the FK's `onDelete: 'set null'` in the
+   * schema). Those deals show up in /submissions as "Unassigned · assign"
+   * so the admin can pick a new owner.
+   */
+  async function performDelete() {
+    if (!deleting) return;
+    setDeleteLoading(true);
+    const res = await fetch(`/api/users/${deleting.id}`, { method: 'DELETE' });
+    setDeleteLoading(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || 'Could not delete user.');
+      return;
+    }
+    toast.success('User deleted.');
+    // Optimistic local update so the row disappears immediately. Also
+    // close the edit drawer if the deleted user was being edited.
+    setUsers((arr) => arr.filter((u) => u.id !== deleting.id));
+    if (editing?.id === deleting.id) setEditing(null);
+    setDeleting(null);
+  }
+
   function newUser() {
     setEditing({ id: '', email: '', name: '', role: 'rep', isActive: true, permissions: [], password: '' });
   }
@@ -871,6 +910,7 @@ function UsersSection() {
                 <th className="px-4 py-2 font-medium">Email</th>
                 <th className="px-4 py-2 font-medium">Role</th>
                 <th className="px-4 py-2 font-medium">Status</th>
+                <th className="w-10"></th>
               </tr>
             </thead>
             <tbody>
@@ -880,6 +920,18 @@ function UsersSection() {
                   <td className="px-4 py-3 text-muted-foreground">{u.email}</td>
                   <td className="px-4 py-3"><Badge variant="outline">{u.role}</Badge></td>
                   <td className="px-4 py-3">{u.isActive ? <Badge variant="success">active</Badge> : <Badge variant="outline">inactive</Badge>}</td>
+                  {/* Inline delete — single click opens the confirm modal.
+                      Stop propagation so the row's own onClick (which opens
+                      the edit drawer) doesn't fire at the same time. */}
+                  <td className="px-2 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => setDeleting({ id: u.id, name: u.name, email: u.email })}
+                      title="Delete this user"
+                      className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -887,12 +939,41 @@ function UsersSection() {
         </CardContent>
       </Card>
 
+      {/* Confirmation modal — uses the shared component so the destruction
+          flow looks the same as deletes in /portfolio, etc. */}
+      <ConfirmDialog
+        open={!!deleting}
+        title={`Delete "${deleting?.name ?? ''}"?`}
+        description={
+          deleting
+            ? `This permanently removes ${deleting.email}'s login. Any deals they own will become Unassigned (you can reassign them from Submissions or Active Deals).`
+            : ''
+        }
+        confirmLabel="Delete user"
+        destructive
+        loading={deleteLoading}
+        onConfirm={performDelete}
+        onCancel={() => !deleteLoading && setDeleting(null)}
+      />
+
       {editing && (
         <div className="fixed inset-0 bg-black/40 z-40 flex justify-end" onClick={() => setEditing(null)}>
           <div className="w-full max-w-xl bg-background border-l border-border h-full overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 bg-background border-b border-border px-6 py-4 flex items-center justify-between z-10">
               <h2 className="text-lg font-semibold">{editing.id ? 'Edit user' : 'New user'}</h2>
               <div className="flex gap-2">
+                {/* Delete is only available for existing users (not for the
+                    new-user form, which has nothing to delete yet). */}
+                {editing.id && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setDeleting({ id: editing.id, name: editing.name, email: editing.email })}
+                    className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    Delete
+                  </Button>
+                )}
                 <Button variant="outline" size="sm" onClick={() => setEditing(null)}>Cancel</Button>
                 <Button size="sm" onClick={save}>Save</Button>
               </div>
@@ -2343,6 +2424,7 @@ function FundedTemplateSection() {
 import { ALL_NAV_ITEMS, DEFAULT_CATEGORIES } from '@/components/sidebar';
 import { SIDEBAR_ICON_NAMES, resolveIcon } from '@/lib/sidebar-icons';
 import { cn } from '@/lib/utils';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 interface EditCategory { id: string; label: string; items: string[] }
 
