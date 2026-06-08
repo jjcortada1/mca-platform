@@ -8,6 +8,7 @@ import {
   Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { resolveIcon } from '@/lib/sidebar-icons';
 import type { SessionUser } from '@/lib/auth/context';
 import type { Branding } from '@/lib/branding';
 
@@ -301,6 +302,8 @@ function SidebarBody({
   // flat order. Both null = default categories (Workflow/Commissions/Resources).
   const [savedOrder, setSavedOrder] = useState<string[] | null>(null);
   const [savedCategories, setSavedCategories] = useState<{ id: string; label: string; items: string[] }[] | null>(null);
+  // Per-item overrides (label rename + icon swap). Map keyed by href.
+  const [itemOverrides, setItemOverrides] = useState<Record<string, { label?: string; icon?: string }> | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetch('/api/settings/sidebar-order', { cache: 'no-store' })
@@ -309,17 +312,35 @@ function SidebarBody({
         if (cancelled) return;
         const o = j?.data?.order;
         const c = j?.data?.categories;
+        const ov = j?.data?.itemOverrides;
         if (Array.isArray(o)) setSavedOrder(o);
         if (Array.isArray(c)) setSavedCategories(c);
+        if (ov && typeof ov === 'object') setItemOverrides(ov);
       })
       .catch(() => { /* fall through to default order */ });
     return () => { cancelled = true; };
   }, []);
 
+  // Apply per-item label/icon overrides to ALL_NAV_ITEMS so the rest of the
+  // pipeline (resolveCategories, permission checks) operates on the renamed
+  // items. We don't mutate ALL_NAV_ITEMS itself — overrides are local to
+  // each tenant.
+  const itemsWithOverrides: NavItem[] = ALL_NAV_ITEMS.map((item) => {
+    const ov = itemOverrides?.[item.href];
+    if (!ov) return item;
+    return {
+      ...item,
+      label: ov.label || item.label,
+      // Icon override: look up the named icon, falling back to the original
+      // component if the override name isn't in our registry.
+      icon: resolveIcon(ov.icon, item.icon as Parameters<typeof resolveIcon>[1]),
+    };
+  });
+
   // Build the resolved sections — each labeled section contains items the
   // current user can see. Empty sections are dropped.
   const visibleSections = resolveCategories(
-    ALL_NAV_ITEMS,
+    itemsWithOverrides,
     savedCategories,
     savedOrder,
     (item) => isAdmin || user.permissions.includes(item.perm),

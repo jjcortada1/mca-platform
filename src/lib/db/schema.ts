@@ -90,6 +90,13 @@ export const companies = pgTable('companies', {
   // section appear in an auto "Other" bucket at the bottom so future app
   // releases that add new nav items show up without an admin re-edit.
   sidebarCategories: jsonb('sidebar_categories').$type<{ id: string; label: string; items: string[] }[]>(),
+  // Per-item overrides for sidebar nav items — lets the admin rename a tab
+  // ("Funded Deals" → "Portfolio") and swap its icon (e.g. from TrendingUp
+  // to BarChart) without touching the master ALL_NAV_ITEMS list. Keyed by
+  // the item's href ('/portfolio'). Empty/null fields fall back to the
+  // built-in defaults. Additive — null = no overrides, every tab uses its
+  // default label/icon.
+  sidebarItemOverrides: jsonb('sidebar_item_overrides').$type<Record<string, { label?: string; icon?: string }>>(),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

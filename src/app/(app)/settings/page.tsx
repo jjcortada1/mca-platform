@@ -2341,6 +2341,8 @@ function FundedTemplateSection() {
    in future releases auto-bucket into "Other" until placed.
    ============================================================ */
 import { ALL_NAV_ITEMS, DEFAULT_CATEGORIES } from '@/components/sidebar';
+import { SIDEBAR_ICON_NAMES, resolveIcon } from '@/lib/sidebar-icons';
+import { cn } from '@/lib/utils';
 
 interface EditCategory { id: string; label: string; items: string[] }
 
@@ -2360,6 +2362,11 @@ function SidebarOrderSection() {
   // For the per-category "Add item" picker — which category is open + which
   // item is currently selected in its dropdown.
   const [pickerOpen, setPickerOpen] = useState<string | null>(null);
+  // Per-item label/icon overrides (admin-controlled, sync globally). Keyed
+  // by href. Null fields = use the item's hardcoded default.
+  const [overrides, setOverrides] = useState<Record<string, { label?: string; icon?: string }>>({});
+  // Which item's inline editor is open. Stores the href. Null = closed.
+  const [editingItem, setEditingItem] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/settings/sidebar-order', { cache: 'no-store' })
@@ -2368,6 +2375,7 @@ function SidebarOrderSection() {
         // Priority: saved categories → saved flat order → default categories.
         const savedCats = j?.data?.categories as EditCategory[] | null;
         const savedOrder = j?.data?.order as string[] | null;
+        const savedOv = j?.data?.itemOverrides as Record<string, { label?: string; icon?: string }> | null;
         if (Array.isArray(savedCats) && savedCats.length) {
           setCats(savedCats.map((c) => ({
             id: c.id, label: c.label, items: [...(c.items ?? [])],
@@ -2377,9 +2385,27 @@ function SidebarOrderSection() {
           // editable section the admin can split apart.
           setCats([{ id: 'menu', label: 'Menu', items: [...savedOrder] }]);
         }
+        if (savedOv && typeof savedOv === 'object') setOverrides(savedOv);
       })
       .finally(() => setLoaded(true));
   }, []);
+
+  // Helper: update one item's override. Empty values clear that field; if
+  // both label and icon end up empty, the entire override entry is removed
+  // so we don't persist no-op rows.
+  function setItemOverride(href: string, patch: { label?: string; icon?: string }) {
+    setOverrides((prev) => {
+      const next = { ...prev };
+      const current = next[href] ?? {};
+      const merged = { ...current, ...patch };
+      if (!merged.label && !merged.icon) {
+        delete next[href];
+      } else {
+        next[href] = merged;
+      }
+      return next;
+    });
+  }
 
   // Set of hrefs already placed in some category. Used to figure out which
   // items are still available to add to a category.
@@ -2456,10 +2482,24 @@ function SidebarOrderSection() {
       label: c.label.trim() || 'Section',
       items: c.items,
     }));
+    // Strip empty/no-op overrides before sending.
+    const trimmedOverrides: Record<string, { label?: string; icon?: string }> = {};
+    for (const [href, ov] of Object.entries(overrides)) {
+      const label = ov.label?.trim();
+      const icon = ov.icon?.trim();
+      if (!label && !icon) continue;
+      trimmedOverrides[href] = {};
+      if (label) trimmedOverrides[href].label = label;
+      if (icon) trimmedOverrides[href].icon = icon;
+    }
     const res = await fetch('/api/settings/sidebar-order', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ categories: payload, order: null }),
+      body: JSON.stringify({
+        categories: payload,
+        order: null,
+        itemOverrides: Object.keys(trimmedOverrides).length > 0 ? trimmedOverrides : null,
+      }),
     });
     setSaving(false);
     if (!res.ok) {
@@ -2470,12 +2510,12 @@ function SidebarOrderSection() {
     toast.success('Saved. Refresh to see the new sidebar.');
   }
   async function resetToDefault() {
-    if (!confirm('Reset the sidebar to the default sections for everyone in your company?')) return;
+    if (!confirm('Reset the sidebar to the default sections + names for everyone in your company?')) return;
     setResetting(true);
     const res = await fetch('/api/settings/sidebar-order', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ categories: null, order: null }),
+      body: JSON.stringify({ categories: null, order: null, itemOverrides: null }),
     });
     setResetting(false);
     if (!res.ok) {
@@ -2484,6 +2524,7 @@ function SidebarOrderSection() {
       return;
     }
     setCats(DEFAULT_CATEGORIES.map((c) => ({ ...c, items: [...c.items] })));
+    setOverrides({});
     toast.success('Reset to default. Refresh to see the change.');
   }
 
@@ -2547,44 +2588,145 @@ function SidebarOrderSection() {
                       </div>
                     );
                   }
-                  const Icon = item.icon;
+                  // Apply any saved override so the editor shows the actual
+                  // sidebar label/icon (matching what users will see).
+                  const ov = overrides[href] ?? {};
+                  const displayLabel = ov.label || item.label;
+                  const DisplayIcon = resolveIcon(ov.icon, item.icon as Parameters<typeof resolveIcon>[1]);
+                  const isEditing = editingItem === href;
+                  const isCustomized = !!(ov.label || ov.icon);
                   return (
-                    <div key={href} className="flex items-center gap-2 p-1.5 rounded border border-border">
-                      <div className="flex flex-col">
+                    <div key={href} className="rounded border border-border">
+                      <div className="flex items-center gap-2 p-1.5">
+                        <div className="flex flex-col">
+                          <button
+                            onClick={() => moveItem(catIdx, itemIdx, -1)}
+                            disabled={itemIdx === 0}
+                            className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
+                            title="Move up"
+                          >▲</button>
+                          <button
+                            onClick={() => moveItem(catIdx, itemIdx, 1)}
+                            disabled={itemIdx === cat.items.length - 1}
+                            className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
+                            title="Move down"
+                          >▼</button>
+                        </div>
+                        <DisplayIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <div className="text-sm font-medium flex-1 min-w-0 truncate flex items-center gap-1.5">
+                          {displayLabel}
+                          {isCustomized && (
+                            <span className="text-[9px] uppercase font-semibold text-primary bg-primary/10 px-1 rounded">
+                              custom
+                            </span>
+                          )}
+                        </div>
+                        {/* Edit (rename + change icon) — opens an inline editor */}
                         <button
-                          onClick={() => moveItem(catIdx, itemIdx, -1)}
-                          disabled={itemIdx === 0}
-                          className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
-                          title="Move up"
-                        >▲</button>
+                          onClick={() => setEditingItem(isEditing ? null : href)}
+                          title="Rename or change icon"
+                          className={cn(
+                            'h-6 px-1.5 rounded text-xs',
+                            isEditing ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                          )}
+                        >
+                          ✎
+                        </button>
+                        {/* Move to other section */}
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value) moveItemToCategory(catIdx, itemIdx, e.target.value);
+                          }}
+                          className="h-7 rounded border border-input bg-card px-1 text-xs text-muted-foreground"
+                          title="Move to another section"
+                        >
+                          <option value="">Move to…</option>
+                          {cats.filter((c) => c.id !== cat.id).map((c) => (
+                            <option key={c.id} value={c.id}>{c.label}</option>
+                          ))}
+                        </select>
                         <button
-                          onClick={() => moveItem(catIdx, itemIdx, 1)}
-                          disabled={itemIdx === cat.items.length - 1}
-                          className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
-                          title="Move down"
-                        >▼</button>
+                          onClick={() => removeItem(catIdx, itemIdx)}
+                          title="Remove from sidebar"
+                          className="text-muted-foreground hover:text-destructive px-1 text-sm"
+                        >✕</button>
                       </div>
-                      <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div className="text-sm font-medium flex-1 min-w-0 truncate">{item.label}</div>
-                      {/* Move to other section */}
-                      <select
-                        value=""
-                        onChange={(e) => {
-                          if (e.target.value) moveItemToCategory(catIdx, itemIdx, e.target.value);
-                        }}
-                        className="h-7 rounded border border-input bg-card px-1 text-xs text-muted-foreground"
-                        title="Move to another section"
-                      >
-                        <option value="">Move to…</option>
-                        {cats.filter((c) => c.id !== cat.id).map((c) => (
-                          <option key={c.id} value={c.id}>{c.label}</option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={() => removeItem(catIdx, itemIdx)}
-                        title="Remove from sidebar"
-                        className="text-muted-foreground hover:text-destructive px-1 text-sm"
-                      >✕</button>
+                      {/* Inline editor — label input + icon picker. Empty
+                          label = revert to the item's default name. Same
+                          for empty icon. */}
+                      {isEditing && (
+                        <div className="border-t border-border bg-muted/20 p-2 space-y-2">
+                          <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
+                            <div>
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                                Rename ({item.label} by default)
+                              </div>
+                              <input
+                                type="text"
+                                value={ov.label ?? ''}
+                                onChange={(e) => setItemOverride(href, { label: e.target.value })}
+                                placeholder={item.label}
+                                maxLength={40}
+                                className="h-8 w-full rounded-md border border-input bg-card px-2 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                                Icon
+                              </div>
+                              <select
+                                value={ov.icon ?? ''}
+                                onChange={(e) => setItemOverride(href, { icon: e.target.value })}
+                                className="h-8 rounded-md border border-input bg-card px-2 text-sm min-w-[140px]"
+                              >
+                                <option value="">— default —</option>
+                                {SIDEBAR_ICON_NAMES.map((n) => (
+                                  <option key={n} value={n}>{n}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          {/* Icon preview grid — visual confirmation. */}
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {SIDEBAR_ICON_NAMES.map((n) => {
+                              const I = resolveIcon(n, item.icon as Parameters<typeof resolveIcon>[1]);
+                              const isPicked = (ov.icon ?? '') === n;
+                              return (
+                                <button
+                                  key={n}
+                                  type="button"
+                                  onClick={() => setItemOverride(href, { icon: n })}
+                                  title={n}
+                                  className={cn(
+                                    'h-7 w-7 rounded flex items-center justify-center transition-colors',
+                                    isPicked
+                                      ? 'bg-primary text-primary-foreground'
+                                      : 'bg-card border border-border text-muted-foreground hover:bg-muted'
+                                  )}
+                                >
+                                  <I className="h-4 w-4" />
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {isCustomized && (
+                            <button
+                              onClick={() => {
+                                setItemOverride(href, { label: undefined, icon: undefined });
+                                setOverrides((prev) => {
+                                  const next = { ...prev };
+                                  delete next[href];
+                                  return next;
+                                });
+                              }}
+                              className="text-[11px] text-muted-foreground hover:text-destructive"
+                            >
+                              Reset this tab to defaults
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

@@ -170,14 +170,21 @@ export default function DealShopPage() {
       .catch(() => {});
   }, [dealId]);
 
-  // Computed CC list: rep's email (if rep selected) + manual entries, deduped.
+  // When a rep is selected, the user can OPTIONALLY add the rep's email to CC.
+  // Default OFF so the rep isn't forced onto every send — keeps the prompt's
+  // "give option to cc them, don't force cc them" behavior.
+  const [ccAssignedRep, setCcAssignedRep] = useState(false);
+  // Computed CC list: rep's email (if rep selected AND ccAssignedRep is on)
+  // + manual entries, deduped.
   const ccList = useMemo(() => {
     const set = new Set<string>();
-    const repEmail = assignedRepId ? reps.find((r) => r.id === assignedRepId)?.email : null;
+    const repEmail = (ccAssignedRep && assignedRepId)
+      ? reps.find((r) => r.id === assignedRepId)?.email
+      : null;
     if (repEmail) set.add(repEmail.toLowerCase());
     for (const e of extraCc) if (e) set.add(e.toLowerCase());
     return Array.from(set);
-  }, [assignedRepId, reps, extraCc]);
+  }, [ccAssignedRep, assignedRepId, reps, extraCc]);
 
   function addCc() {
     const v = ccInput.trim();
@@ -323,14 +330,20 @@ export default function DealShopPage() {
     return v === undefined || v === null ? null : Number(v);
   }
 
-  async function runMatch() {
+  async function runMatch(opts: { silent?: boolean } = {}) {
     setError(null);
-    if (!revenueOption) {
-      setError('Pick a revenue range.');
-      return;
-    }
-    if (!position) {
-      setError('Pick number of positions.');
+    // In live/auto mode, missing fields just clear the result instead of
+    // raising an error toast. In explicit mode (user clicked the button),
+    // we keep the old strict validation so the user sees what's missing.
+    const minimumPresent = revenueOption && position;
+    if (!minimumPresent) {
+      if (!opts.silent) {
+        if (!revenueOption) { setError('Pick a revenue range.'); return; }
+        if (!position) { setError('Pick number of positions.'); return; }
+      }
+      // Silent mode: clear any prior results so the right panel falls back
+      // to the "all funders" picker. Don't show an error.
+      setResults(null);
       return;
     }
 
@@ -353,18 +366,33 @@ export default function DealShopPage() {
       });
       const json = await res.json();
       if (!res.ok) {
-        setError(json.error || 'Match failed');
+        if (!opts.silent) setError(json.error || 'Match failed');
         setResults(null);
         return;
       }
       setResults(json);
       setActiveTier('all');
-      setExpanded(new Set());
-      setSelectedFunders(new Set());
+      // DON'T clear selections on a silent re-match — the user may have
+      // already picked funders and we don't want their checks to drop as
+      // the criteria refines. On explicit clicks we DO reset since that's
+      // typically "start over."
+      if (!opts.silent) {
+        setExpanded(new Set());
+        setSelectedFunders(new Set());
+      }
     } finally {
       setLoading(false);
     }
   }
+
+  // Live matching — auto-trigger when criteria changes. 300ms debounce so
+  // dragging through select dropdowns doesn't spam the API. Silent mode so
+  // missing fields just blank the right panel instead of showing errors.
+  useEffect(() => {
+    const t = setTimeout(() => { runMatch({ silent: true }); }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revenueOption, creditOption, position, industry, state, dealType]);
 
   function toggleFunderSel(id: string) {
     setSelectedFunders((prev) => {
@@ -429,29 +457,39 @@ export default function DealShopPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <PageHeader
         title="Shop & Submit"
         description="Enter deal criteria, see matching funders, select the ones you want, then send — all on one page."
       />
 
-      {/* Centered intake card */}
-      <div className="max-w-3xl mx-auto w-full">
+      {/* ====================================================================
+          SPLIT LAYOUT
+          Left column (5/12 ≈ 42%): compact deal profile + send form.
+          Right column (7/12 ≈ 58%): match results, ALWAYS visible. When no
+          criteria have been entered the right panel shows the full active
+          funder list so the user can pick directly without doing intake.
+          On narrow screens we stack (single column), preserving order.
+          ==================================================================== */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+
+        {/* ============ LEFT COLUMN — DEAL PROFILE + SEND ============ */}
+        <div className="lg:col-span-5 space-y-3 min-w-0">
         <Card>
-          <CardContent className="p-6 space-y-5">
-            <div className="text-center pb-3 border-b border-border">
-              <div className="inline-flex items-center justify-center h-10 w-10 rounded-full bg-primary/10 mb-2">
-                <Search className="h-5 w-5 text-primary" />
-              </div>
-              <h2 className="text-base font-semibold">Deal Profile</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">All fields shape which funders qualify.</p>
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-2 pb-2 border-b border-border">
+              <Search className="h-4 w-4 text-primary" />
+              <h2 className="text-sm font-semibold">Deal Profile</h2>
+              <span className="text-[10px] text-muted-foreground ml-auto">Live matching — right panel updates as you type</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Compact 2-col grid — Revenue/Credit/Position/Industry/State.
+                Drop the generous gap-4 + p-6 of the original centered card. */}
+            <div className="grid grid-cols-2 gap-2">
               {/* Revenue */}
               <Field label="Monthly Revenue" required>
                 <Select value={revenueOption} onChange={setRevenueOption} options={[
-                  { value: '', label: '— Pick a range —' },
+                  { value: '', label: '— Pick —' },
                   ...revenueRanges.map((r) => ({ value: r.value, label: r.label })),
                 ]} />
               </Field>
@@ -464,7 +502,7 @@ export default function DealShopPage() {
               </Field>
 
               {/* Position */}
-              <Field label="Number of Positions" required>
+              <Field label="Positions" required>
                 <Select value={position} onChange={setPosition} options={[
                   { value: '', label: '— Pick —' },
                   ...positionOptions.map((p) => ({ value: p.value, label: p.label })),
@@ -472,14 +510,14 @@ export default function DealShopPage() {
               </Field>
 
               {/* Industry */}
-              <Field label="Industry" hint='Pick "Other" to skip industry filtering'>
+              <Field label="Industry">
                 <Select value={industry} onChange={setIndustry} options={[
                   ...industries.map((i) => ({ value: i.value, label: i.label })),
                 ]} />
               </Field>
 
               {/* State */}
-              <Field label="State" hint='Pick "Other" to skip state filtering'>
+              <Field label="State" className="col-span-2">
                 <Select value={state} onChange={setState} options={[
                   { value: 'other', label: 'Other / N/A' },
                   ...(stateOptions.length > 0
@@ -489,16 +527,16 @@ export default function DealShopPage() {
                 ]} />
               </Field>
 
-              {/* Deal type */}
-              <Field label="Deal Type" className="sm:col-span-2">
-                <div className="grid grid-cols-2 gap-2">
+              {/* Deal type — compact chip row instead of large stacked buttons */}
+              <Field label="Deal Type" className="col-span-2">
+                <div className="grid grid-cols-2 gap-1.5">
                   {dealTypes.map((d) => (
                     <button
                       key={d.value}
                       type="button"
                       onClick={() => setDealType(d.value)}
                       className={cn(
-                        'px-4 py-2.5 rounded border-2 text-sm font-medium transition',
+                        'px-2.5 py-1.5 rounded border text-xs font-medium transition',
                         dealType === d.value
                           ? 'bg-primary text-primary-foreground border-primary'
                           : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30',
@@ -517,16 +555,209 @@ export default function DealShopPage() {
               </div>
             )}
 
-            <div className="flex items-center justify-between pt-3 border-t border-border">
-              <Button variant="ghost" onClick={clearForm} type="button">Clear</Button>
-              <Button onClick={runMatch} loading={loading} className="gap-1.5 px-6">
-                <Zap className="h-4 w-4" />
-                Find Funders
-              </Button>
+            <div className="flex items-center justify-between pt-1">
+              <Button variant="ghost" size="sm" onClick={clearForm} type="button">Clear</Button>
+              {loading && <span className="text-[11px] text-muted-foreground italic">Matching…</span>}
             </div>
           </CardContent>
         </Card>
-      </div>
+
+        {/* ====================================================================
+            SEND TO SELECTED FUNDERS — left column, below intake.
+            Becomes interactive only when at least one funder is selected on
+            the right panel. The rep CC checkbox makes the rep email opt-in
+            rather than auto-CC'd (per spec).
+            ==================================================================== */}
+        <Card className="border-primary/30">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">
+                Send to selected funders
+                {selectedFunders.size > 0 && (
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                    ({selectedFunders.size})
+                  </span>
+                )}
+              </h3>
+              {fromEmail && (
+                <span className="text-[10px] text-muted-foreground truncate">
+                  From: <strong className="text-foreground">{fromEmail}</strong>
+                </span>
+              )}
+            </div>
+
+            {smtpConfigured === false && (
+              <div className="text-[11px] bg-amber-50 border border-amber-200 text-amber-900 rounded px-2.5 py-1.5">
+                ⚠️ Email not configured. Set up SMTP in Settings.
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 gap-2">
+              <Field label="Deal name">
+                <Input
+                  value={dealName}
+                  onChange={(e) => setDealName(e.target.value)}
+                  disabled={dealNameLocked}
+                  placeholder="Acme Pizza – 2nd position"
+                />
+                {dealNameLocked && (
+                  <div className="text-[10px] text-muted-foreground mt-1">Locked to existing deal</div>
+                )}
+              </Field>
+              <Field label="Assigned rep (optional)">
+                <select
+                  value={assignedRepId}
+                  onChange={(e) => setAssignedRepId(e.target.value)}
+                  className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+                >
+                  <option value="">— Unassigned —</option>
+                  {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+                {/* Opt-in CC checkbox — replaces the previous auto-CC behavior
+                    so the rep isn't force-added to every send. Only renders
+                    when a rep is actually selected. */}
+                {assignedRepId && (
+                  <label className="flex items-center gap-1.5 mt-1.5 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={ccAssignedRep}
+                      onChange={(e) => setCcAssignedRep(e.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-border accent-[var(--primary,#2563eb)]"
+                    />
+                    <span className="text-muted-foreground">
+                      Also CC this rep ({reps.find((r) => r.id === assignedRepId)?.email})
+                    </span>
+                  </label>
+                )}
+              </Field>
+            </div>
+
+            <Field label="Notes (appears at top of email)">
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={3}
+                placeholder="$45k 1st position, 14 month tib, 660 fico…"
+                className="w-full rounded-md border border-input bg-card px-2.5 py-1.5 text-sm resize-y"
+              />
+            </Field>
+
+            <Field label="Additional CC">
+              <div className="space-y-1.5">
+                <Input
+                  value={ccInput}
+                  onChange={(e) => setCcInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCc(); } }}
+                  placeholder="someone@example.com — Enter to add"
+                  type="email"
+                />
+                {ccList.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {ccList.map((email) => {
+                      const isRep = !!(ccAssignedRep && assignedRepId && reps.find((r) => r.id === assignedRepId)?.email.toLowerCase() === email);
+                      return (
+                        <span key={email} className={cn(
+                          'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono',
+                          isRep ? 'bg-blue-100 text-blue-900' : 'bg-muted text-foreground'
+                        )}>
+                          {isRep && <span className="text-[8px] uppercase font-sans font-semibold">rep</span>}
+                          {email}
+                          {!isRep && (
+                            <button
+                              onClick={() => removeCc(email)}
+                              className="hover:text-destructive"
+                              title="Remove"
+                            >
+                              <X className="h-2.5 w-2.5" />
+                            </button>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </Field>
+
+            <Field label="Attachments (optional)">
+              <div className="space-y-1.5">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  onChange={(e) => onFilePick(e.target.files)}
+                  className="hidden"
+                  id="deal-shop-attach"
+                />
+                <label
+                  htmlFor="deal-shop-attach"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-input bg-card text-xs font-medium cursor-pointer hover:bg-muted/30"
+                >
+                  <Paperclip className="h-3 w-3" />
+                  Add files
+                </label>
+                {attachments.length > 0 && (
+                  <div className="space-y-1">
+                    {attachments.map((f, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 text-[11px] bg-muted/30 rounded px-2 py-0.5">
+                        <span className="truncate">{f.name}</span>
+                        <span className="text-muted-foreground tabular-nums">{(f.size / 1024).toFixed(0)} KB</span>
+                        <button
+                          onClick={() => setAttachments(attachments.filter((_, x) => x !== i))}
+                          className="text-muted-foreground hover:text-destructive shrink-0"
+                          title="Remove"
+                        >
+                          <X className="h-2.5 w-2.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Field>
+
+            <Button
+              onClick={sendNow}
+              disabled={sending || selectedFunders.size === 0 || smtpConfigured === false}
+              className="w-full"
+            >
+              <Send className="h-4 w-4 mr-2" />
+              {sending
+                ? 'Sending…'
+                : selectedFunders.size === 0
+                  ? 'Pick funders →'
+                  : `Send to ${selectedFunders.size} funder${selectedFunders.size === 1 ? '' : 's'}`}
+            </Button>
+
+            {sendResults && (
+              <div className="space-y-1 pt-2 border-t border-border">
+                <div className="text-[11px] font-semibold">Send results</div>
+                {sendResults.map((r, i) => (
+                  <div
+                    key={i}
+                    className={cn(
+                      'flex items-center justify-between gap-2 py-1 px-2 rounded border-l-2 text-[11px]',
+                      r.success ? 'border-emerald-500 bg-emerald-50' : 'border-rose-500 bg-rose-50'
+                    )}
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{r.funderName}</div>
+                      <div className="text-[9px] text-muted-foreground font-mono truncate">{r.toEmails.join(', ')}</div>
+                    </div>
+                    <div className={cn('shrink-0 text-[10px] font-medium', r.success ? 'text-emerald-700' : 'text-rose-700')}>
+                      {r.success ? '✓ Sent' : `✗ ${r.message}`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        </div>
+        {/* ============ END LEFT COLUMN ============ */}
+
+        {/* ============ RIGHT COLUMN — FUNDER MATCHES, ALWAYS VISIBLE ============ */}
+        <div className="lg:col-span-7 space-y-3 lg:sticky lg:top-4 lg:self-start min-w-0">
 
       {/* Results section */}
       {results && (
@@ -559,42 +790,43 @@ export default function DealShopPage() {
               )}
             </div>
 
-            <div className="grid lg:grid-cols-[200px_1fr] gap-4">
-              {/* Tier rail */}
-              <Card className="self-start lg:sticky lg:top-4">
-                <CardContent className="p-2">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-3 py-2">
-                    Filter by tier
-                  </div>
-                  <button
-                    onClick={() => setActiveTier('all')}
-                    className={cn(
-                      'w-full flex items-center justify-between px-3 py-2 rounded text-sm transition-colors',
-                      activeTier === 'all' ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'
-                    )}
-                  >
-                    <span>All tiers</span>
-                    <Badge variant="outline" className="text-[10px]">{totalMatched + totalExcluded}</Badge>
-                  </button>
-                  {tierGroups.map((g) => (
-                    <button
-                      key={g.tier}
-                      onClick={() => setActiveTier(g.tier)}
-                      className={cn(
-                        'w-full flex items-center justify-between px-3 py-2 rounded text-sm transition-colors',
-                        activeTier === g.tier ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'
-                      )}
-                    >
-                      <span className="truncate">{g.tier}</span>
-                      <span className="flex items-center gap-1 shrink-0">
-                        {g.matched.length > 0 && <Badge variant="success" className="text-[10px]">{g.matched.length}</Badge>}
-                        {g.excluded.length > 0 && <Badge variant="default" className="text-[10px]">{g.excluded.length}</Badge>}
-                      </span>
-                    </button>
-                  ))}
-                </CardContent>
-              </Card>
+            {/* Tier filter — horizontal chip row instead of side rail so
+                the funder list gets the full right-column width. */}
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                onClick={() => setActiveTier('all')}
+                className={cn(
+                  'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors',
+                  activeTier === 'all'
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
+                )}
+              >
+                All tiers
+                <span className={cn('tabular-nums px-1 rounded text-[10px]',
+                  activeTier === 'all' ? 'bg-primary-foreground/20' : 'bg-muted')}>{totalMatched + totalExcluded}</span>
+              </button>
+              {tierGroups.map((g) => (
+                <button
+                  key={g.tier}
+                  onClick={() => setActiveTier(g.tier)}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors max-w-[180px]',
+                    activeTier === g.tier
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
+                  )}
+                >
+                  <span className="truncate">{g.tier}</span>
+                  <span className="flex items-center gap-0.5 shrink-0">
+                    {g.matched.length > 0 && <Badge variant="success" className="text-[9px]">{g.matched.length}</Badge>}
+                    {g.excluded.length > 0 && <Badge variant="default" className="text-[9px]">{g.excluded.length}</Badge>}
+                  </span>
+                </button>
+              ))}
+            </div>
 
+            <div>
               {/* Results table */}
               <div className="space-y-4 min-w-0">
                 {/* Already-submitted bucket — only when the user navigated
@@ -782,193 +1014,77 @@ export default function DealShopPage() {
         )
       )}
 
-      {/* ===================================================================
-          SEND TO SELECTED FUNDERS (inline submit)
-          Lives at the bottom of the page so the flow reads naturally:
-          enter criteria → see matches → pick funders → write notes & send.
-          Becomes interactive only when at least one funder is checked,
-          and stays passive otherwise so it doesn't dominate the page when
-          the user is still discovering funders.
-          =================================================================== */}
-      {results && (
-        <Card className="border-primary/30">
-          <CardContent className="p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold">
-                  Send to selected funders
-                  {selectedFunders.size > 0 && (
-                    <span className="ml-2 text-xs font-normal text-muted-foreground">
-                      ({selectedFunders.size} funder{selectedFunders.size === 1 ? '' : 's'} selected)
-                    </span>
-                  )}
-                </h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Each funder receives a separate email. Add notes + attachments below.
-                </p>
-              </div>
-              {fromEmail && (
-                <span className="text-[11px] text-muted-foreground hidden sm:block">
-                  From: <strong className="text-foreground">{fromEmail}</strong>
-                </span>
-              )}
+      {/* Manual funder picker — shown when no match has been run (criteria
+          incomplete). Lets the broker who already knows where to shop just
+          pick funders directly without entering deal info. The same
+          selectedFunders state drives the send form on the left. */}
+      {!results && (
+        <Card>
+          <CardContent className="p-3">
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/80">
+                Active funders ({funderMap.size})
+              </h3>
+              <span className="text-[10px] text-muted-foreground italic">
+                Enter criteria for matching · or pick directly
+              </span>
             </div>
-
-            {smtpConfigured === false && (
-              <div className="text-xs bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">
-                ⚠️ Email is not configured yet. Set up SMTP in Settings before sending.
+            {funderMap.size === 0 ? (
+              <div className="text-xs text-muted-foreground py-6 text-center">
+                No funders configured yet. Add some in the <a href="/funders" className="text-primary hover:underline">Funders</a> tab.
               </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Field label="Deal name">
-                <Input
-                  value={dealName}
-                  onChange={(e) => setDealName(e.target.value)}
-                  disabled={dealNameLocked}
-                  placeholder="Acme Pizza – 2nd position"
-                />
-                {dealNameLocked && (
-                  <div className="text-[10px] text-muted-foreground mt-1">Locked to existing deal</div>
-                )}
-              </Field>
-              <Field label="Assigned rep (auto-CCs their email)">
-                <select
-                  value={assignedRepId}
-                  onChange={(e) => setAssignedRepId(e.target.value)}
-                  className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
-                >
-                  <option value="">— Unassigned —</option>
-                  {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                </select>
-              </Field>
-            </div>
-
-            <Field label="Notes (appears at the top of the email body)">
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={3}
-                placeholder="$45k 1st position, 14 month tib, 660 fico…"
-                className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm resize-y"
-              />
-            </Field>
-
-            <Field label="Additional CC (press Enter to add)">
-              <div className="space-y-1.5">
-                <Input
-                  value={ccInput}
-                  onChange={(e) => setCcInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCc(); } }}
-                  placeholder="someone@example.com"
-                  type="email"
-                />
-                {ccList.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {ccList.map((email) => {
-                      const isRep = !!(assignedRepId && reps.find((r) => r.id === assignedRepId)?.email.toLowerCase() === email);
-                      return (
-                        <span key={email} className={cn(
-                          'inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono',
-                          isRep ? 'bg-blue-100 text-blue-900' : 'bg-muted text-foreground'
-                        )}>
-                          {isRep && <span className="text-[9px] uppercase font-sans font-semibold">rep</span>}
-                          {email}
-                          {!isRep && (
-                            <button
-                              onClick={() => removeCc(email)}
-                              className="hover:text-destructive"
-                              title="Remove"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
+            ) : (
+              <div className="divide-y divide-border/60 max-h-[calc(100vh-220px)] overflow-y-auto">
+                {Array.from(funderMap.values())
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map((f) => {
+                    const shoppingEmails: string[] = (f.emails ?? []).filter(Boolean);
+                    const primary = f.contacts?.find((c) => c.email);
+                    const displayEmail = shoppingEmails[0] ?? primary?.email ?? null;
+                    const isSelected = selectedFunders.has(f.id);
+                    const sub = alreadySubmitted.get(f.id);
+                    return (
+                      <label
+                        key={f.id}
+                        className={cn(
+                          'flex items-center gap-2 py-1.5 px-2 cursor-pointer hover:bg-muted/30 rounded',
+                          isSelected && 'bg-primary/5',
+                          sub && 'opacity-60'
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleFunderSel(f.id)}
+                          className="h-4 w-4 rounded border-border accent-[var(--primary,#2563eb)]"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate flex items-center gap-1.5">
+                            {f.name}
+                            {sub && (
+                              <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-blue-100 text-blue-800">
+                                Already sent
+                              </span>
+                            )}
+                          </div>
+                          {displayEmail && (
+                            <div className="text-[10px] text-muted-foreground font-mono truncate">{displayEmail}</div>
                           )}
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </Field>
-
-            <Field label="Attachments (optional)">
-              <div className="space-y-1.5">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  onChange={(e) => onFilePick(e.target.files)}
-                  className="hidden"
-                  id="deal-shop-attach"
-                />
-                <label
-                  htmlFor="deal-shop-attach"
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-input bg-card text-xs font-medium cursor-pointer hover:bg-muted/30"
-                >
-                  <Paperclip className="h-3.5 w-3.5" />
-                  Add files
-                </label>
-                {attachments.length > 0 && (
-                  <div className="space-y-1">
-                    {attachments.map((f, i) => (
-                      <div key={i} className="flex items-center justify-between gap-2 text-xs bg-muted/30 rounded px-2 py-1">
-                        <span className="truncate">{f.name}</span>
-                        <span className="text-muted-foreground tabular-nums">{(f.size / 1024).toFixed(0)} KB</span>
-                        <button
-                          onClick={() => setAttachments(attachments.filter((_, x) => x !== i))}
-                          className="text-muted-foreground hover:text-destructive shrink-0"
-                          title="Remove"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </Field>
-
-            <Button
-              onClick={sendNow}
-              disabled={sending || selectedFunders.size === 0 || smtpConfigured === false}
-              size="lg"
-              className="w-full"
-            >
-              <Send className="h-4 w-4 mr-2" />
-              {sending
-                ? 'Sending…'
-                : selectedFunders.size === 0
-                  ? 'Select funders above to enable send'
-                  : `Send to ${selectedFunders.size} funder${selectedFunders.size === 1 ? '' : 's'}`}
-            </Button>
-
-            {/* Inline send results — appears below the form, NOT at the top
-                of the page. Color-coded per row. */}
-            {sendResults && (
-              <div className="space-y-1.5 pt-2 border-t border-border">
-                <div className="text-xs font-semibold mb-1">Send results</div>
-                {sendResults.map((r, i) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      'flex items-center justify-between py-1.5 px-2.5 rounded border-l-4 text-xs',
-                      r.success ? 'border-emerald-500 bg-emerald-50' : 'border-rose-500 bg-rose-50'
-                    )}
-                  >
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">{r.funderName}</div>
-                      <div className="text-[10px] text-muted-foreground font-mono truncate">{r.toEmails.join(', ')}</div>
-                    </div>
-                    <div className={cn('shrink-0 ml-2 text-[11px] font-medium', r.success ? 'text-emerald-700' : 'text-rose-700')}>
-                      {r.success ? '✓ Sent' : `✗ ${r.message}`}
-                    </div>
-                  </div>
-                ))}
+                        </div>
+                      </label>
+                    );
+                  })}
               </div>
             )}
           </CardContent>
         </Card>
       )}
+
+        </div>
+        {/* ============ END RIGHT COLUMN ============ */}
+
+      </div>
+      {/* ============ END SPLIT LAYOUT ============ */}
 
       {/* Post-send confirmation — replaces the old browser-top confirm popup */}
       <ConfirmDialog
