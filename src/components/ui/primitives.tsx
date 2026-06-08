@@ -81,6 +81,126 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
 );
 Input.displayName = 'Input';
 
+/* ============================================================================
+ * Money / percent string-input helpers
+ * ============================================================================
+ *
+ * Goal: anywhere the app collects a dollar amount or a percentage, the user
+ * should see commas-as-they-type (1,000) for money, and a "%" suffix for
+ * percentages. Both wrappers accept a `string` value (matches how forms
+ * elsewhere in the app already store these) and emit a CLEAN string (no
+ * commas, no $/%) on change so downstream code keeps working unchanged.
+ *
+ * Why not the existing MoneyInput (number-based)?
+ *  - Most forms in this app pass strings around so they can preserve "1000.50"
+ *    typing state without coercing to a number every keystroke. Forcing a
+ *    swap to number-typed values would touch a lot of unrelated code.
+ *  - These wrappers slot in 1-for-1 wherever an Input is used today, with
+ *    the same string-in / string-out contract.
+ */
+
+/** Insert thousands commas into a digit string, preserving an optional decimal. */
+function addCommasToDigitString(input: string): string {
+  if (!input) return '';
+  // Allow only digits + at most one period
+  const cleaned = input.replace(/[^\d.]/g, '');
+  const dotIdx = cleaned.indexOf('.');
+  let whole = dotIdx === -1 ? cleaned : cleaned.slice(0, dotIdx);
+  const frac = dotIdx === -1 ? '' : cleaned.slice(dotIdx); // includes the "."
+  // Strip leading zeros but keep a single zero (so "0.05" works)
+  whole = whole.replace(/^0+(\d)/, '$1');
+  // Add commas
+  whole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return whole + frac;
+}
+
+/** Strip everything except digits and a single decimal point. */
+function stripFormat(input: string): string {
+  if (!input) return '';
+  return input.replace(/[^\d.]/g, '');
+}
+
+export interface CurrencyInputProps
+  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'> {
+  value: string;
+  onChange: (rawDigits: string) => void;
+}
+
+/**
+ * String-based currency input. Renders the value with commas while the
+ * user types. The `onChange` callback gets the clean digit string (no
+ * commas, no $ sign) so persistence code is unchanged.
+ *
+ * <CurrencyInput value={fundedAmount} onChange={(v) => setForm({...form, fundedAmount: v})} />
+ */
+export const CurrencyInput = React.forwardRef<HTMLInputElement, CurrencyInputProps>(
+  ({ value, onChange, className, ...props }, ref) => (
+    <div className="relative">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm pointer-events-none select-none">$</span>
+      <input
+        ref={ref}
+        type="text"
+        inputMode="decimal"
+        value={addCommasToDigitString(value ?? '')}
+        onChange={(e) => onChange(stripFormat(e.target.value))}
+        className={cn(
+          'flex h-10 w-full rounded-lg border border-input bg-card pl-7 pr-3 py-1 text-sm transition-all',
+          'shadow-[0_1px_2px_0_hsl(222_47%_11%/0.04)]',
+          'placeholder:text-muted-foreground/60',
+          'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 focus-visible:border-foreground/30',
+          'disabled:cursor-not-allowed disabled:opacity-50 tabular-nums',
+          className
+        )}
+        {...props}
+      />
+    </div>
+  )
+);
+CurrencyInput.displayName = 'CurrencyInput';
+
+export interface PercentInputProps
+  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'> {
+  value: string;
+  onChange: (rawDigits: string) => void;
+}
+
+/**
+ * String-based percent input. Same contract as CurrencyInput but renders
+ * with a "%" suffix and no thousands commas (a fee % rarely exceeds 100).
+ *
+ * Use this for fee %, rep split %, etc. — anywhere a percentage is being
+ * entered. Replaces the "$ amount" mental model some users were falling
+ * into when a plain Input was used for a fee field.
+ */
+export const PercentInput = React.forwardRef<HTMLInputElement, PercentInputProps>(
+  ({ value, onChange, className, ...props }, ref) => (
+    <div className="relative">
+      <input
+        ref={ref}
+        type="text"
+        inputMode="decimal"
+        value={value ?? ''}
+        onChange={(e) => {
+          // Allow only digits + optional decimal; cap at 100 for sanity.
+          const cleaned = stripFormat(e.target.value);
+          onChange(cleaned);
+        }}
+        className={cn(
+          'flex h-10 w-full rounded-lg border border-input bg-card px-3 pr-7 py-1 text-sm transition-all',
+          'shadow-[0_1px_2px_0_hsl(222_47%_11%/0.04)]',
+          'placeholder:text-muted-foreground/60',
+          'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 focus-visible:border-foreground/30',
+          'disabled:cursor-not-allowed disabled:opacity-50 tabular-nums',
+          className
+        )}
+        {...props}
+      />
+      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm pointer-events-none select-none">%</span>
+    </div>
+  )
+);
+PercentInput.displayName = 'PercentInput';
+
 /**
  * Password input with built-in show/hide toggle eye icon.
  */

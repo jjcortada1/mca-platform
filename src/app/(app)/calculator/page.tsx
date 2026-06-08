@@ -1,5 +1,6 @@
 'use client';
 
+import * as React from 'react';
 import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, Button, Input, Field, PageHeader, Badge, MoneyInput } from '@/components/ui/primitives';
 import { formatCurrency, cn } from '@/lib/utils';
@@ -303,19 +304,29 @@ function ReverseCalc() {
 
   const cleanScore = matchDetail?.score ?? null;
 
-  // When user changes deposit/payment, try to find a sensible default
+  // When user changes deposit/payment, solve for the EXACT term that makes
+  // the predicted payment match the observed payment to the penny. Given
+  // funded = deposit / (1 - fee%), payback = funded × factor, payment =
+  // payback / term, the exact term is:
+  //
+  //   daily:   termWeeks = (funded × factor) / (payment × BUSINESS_DAYS_PER_WEEK)
+  //   weekly:  termWeeks = (funded × factor) / payment
+  //
+  // No rounding — the slider step is fine enough (0.1 wks) and the inline
+  // numeric input accepts arbitrary decimals so the user gets penny-exact.
   useEffect(() => {
     if (!autoSync || !dep || !pmt) return;
-    // For the current factor + fee, infer term from observed payment
+    if (lockTerm) return; // user has frozen term; leave it alone
     const funded = dep / (1 - feePct / 100);
     const estPayback = funded * factorRate;
-    if (freq === 'daily') {
-      const estDays = estPayback / pmt;
-      const estWks = estDays / BUSINESS_DAYS_PER_WEEK;
-      if (estWks > 4 && estWks < 60) setTermWeeks(Math.round(estWks));
-    } else {
-      const estWks = estPayback / pmt;
-      if (estWks > 4 && estWks < 60) setTermWeeks(Math.round(estWks));
+    const estWks = freq === 'daily'
+      ? estPayback / (pmt * BUSINESS_DAYS_PER_WEEK)
+      : estPayback / pmt;
+    if (estWks > 4 && estWks < 60) {
+      // Round to 1 decimal place to match the slider's display precision —
+      // this keeps the input compact without sacrificing penny accuracy
+      // (1.4 weeks gives sub-day precision on the schedule anyway).
+      setTermWeeks(Math.round(estWks * 10) / 10);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dep, pmt, freq]); // intentionally NOT autoSync/factorRate/feePct — those are user-driven
@@ -534,11 +545,12 @@ function ReverseCalc() {
                 value={factorRate}
                 min={1.10}
                 max={1.55}
-                step={0.005}
+                step={0.001}
                 onChange={setFactorRate}
                 format={(v) => v.toFixed(3)}
                 cleanValues={[1.30, 1.35, 1.40, 1.45, 1.49]}
                 disabled={lockFactor}
+                precision={3}
               />
             </div>
 
@@ -552,11 +564,12 @@ function ReverseCalc() {
                 value={feePct}
                 min={0}
                 max={15}
-                step={0.5}
+                step={0.05}
                 onChange={setFeePct}
-                format={(v) => `${v.toFixed(1)}%`}
+                format={(v) => `${v.toFixed(2)}%`}
                 cleanValues={[3, 5, 7, 10]}
                 disabled={lockFee}
+                precision={2}
               />
             </div>
 
@@ -570,11 +583,12 @@ function ReverseCalc() {
                 value={termWeeks}
                 min={4}
                 max={60}
-                step={1}
+                step={0.1}
                 onChange={setTermWeeks}
-                format={(v) => `${v} wks (${v * BUSINESS_DAYS_PER_WEEK} days)`}
+                format={(v) => `${v.toFixed(1)} wks`}
                 cleanValues={[10, 12, 16, 20, 24, 30, 40]}
                 disabled={lockTerm}
+                precision={1}
               />
             </div>
           </CardContent>
@@ -737,6 +751,7 @@ function Slider({
   format,
   cleanValues,
   disabled,
+  precision,
 }: {
   label: string;
   value: number;
@@ -747,35 +762,80 @@ function Slider({
   format: (v: number) => string;
   cleanValues?: number[];
   disabled?: boolean;
+  /** Decimal places for the inline editable number input. Inferred from
+   *  `step` if not provided. */
+  precision?: number;
 }) {
-  const pct = ((value - min) / (max - min)) * 100;
+  const pct = ((Math.min(max, Math.max(min, value)) - min) / (max - min)) * 100;
   const isClean = cleanValues?.some((c) => Math.abs(c - value) < step / 2);
+
+  // Derive decimal places from step if not explicit. `step=0.0001` → 4 places.
+  // Lets us render the number input at the right precision without forcing
+  // long .0000 tails on integer-stepped sliders.
+  const decimalPlaces = precision ?? (() => {
+    if (step >= 1) return 0;
+    const s = step.toString();
+    return s.includes('.') ? s.split('.')[1].length : 0;
+  })();
+
+  // Local text state for the inline numeric input. Decoupled from `value`
+  // while focused so the user can clear / type fractional digits without
+  // the parent's value snapping back.
+  const [text, setText] = React.useState<string>(value.toFixed(decimalPlaces));
+  const [focused, setFocused] = React.useState(false);
+  React.useEffect(() => {
+    if (!focused) setText(value.toFixed(decimalPlaces));
+  }, [value, decimalPlaces, focused]);
+
+  function commitText() {
+    const parsed = parseFloat(text);
+    if (Number.isFinite(parsed)) {
+      const clamped = Math.min(max, Math.max(min, parsed));
+      onChange(clamped);
+      setText(clamped.toFixed(decimalPlaces));
+    } else {
+      // Reject — reset to current value
+      setText(value.toFixed(decimalPlaces));
+    }
+  }
+
   return (
     <div className={disabled ? 'opacity-50' : ''}>
-      {label && (
-        <div className="flex items-baseline justify-between mb-1.5">
+      <div className="flex items-baseline justify-between mb-1.5 gap-2">
+        {label ? (
           <div className="text-xs font-medium text-muted-foreground">{label}</div>
-          <div className={cn(
-            'text-sm font-semibold tabular-nums',
-            isClean ? 'text-emerald-600' : 'text-foreground'
-          )}>
-            {format(value)} {isClean && <span className="text-[10px] ml-1">★</span>}
-          </div>
+        ) : <div />}
+        {/* Inline editable number input — types-in the exact value when
+            slider granularity isn't enough. Bypasses the slider step so
+            penny-precise factor / fee / term values are achievable. */}
+        <div className="flex items-center gap-1.5">
+          <input
+            type="text"
+            inputMode="decimal"
+            value={text}
+            onChange={(e) => setText(e.target.value.replace(/[^\d.\-]/g, ''))}
+            onFocus={() => setFocused(true)}
+            onBlur={() => { setFocused(false); commitText(); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+            }}
+            disabled={disabled}
+            className={cn(
+              'h-6 w-20 rounded border border-input bg-card px-1.5 text-xs text-right tabular-nums',
+              'focus:outline-none focus:ring-2 focus:ring-ring/40',
+              isClean && 'text-emerald-700 font-semibold'
+            )}
+          />
+          {isClean && <span className="text-[10px] text-emerald-600">★</span>}
         </div>
-      )}
-      {!label && (
-        <div className="flex items-baseline justify-end mb-1.5">
-          <div className={cn(
-            'text-sm font-semibold tabular-nums',
-            isClean ? 'text-emerald-600' : 'text-foreground'
-          )}>
-            {format(value)} {isClean && <span className="text-[10px] ml-1">★</span>}
-          </div>
-        </div>
-      )}
-      <div className="relative h-1.5 bg-muted rounded-full">
+      </div>
+
+      {/* Track: rendered as background + filled portion + range overlay.
+          The native range input gets opacity-0 but covers the whole bar
+          so click-and-drag works anywhere on the track. */}
+      <div className="relative h-2 bg-muted rounded-full">
         <div
-          className="absolute h-full bg-primary rounded-full transition-all"
+          className="absolute h-full bg-primary rounded-full transition-[width]"
           style={{ width: `${pct}%` }}
         />
         {cleanValues?.map((c) => {
@@ -784,12 +844,18 @@ function Slider({
           return (
             <div
               key={c}
-              className="absolute top-1/2 -translate-y-1/2 w-0.5 h-3 bg-emerald-400/60 rounded-full"
+              className="absolute top-1/2 -translate-y-1/2 w-0.5 h-3.5 bg-emerald-400/60 rounded-full pointer-events-none"
               style={{ left: `${cPct}%` }}
               title={`Clean: ${format(c)}`}
             />
           );
         })}
+        {/* Visual thumb — purely decorative. The real input below handles
+            interaction. */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-4 w-4 rounded-full bg-card border-2 border-primary shadow-sm pointer-events-none"
+          style={{ left: `${pct}%` }}
+        />
         <input
           type="range"
           min={min}
@@ -799,6 +865,7 @@ function Slider({
           onChange={(e) => onChange(parseFloat(e.target.value))}
           disabled={disabled}
           className="absolute inset-0 w-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+          aria-label={label}
         />
       </div>
     </div>

@@ -1,18 +1,29 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, PageHeader, Input } from '@/components/ui/primitives';
+import { Card, CardContent, PageHeader, Input, Button, CurrencyInput, PercentInput } from '@/components/ui/primitives';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { formatCurrency } from '@/lib/utils';
 import { cn } from '@/lib/utils';
-import { Search, Trash2 } from 'lucide-react';
-import { computePaydown, DEAL_STATUS_META } from '@/lib/deals/paydown';
+import { Search, Trash2, Plus } from 'lucide-react';
+import { computePaydown } from '@/lib/deals/paydown';
+import { formatCalendarDate, toDateInput } from '@/lib/dates';
 
 interface Deal {
   id: string;
   name: string;
   merchantFirstName: string | null;
   merchantLastName: string | null;
+  // Extended merchant + business fields — surfaced in the full-detail expand.
+  // All optional / nullable so the type stays compatible with legacy rows.
+  merchantPhone?: string | null;
+  merchantEmail?: string | null;
+  businessName?: string | null;
+  businessAddress?: string | null;
+  businessCity?: string | null;
+  businessState?: string | null;
+  businessZip?: string | null;
+  industry?: string | null;
   status: string;
   fundedAmount: string | null;
   feePct: string | null;
@@ -25,6 +36,12 @@ interface Deal {
   assignedRepName?: string | null;
   // Funded-deal sub-status. Null/missing → treated as 'active' in UI.
   fundedSubStatus?: 'active' | 'refi_eligible' | 'payment_issues' | 'default' | null;
+  // Free-text fields displayed in the expand panel.
+  notes?: string | null;
+  renewalNotes?: string | null;
+  // Audit timestamps — surfaced as "Created" / "Updated" in the detail grid.
+  createdAt?: string | null;
+  updatedAt?: string | null;
 }
 
 /** Sub-status labels + tones for the Funded Deals table. */
@@ -43,7 +60,6 @@ const TONE_CLASS: Record<string, string> = {
   orange: 'bg-orange-100 text-orange-800 border-orange-200', teal: 'bg-teal-100 text-teal-800 border-teal-200',
   cyan: 'bg-cyan-100 text-cyan-800 border-cyan-200',
 };
-const meta = (s: string) => DEAL_STATUS_META[s] ?? { label: s, tone: 'gray' };
 
 type SortKey = 'recent' | 'pct_desc' | 'pct_asc' | 'balance_desc' | 'funded_desc';
 
@@ -62,7 +78,26 @@ export default function PortfolioPage() {
   const [deleting, setDeleting] = useState<{ dealId: string; name: string } | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  // Current user — used to enforce the "reps only see their own funded deals"
+  // rule on the client side (the server enforces it independently). Admins
+  // get a Rep filter dropdown that lets them slice the list by any rep.
+  const [me, setMe] = useState<{ id: string; role: string } | null>(null);
+  const isAdmin = me?.role === 'master_admin' || me?.role === 'company_admin';
+  // Admin's rep filter: '' = all, 'mine' = current user, else specific repId.
+  const [repFilter, setRepFilter] = useState<string>('');
+
+  // "Add funded deal" drawer state. Lives in this top-level component so the
+  // drawer survives table re-renders.
+  const [showAdd, setShowAdd] = useState(false);
+
   useEffect(() => {
+    // Load current user FIRST so we know whether to send `?mine=1`. We don't
+    // actually need to wait — the server enforces the rep scoping by role —
+    // but sending the param keeps the network trace explicit.
+    fetch('/api/auth/me', { cache: 'no-store' }).then((r) => r.json()).then((j) => {
+      if (j?.user) setMe({ id: j.user.id, role: j.user.role });
+    }).catch(() => {});
+
     fetch('/api/deals', { cache: 'no-store' }).then((r) => r.json()).then((j) => {
       setDeals((j.data ?? j.deals ?? []) as Deal[]);
     }).catch(() => {}).finally(() => setLoading(false));
@@ -115,6 +150,21 @@ export default function PortfolioPage() {
     // now entered HERE on Funded Deals (not Active Deals), so we have to
     // surface the cards that need attention.
     let list = enriched;
+
+    // Rep filter:
+    //   • Non-admin: hard-scoped to their own deals (defense in depth on top
+    //     of the server-side filter — keeps any cached list private).
+    //   • Admin with repFilter='mine': scope to admin's own deals.
+    //   • Admin with repFilter=<repId>: scope to that rep.
+    //   • Admin with empty repFilter: all funded deals.
+    if (me && !isAdmin) {
+      list = list.filter((e) => e.deal.assignedRepId === me.id);
+    } else if (isAdmin && me && repFilter === 'mine') {
+      list = list.filter((e) => e.deal.assignedRepId === me.id);
+    } else if (isAdmin && repFilter && repFilter !== 'mine') {
+      list = list.filter((e) => e.deal.assignedRepId === repFilter);
+    }
+
     if (view === 'paying') list = list.filter((e) => e.p.hasStructure && !e.p.renewalEligible && e.p.pctPaidIn < 100);
     if (view === 'refi') list = list.filter((e) => e.p.hasStructure && e.p.renewalEligible);
     if (search.trim()) {
@@ -135,7 +185,7 @@ export default function PortfolioPage() {
     // populated ones still lead the page.
     sorted.sort((a, b) => Number(b.p.hasStructure) - Number(a.p.hasStructure));
     return sorted;
-  }, [enriched, view, search, sort]);
+  }, [enriched, view, search, sort, me, isAdmin, repFilter]);
 
   // Portfolio totals
   const totals = useMemo(() => {
@@ -151,7 +201,16 @@ export default function PortfolioPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Funded Deals" description="Live view of every funded deal — balance, paydown, and renewal status update automatically." />
+      <PageHeader
+        title="Funded Deals"
+        description="Live view of every funded deal — balance, paydown, and renewal status update automatically."
+        actions={
+          <Button size="sm" onClick={() => setShowAdd(true)} className="gap-1">
+            <Plus className="h-4 w-4" />
+            Add funded deal
+          </Button>
+        }
+      />
 
       {/* Portfolio totals */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -179,6 +238,21 @@ export default function PortfolioPage() {
           <option value="balance_desc">Highest balance</option>
           <option value="funded_desc">Largest funded</option>
         </select>
+        {/* Rep filter — admin-only. Reps see only their own deals (forced
+            both server-side and client-side) so the dropdown is hidden. */}
+        {isAdmin && (
+          <select
+            value={repFilter}
+            onChange={(e) => setRepFilter(e.target.value)}
+            className="h-8 rounded-full border border-input bg-card px-3 text-xs text-muted-foreground max-w-[180px]"
+            title="Filter funded deals by rep"
+          >
+            <option value="">All reps</option>
+            <option value="mine">My deals only</option>
+            <option disabled>──────────</option>
+            {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        )}
         <div className="ml-auto relative w-full sm:w-auto sm:min-w-[220px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search deals or merchants…" className="pl-9" />
@@ -239,6 +313,19 @@ export default function PortfolioPage() {
         onConfirm={performDelete}
         onCancel={() => !deleteLoading && setDeleting(null)}
       />
+
+      {/* Add-funded-deal drawer — creates a new deal with status='funded'
+          and pre-filled funding details so it shows up here immediately. */}
+      {showAdd && (
+        <AddFundedDealDrawer
+          reps={reps}
+          onClose={() => setShowAdd(false)}
+          onCreated={(d) => {
+            setDeals((arr) => [d, ...arr]);
+            setShowAdd(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -481,12 +568,19 @@ function FundedDealRow({
             <div className="space-y-3">
               {!editing && p.hasStructure && (
                 <>
-                  {/* Detail panel — grid of high-detail fields that don't fit
-                      in the collapsed row. Echoes the syndication-style columns
-                      the user mentioned (principal, payback, payoff date,
-                      payment amount/frequency, etc). */}
+                  {/* Full detail panel — everything we know about this funded
+                      deal. Grouped into sections so admins/reps can scan
+                      quickly: paydown numbers → schedule → merchant info →
+                      business info → notes/audit. Dates use
+                      formatCalendarDate so they never shift one day from
+                      the value that was typed in.
+                      Fee % comes from the underlying deal record (not from
+                      computePaydown) because the paydown engine doesn't
+                      surface it. */}
+                  <SectionLabel>Paydown</SectionLabel>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                     <Detail label="Funded amount" value={formatCurrency(p.fundedAmount)} />
+                    <Detail label="Fee %" value={deal.feePct ? `${parseFloat(deal.feePct).toFixed(2)}%` : '—'} />
                     <Detail label="Factor rate" value={p.factorRate.toFixed(3)} />
                     <Detail label="Total payback" value={formatCurrency(p.totalPayback)} />
                     <Detail label="Amount collected" value={formatCurrency(p.amountCollected)} />
@@ -496,12 +590,12 @@ function FundedDealRow({
                       value={formatCurrency(p.paymentAmount)}
                     />
                     <Detail
-                      label="Payments made"
-                      value={`${p.paymentsMade} / ${p.paymentsTotal}`}
+                      label="Term"
+                      value={`${p.termCount} ${p.termMode === 'daily' ? 'business days' : 'weeks'}`}
                     />
                     <Detail
-                      label="Est. payoff"
-                      value={p.payoffDate ? p.payoffDate.toLocaleDateString() : '—'}
+                      label="Payments made"
+                      value={`${p.paymentsMade} / ${p.paymentsTotal}`}
                     />
                     <Detail
                       label="% Paid in"
@@ -513,20 +607,80 @@ function FundedDealRow({
                       value={p.renewalEligible
                         ? 'Eligible now'
                         : p.renewalDate
-                          ? `~${p.renewalDate.toLocaleDateString()}`
+                          ? `~${formatCalendarDate(p.renewalDate)}`
                           : '—'}
                       tone={p.renewalEligible ? 'teal' : undefined}
                     />
-                    <Detail
-                      label="Funded date"
-                      value={p.fundingDate ? p.fundingDate.toLocaleDateString() : '—'}
-                    />
-                    <Detail
-                      label="Term"
-                      value={`${p.termCount} ${p.termMode === 'daily' ? 'business days' : 'weeks'}`}
-                    />
                   </div>
-                  <div className="flex items-center justify-between gap-3">
+
+                  <SectionLabel>Schedule</SectionLabel>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                    <Detail label="Funded date" value={formatCalendarDate(deal.fundingDate)} />
+                    {/* First payment date: daily = next business day after
+                        funding; weekly = same day, 7 days later. Matches the
+                        cadence used by the buildPaymentSchedule generator. */}
+                    <Detail
+                      label="First payment"
+                      value={p.fundingDate
+                        ? formatCalendarDate(firstPaymentDate(p.fundingDate, p.termMode))
+                        : '—'}
+                    />
+                    <Detail label="Est. payoff" value={p.payoffDate ? formatCalendarDate(p.payoffDate) : '—'} />
+                    <Detail label="Term mode" value={p.termMode === 'daily' ? 'Daily (M–F)' : p.termMode === 'weekly' ? 'Weekly' : '—'} />
+                  </div>
+
+                  {/* Merchant + business contact info — pulled directly from
+                      the deal record; nothing computed. */}
+                  {(deal.merchantFirstName || deal.merchantLastName || deal.merchantEmail || deal.merchantPhone || deal.businessName) && (
+                    <>
+                      <SectionLabel>Merchant &amp; business</SectionLabel>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                        <Detail label="Merchant" value={`${deal.merchantFirstName ?? ''} ${deal.merchantLastName ?? ''}`.trim() || '—'} />
+                        <Detail label="Phone" value={deal.merchantPhone || '—'} />
+                        <Detail label="Email" value={deal.merchantEmail || '—'} />
+                        <Detail label="Business name" value={deal.businessName || '—'} />
+                        {(deal.businessAddress || deal.businessCity || deal.businessState || deal.businessZip) && (
+                          <Detail
+                            label="Business address"
+                            value={[deal.businessAddress, deal.businessCity, deal.businessState, deal.businessZip].filter(Boolean).join(', ') || '—'}
+                          />
+                        )}
+                        {deal.industry && <Detail label="Industry" value={deal.industry} />}
+                      </div>
+                    </>
+                  )}
+
+                  {(deal.notes || deal.renewalNotes) && (
+                    <>
+                      <SectionLabel>Notes</SectionLabel>
+                      <div className="space-y-2 text-xs">
+                        {deal.notes && (
+                          <div>
+                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-0.5">Deal notes</div>
+                            <div className="whitespace-pre-wrap text-foreground">{deal.notes}</div>
+                          </div>
+                        )}
+                        {deal.renewalNotes && (
+                          <div>
+                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-0.5">Renewal notes</div>
+                            <div className="whitespace-pre-wrap text-foreground">{deal.renewalNotes}</div>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {(deal.createdAt || deal.updatedAt) && (
+                    <>
+                      <SectionLabel>Audit</SectionLabel>
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        {deal.createdAt && <Detail label="Created" value={formatCalendarDate(deal.createdAt)} />}
+                        {deal.updatedAt && <Detail label="Updated" value={formatCalendarDate(deal.updatedAt)} />}
+                      </div>
+                    </>
+                  )}
+
+                  <div className="flex items-center justify-between gap-3 pt-2 border-t border-border">
                     {/* Quick rep changer in the detail view — same as the
                         editor but without entering edit mode. */}
                     <div className="flex items-center gap-2">
@@ -557,11 +711,11 @@ function FundedDealRow({
                 <div className="space-y-2">
                   <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Funding details</div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                    <Field label="Funded amount ($)">
-                      <Input inputMode="decimal" value={String(draft.fundedAmount ?? '')} onChange={(e) => setDraft({ ...draft, fundedAmount: e.target.value })} placeholder="50000" />
+                    <Field label="Funded amount">
+                      <CurrencyInput value={String(draft.fundedAmount ?? '')} onChange={(v) => setDraft({ ...draft, fundedAmount: v })} placeholder="50,000" />
                     </Field>
-                    <Field label="Fee (%)">
-                      <Input inputMode="decimal" value={String(draft.feePct ?? '')} onChange={(e) => setDraft({ ...draft, feePct: e.target.value })} placeholder="5" />
+                    <Field label="Fee">
+                      <PercentInput value={String(draft.feePct ?? '')} onChange={(v) => setDraft({ ...draft, feePct: v })} placeholder="5" />
                     </Field>
                     <Field label="Factor rate">
                       <Input inputMode="decimal" value={String(draft.factorRate ?? '')} onChange={(e) => setDraft({ ...draft, factorRate: e.target.value })} placeholder="1.40" />
@@ -576,10 +730,10 @@ function FundedDealRow({
                       <Input inputMode="numeric" value={String(draft.termCount ?? '')} onChange={(e) => setDraft({ ...draft, termCount: e.target.value })} placeholder="26" />
                     </Field>
                     <Field label="Funding date">
-                      <Input type="date" value={draft.fundingDate ?? ''} onChange={(e) => setDraft({ ...draft, fundingDate: e.target.value })} />
+                      <Input type="date" value={toDateInput(draft.fundingDate ?? '')} onChange={(e) => setDraft({ ...draft, fundingDate: e.target.value })} />
                     </Field>
-                    <Field label="Amount collected ($)">
-                      <Input inputMode="decimal" value={String(draft.amountCollected ?? '')} onChange={(e) => setDraft({ ...draft, amountCollected: e.target.value })} placeholder="auto if blank" />
+                    <Field label="Amount collected">
+                      <CurrencyInput value={String(draft.amountCollected ?? '')} onChange={(v) => setDraft({ ...draft, amountCollected: v })} placeholder="auto if blank" />
                     </Field>
                     <Field label="Assigned rep">
                       <select
@@ -631,16 +785,252 @@ function Detail({ label, value, tone }: { label: string; value: string; tone?: '
   return (
     <div>
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</div>
-      <div className={cn('tabular-nums font-medium mt-0.5', tone === 'teal' ? 'text-teal-700' : 'text-foreground')}>{value}</div>
+      <div className={cn('tabular-nums font-medium mt-0.5 break-words', tone === 'teal' ? 'text-teal-700' : 'text-foreground')}>{value}</div>
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+/** Section header inside the expand panel — groups Detail items into
+ *  scannable buckets. */
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="space-y-0.5">
-      <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+    <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground/70 pt-2 first:pt-0">
       {children}
+    </div>
+  );
+}
+
+/**
+ * Compute the first payment date from a funding date + term mode.
+ *
+ *   • daily   → next business day (Mon–Fri, skip Sat/Sun)
+ *   • weekly  → same day of the week, 7 days later
+ *
+ * Mirrors the cadence used by buildPaymentSchedule so the displayed
+ * "First payment" date is exactly when payment #1 lands.
+ */
+function firstPaymentDate(funded: Date, termMode: 'daily' | 'weekly' | null): Date | null {
+  if (!termMode) return null;
+  const d = new Date(funded);
+  if (termMode === 'daily') {
+    do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6);
+  } else {
+    d.setDate(d.getDate() + 7);
+  }
+  return d;
+}
+
+function Field({ label, children, required, className }: {
+  label: string;
+  children: React.ReactNode;
+  required?: boolean;
+  className?: string;
+}) {
+  return (
+    <div className={cn('space-y-0.5', className)}>
+      {label && (
+        <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {label}
+          {required && <span className="text-rose-600 ml-0.5">*</span>}
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Drawer to manually create a funded deal from the Funded Deals page.
+ *
+ * Why this exists: the normal deal lifecycle is shop → submit → active →
+ * funded. But sometimes deals enter the system as funded already (back-fill,
+ * direct paper, etc.) and the user shouldn't have to walk one through every
+ * earlier status just to get it onto the tracker.
+ *
+ * Posts to /api/deals with status='funded' and all the funding-detail
+ * fields populated. The new row is handed back to the parent so it appears
+ * in the table immediately.
+ */
+function AddFundedDealDrawer({
+  reps,
+  onClose,
+  onCreated,
+}: {
+  reps: { id: string; name: string }[];
+  onClose: () => void;
+  onCreated: (deal: Deal) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    name: '',
+    merchantFirstName: '',
+    merchantLastName: '',
+    merchantPhone: '',
+    merchantEmail: '',
+    businessName: '',
+    fundedAmount: '',
+    feePct: '',
+    factorRate: '',
+    termMode: 'weekly' as 'weekly' | 'daily',
+    termCount: '',
+    fundingDate: '',
+    amountCollected: '',
+    assignedRepId: '',
+    fundedSubStatus: 'active' as 'active' | 'refi_eligible' | 'payment_issues' | 'default',
+    notes: '',
+  });
+
+  async function submit() {
+    setErr(null);
+    if (!form.name.trim()) { setErr('Deal name is required.'); return; }
+    setSaving(true);
+    // Build the request body, converting empty strings to null where the API
+    // expects null (numeric / FK columns).
+    const body: Record<string, unknown> = {
+      name: form.name.trim(),
+      status: 'funded',  // KEY — what makes this row appear on Funded Deals
+      merchantFirstName: form.merchantFirstName.trim() || null,
+      merchantLastName: form.merchantLastName.trim() || null,
+      merchantPhone: form.merchantPhone.trim() || null,
+      merchantEmail: form.merchantEmail.trim() || null,
+      businessName: form.businessName.trim() || null,
+      fundedAmount: form.fundedAmount || null,
+      feePct: form.feePct || null,
+      factorRate: form.factorRate || null,
+      termMode: form.termMode,
+      termCount: form.termCount || null,
+      fundingDate: form.fundingDate || null,
+      amountCollected: form.amountCollected || null,
+      assignedRepId: form.assignedRepId || null,
+      fundedSubStatus: form.fundedSubStatus,
+      notes: form.notes.trim() || null,
+    };
+    const res = await fetch('/api/deals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setErr(j.error || 'Could not create deal.');
+      return;
+    }
+    const j = await res.json();
+    const created = (j.data ?? j.deal) as Deal | undefined;
+    if (created) onCreated(created);
+    else onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-40 flex justify-end" onClick={onClose}>
+      <div
+        className="w-full max-w-xl bg-background border-l border-border h-full overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 bg-background border-b border-border px-6 py-4 flex items-center justify-between z-10">
+          <h2 className="text-lg font-semibold">Add funded deal</h2>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
+            <Button size="sm" onClick={submit} disabled={saving}>{saving ? 'Saving…' : 'Create'}</Button>
+          </div>
+        </div>
+        <div className="p-6 space-y-4">
+          {err && <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded px-3 py-2">{err}</div>}
+
+          <SectionLabel>Deal</SectionLabel>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Deal name" required className="col-span-2">
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Acme Pizza – 1st Position" />
+            </Field>
+            <Field label="Assigned rep">
+              <select
+                value={form.assignedRepId}
+                onChange={(e) => setForm({ ...form, assignedRepId: e.target.value })}
+                className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+              >
+                <option value="">Unassigned</option>
+                {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Status">
+              <select
+                value={form.fundedSubStatus}
+                onChange={(e) => setForm({ ...form, fundedSubStatus: e.target.value as typeof form.fundedSubStatus })}
+                className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+              >
+                <option value="active">Active</option>
+                <option value="refi_eligible">Refi Eligible</option>
+                <option value="payment_issues">Payment Issues</option>
+                <option value="default">Default</option>
+              </select>
+            </Field>
+          </div>
+
+          <SectionLabel>Merchant</SectionLabel>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="First name">
+              <Input value={form.merchantFirstName} onChange={(e) => setForm({ ...form, merchantFirstName: e.target.value })} />
+            </Field>
+            <Field label="Last name">
+              <Input value={form.merchantLastName} onChange={(e) => setForm({ ...form, merchantLastName: e.target.value })} />
+            </Field>
+            <Field label="Business name" className="col-span-2">
+              <Input value={form.businessName} onChange={(e) => setForm({ ...form, businessName: e.target.value })} />
+            </Field>
+            <Field label="Phone">
+              <Input value={form.merchantPhone} onChange={(e) => setForm({ ...form, merchantPhone: e.target.value })} />
+            </Field>
+            <Field label="Email">
+              <Input type="email" value={form.merchantEmail} onChange={(e) => setForm({ ...form, merchantEmail: e.target.value })} />
+            </Field>
+          </div>
+
+          <SectionLabel>Funding</SectionLabel>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Funded amount">
+              <CurrencyInput value={form.fundedAmount} onChange={(v) => setForm({ ...form, fundedAmount: v })} placeholder="50,000" />
+            </Field>
+            <Field label="Fee">
+              <PercentInput value={form.feePct} onChange={(v) => setForm({ ...form, feePct: v })} placeholder="5" />
+            </Field>
+            <Field label="Factor rate">
+              <Input inputMode="decimal" value={form.factorRate} onChange={(e) => setForm({ ...form, factorRate: e.target.value })} placeholder="1.40" />
+            </Field>
+            <Field label="Funding date">
+              <Input type="date" value={form.fundingDate} onChange={(e) => setForm({ ...form, fundingDate: e.target.value })} />
+            </Field>
+            <Field label="Term type">
+              <select
+                value={form.termMode}
+                onChange={(e) => setForm({ ...form, termMode: e.target.value as 'weekly' | 'daily' })}
+                className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+              >
+                <option value="weekly">Weekly</option>
+                <option value="daily">Daily</option>
+              </select>
+            </Field>
+            <Field label="# of payments">
+              <Input inputMode="numeric" value={form.termCount} onChange={(e) => setForm({ ...form, termCount: e.target.value })} placeholder="26" />
+            </Field>
+            <Field label="Amount collected" className="col-span-2">
+              <CurrencyInput value={form.amountCollected} onChange={(v) => setForm({ ...form, amountCollected: v })} placeholder="auto if blank" />
+            </Field>
+          </div>
+
+          <SectionLabel>Notes</SectionLabel>
+          <Field label="">
+            <textarea
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              rows={3}
+              className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm resize-y"
+              placeholder="Optional context — funder name, special terms, etc."
+            />
+          </Field>
+        </div>
+      </div>
     </div>
   );
 }
