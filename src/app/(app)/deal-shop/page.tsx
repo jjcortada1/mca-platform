@@ -753,11 +753,15 @@ export default function DealShopPage() {
             <Field label="Attachments (optional)">
               <div className="space-y-1.5">
                 {/* Click + drag-and-drop zone.
-                    The hidden file input uses `sr-only` rather than
-                    `display:none` because Safari + some Chromium builds
-                    refuse to fire the click event on a fully `display:none`
-                    input. `sr-only` keeps it visually hidden but in the
-                    layout / accessible / clickable.
+                    Using a <label htmlFor> wrapping the dropzone is the
+                    most reliable cross-browser pattern — clicking anywhere
+                    on the label natively opens the file picker, no JS
+                    .click() shim required (which was failing silently in
+                    some browsers).
+                    The hidden file input uses `sr-only` so it stays in the
+                    layout / accessible / clickable rather than being
+                    `display:none` (which breaks the label association in
+                    some Chromium builds).
                     Drag handlers preventDefault on every event so the
                     browser doesn't navigate away when a file drops outside
                     the intended zone (default browser behavior is to OPEN
@@ -770,8 +774,8 @@ export default function DealShopPage() {
                   className="sr-only"
                   id="deal-shop-attach"
                 />
-                <div
-                  onClick={() => fileInputRef.current?.click()}
+                <label
+                  htmlFor="deal-shop-attach"
                   onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
                   onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
                   onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
@@ -797,7 +801,7 @@ export default function DealShopPage() {
                       : <><span className="font-medium text-foreground">Click to upload</span> or drag &amp; drop</>}
                   </div>
                   <div className="text-[10px] text-muted-foreground/70">PDF, images, docs — up to 25MB each</div>
-                </div>
+                </label>
                 {attachments.length > 0 && (
                   <div className="space-y-1">
                     {attachments.map((f, i) => (
@@ -806,12 +810,14 @@ export default function DealShopPage() {
                         <span className="text-muted-foreground tabular-nums">{(f.size / 1024).toFixed(0)} KB</span>
                         <button
                           onClick={(e) => {
-                            // Don't propagate to the dropzone (which would open the picker).
+                            // Don't propagate to the label (which would open the picker).
+                            e.preventDefault();
                             e.stopPropagation();
                             setAttachments(attachments.filter((_, x) => x !== i));
                           }}
                           className="text-muted-foreground hover:text-destructive shrink-0"
                           title="Remove"
+                          type="button"
                         >
                           <X className="h-3 w-3" />
                         </button>
