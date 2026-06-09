@@ -128,6 +128,10 @@ export default function DealShopPage() {
   const [ccInput, setCcInput] = useState('');
   const [attachments, setAttachments] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Drag-and-drop visual state. When true, the dropzone shows a highlighted
+  // border + tint so the user knows the dragover is being received and they
+  // can release the mouse to drop.
+  const [dragActive, setDragActive] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendResults, setSendResults] = useState<{ funderName: string; toEmails: string[]; success: boolean; message: string }[] | null>(null);
   const [smtpConfigured, setSmtpConfigured] = useState<boolean | null>(null);
@@ -748,33 +752,68 @@ export default function DealShopPage() {
 
             <Field label="Attachments (optional)">
               <div className="space-y-1.5">
+                {/* Click + drag-and-drop zone.
+                    The hidden file input uses `sr-only` rather than
+                    `display:none` because Safari + some Chromium builds
+                    refuse to fire the click event on a fully `display:none`
+                    input. `sr-only` keeps it visually hidden but in the
+                    layout / accessible / clickable.
+                    Drag handlers preventDefault on every event so the
+                    browser doesn't navigate away when a file drops outside
+                    the intended zone (default browser behavior is to OPEN
+                    the file in the current tab — really easy to lose work). */}
                 <input
                   ref={fileInputRef}
                   type="file"
                   multiple
                   onChange={(e) => onFilePick(e.target.files)}
-                  className="hidden"
+                  className="sr-only"
                   id="deal-shop-attach"
                 />
-                <label
-                  htmlFor="deal-shop-attach"
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-input bg-card text-xs font-medium cursor-pointer hover:bg-muted/30"
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                  onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setDragActive(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                      onFilePick(e.dataTransfer.files);
+                    }
+                  }}
+                  className={cn(
+                    'flex flex-col items-center justify-center gap-1 px-3 py-4 rounded-md border-2 border-dashed cursor-pointer transition-colors',
+                    dragActive
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border bg-muted/20 hover:bg-muted/40 hover:border-foreground/30'
+                  )}
                 >
-                  <Paperclip className="h-3 w-3" />
-                  Add files
-                </label>
+                  <Paperclip className="h-4 w-4 text-muted-foreground" />
+                  <div className="text-xs text-muted-foreground text-center">
+                    {dragActive
+                      ? 'Drop files here'
+                      : <><span className="font-medium text-foreground">Click to upload</span> or drag &amp; drop</>}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground/70">PDF, images, docs — up to 25MB each</div>
+                </div>
                 {attachments.length > 0 && (
                   <div className="space-y-1">
                     {attachments.map((f, i) => (
-                      <div key={i} className="flex items-center justify-between gap-2 text-[11px] bg-muted/30 rounded px-2 py-0.5">
-                        <span className="truncate">{f.name}</span>
+                      <div key={i} className="flex items-center justify-between gap-2 text-[11px] bg-muted/30 rounded px-2 py-1">
+                        <span className="truncate flex-1">{f.name}</span>
                         <span className="text-muted-foreground tabular-nums">{(f.size / 1024).toFixed(0)} KB</span>
                         <button
-                          onClick={() => setAttachments(attachments.filter((_, x) => x !== i))}
+                          onClick={(e) => {
+                            // Don't propagate to the dropzone (which would open the picker).
+                            e.stopPropagation();
+                            setAttachments(attachments.filter((_, x) => x !== i));
+                          }}
                           className="text-muted-foreground hover:text-destructive shrink-0"
                           title="Remove"
                         >
-                          <X className="h-2.5 w-2.5" />
+                          <X className="h-3 w-3" />
                         </button>
                       </div>
                     ))}
