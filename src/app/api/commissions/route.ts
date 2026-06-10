@@ -55,7 +55,11 @@ export async function GET() {
       const effectiveStatus = resolveAutoStatus(c.status, c.fundingDate, now);
       const amount = Number(c.repCommissionAmount);
       const paid = Number(c.paidAmount);
-      return {
+      // Privacy: gross commission + split % expose what the LEAD SOURCE is
+      // earning (lead source pay ≈ gross × (100 − repSplitPct)). Reps should
+      // never see either. Hide them for any non-admin caller. Admins get the
+      // full data they need to edit splits.
+      const base = {
         id: c.id,
         dealId: c.dealId,
         dealName,
@@ -68,8 +72,6 @@ export async function GET() {
         fundedAmount: c.fundedAmount, rate: c.rate, termMonths: c.termMonths,
         termMode: c.termMode, termCount: c.termCount,
         fees: c.fees, brokerFee: c.brokerFee,
-        grossCommission: c.grossCommission,
-        repSplitPct: c.repSplitPct,
         repCommissionAmount: c.repCommissionAmount,
         paidAmount: c.paidAmount,
         pendingAmount: effectiveStatus === 'pending' ? Math.max(0, amount - paid) : 0,
@@ -82,6 +84,14 @@ export async function GET() {
         syncState: c.syncState,
         updatedAt: c.updatedAt,
       };
+      if (isAdmin) {
+        return {
+          ...base,
+          grossCommission: c.grossCommission,
+          repSplitPct: c.repSplitPct,
+        };
+      }
+      return base;
     });
 
     return NextResponse.json({ commissions: data, data });

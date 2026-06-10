@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
-import { Card, CardContent, Button, Input, Textarea, Badge, PageHeader, EmptyState } from '@/components/ui/primitives';
+import { Card, CardContent, Button, Input, Textarea, Badge, PageHeader, EmptyState, Field, CurrencyInput, PercentInput } from '@/components/ui/primitives';
+import { RepPicker } from '@/components/ui/rep-picker';
 import { exportCSV } from '@/lib/csv-export';
 import { useToast } from '@/components/toast';
 import { formatDate, formatCurrency } from '@/lib/utils';
@@ -80,6 +81,14 @@ export default function ActiveDealsPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
+  // Rep filter (admin-side narrowing). '' = all, 'mine' = current user,
+  // 'unassigned' = no rep, else specific repId.
+  const [repFilter, setRepFilter] = useState<string>('');
+  // Sort key — 'recent' (default), 'oldest', or 'rep' (group by rep name).
+  const [sortKey, setSortKey] = useState<'recent' | 'oldest' | 'rep'>('recent');
+  // Current user identity for the "mine" filter shortcut.
+  const [me, setMe] = useState<{ id: string; role: string } | null>(null);
+  const isAdmin = me?.role === 'master_admin' || me?.role === 'company_admin';
 
   // Inline edit state — what's being edited and pending changes
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -101,7 +110,17 @@ export default function ActiveDealsPage() {
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    // Fetch current user — used to drive the "My deals only" shortcut and
+    // to hide the rep filter from non-admin users (server-side scoping
+    // already restricts what they see, but we don't want the dropdown
+    // visible to suggest there's something to filter).
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => { if (j?.user) setMe({ id: j.user.id, role: j.user.role }); })
+      .catch(() => {});
+  }, []);
 
   function startEdit(d: Deal) {
     setExpandedId(d.id);
@@ -132,8 +151,23 @@ export default function ActiveDealsPage() {
     return true;
   }
 
+  // When the user marks a deal "funded" inline, we don't just flip the
+  // status — we collect merchant contact + funding details so the deal
+  // shows up correctly on /portfolio. Stores the in-progress deal until
+  // the user saves or cancels.
+  const [markingFunded, setMarkingFunded] = useState<Deal | null>(null);
+
   // Inline status change — saves immediately
   async function quickStatusChange(deal: Deal, status: Deal['status']) {
+    // Moving to "funded" ALWAYS opens the modal so the user can review /
+    // fill in merchant contact details, funding amount, fee, factor, term,
+    // funding date. Even if the deal already has funding details set,
+    // contact info often isn't collected until funding time — and the user
+    // wants to be able to add it at this point.
+    if (status === 'funded') {
+      setMarkingFunded(deal);
+      return;
+    }
     const ok = await persist(deal, { status });
     if (ok) {
       toast.success(`Marked as ${status}.`);
@@ -205,6 +239,17 @@ export default function ActiveDealsPage() {
   const filtered = useMemo(() => {
     let arr = deals.filter((d) => !HIDDEN_FROM_ACTIVE.has(d.status));
     if (statusFilter !== 'all') arr = arr.filter((d) => d.status === statusFilter);
+    // Rep filter — '' = all reps (admin default); 'mine' = current user;
+    // any other value = specific rep id. The /api/deals endpoint already
+    // enforces server-side scoping for non-admin users; this client filter
+    // is purely a UX convenience for admins narrowing the list.
+    if (repFilter === 'mine') {
+      if (me) arr = arr.filter((d) => d.assignedRepId === me.id);
+    } else if (repFilter && repFilter !== 'unassigned') {
+      arr = arr.filter((d) => d.assignedRepId === repFilter);
+    } else if (repFilter === 'unassigned') {
+      arr = arr.filter((d) => !d.assignedRepId);
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       arr = arr.filter((d) =>
@@ -213,8 +258,26 @@ export default function ActiveDealsPage() {
         (d.merchantEmail ?? '').toLowerCase().includes(q)
       );
     }
+    // Sort. Default = most-recent first. Sort-by-rep groups by rep name
+    // (with unassigned last) for fast scanning of who owns what.
+    if (sortKey === 'rep') {
+      const repNameOf = (d: typeof arr[number]) => {
+        if (!d.assignedRepId) return '\uffff'; // sort unassigned last
+        return reps.find((r) => r.id === d.assignedRepId)?.name?.toLowerCase() ?? '\uffff';
+      };
+      arr = [...arr].sort((a, b) => {
+        const cmp = repNameOf(a).localeCompare(repNameOf(b));
+        if (cmp !== 0) return cmp;
+        // Tie-break: most recently updated first within a rep
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+    } else if (sortKey === 'oldest') {
+      arr = [...arr].sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime());
+    } else {
+      arr = [...arr].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    }
     return arr;
-  }, [deals, statusFilter, search]);
+  }, [deals, statusFilter, search, repFilter, me, sortKey, reps]);
 
   const counts = useMemo(() => {
     const pipeline = deals.filter((d) => !HIDDEN_FROM_ACTIVE.has(d.status));
@@ -275,14 +338,46 @@ export default function ActiveDealsPage() {
             tone={statusMeta(s).tone}
           />
         ))}
-        <div className="ml-auto relative w-full sm:w-auto sm:min-w-[240px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search deals or merchants…"
-            className="pl-9"
-          />
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {/* Sort key — including by rep so admins can see who's working
+              what at a glance. Default "recent" matches the prior behavior
+              so the page doesn't feel different to existing users. */}
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as 'recent' | 'oldest' | 'rep')}
+            className="h-9 rounded-md border border-input bg-card px-2 text-xs"
+            title="Sort"
+          >
+            <option value="recent">Recent first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="rep">By rep</option>
+          </select>
+          {/* Rep filter — admin-only (server-side scope already hides others'
+              deals from reps; showing the dropdown to a rep would be
+              misleading since they only see their own). */}
+          {isAdmin && (
+            <select
+              value={repFilter}
+              onChange={(e) => setRepFilter(e.target.value)}
+              className="h-9 rounded-md border border-input bg-card px-2 text-xs max-w-[180px]"
+              title="Filter by rep"
+            >
+              <option value="">All reps</option>
+              <option value="mine">My deals only</option>
+              <option value="unassigned">Unassigned</option>
+              <option disabled>──────────</option>
+              {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          )}
+          <div className="relative w-full sm:w-auto sm:min-w-[240px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search deals or merchants…"
+              className="pl-9"
+            />
+          </div>
         </div>
       </div>
 
@@ -328,16 +423,11 @@ export default function ActiveDealsPage() {
                   deal views the same as any other assigned deal. */}
               <label className="space-y-1 sm:col-span-2">
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Assign to rep</div>
-                <select
+                <RepPicker
                   value={creating.assignedRepId ?? ''}
-                  onChange={(e) => setCreating({ ...creating, assignedRepId: e.target.value || null })}
-                  className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
-                >
-                  <option value="">— unassigned —</option>
-                  {reps.map((r) => (
-                    <option key={r.id} value={r.id}>{r.name}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setCreating({ ...creating, assignedRepId: v || null })}
+                  reps={reps}
+                />
               </label>
             </div>
             <div className="flex justify-end gap-2 pt-2 border-t border-border">
@@ -427,17 +517,14 @@ export default function ActiveDealsPage() {
                         </div>
                       </td>
                       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                        <select
+                        <RepPicker
                           value={d.assignedRepId ?? ''}
-                          onChange={(e) => quickRepChange(d, e.target.value || null)}
+                          onChange={(v) => quickRepChange(d, v || null)}
+                          reps={reps}
+                          size="sm"
                           disabled={savingId === d.id}
-                          className="h-8 rounded-md border border-input bg-card px-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring max-w-[140px]"
-                        >
-                          <option value="">— unassigned —</option>
-                          {reps.map((r) => (
-                            <option key={r.id} value={r.id}>{r.name}</option>
-                          ))}
-                        </select>
+                          className="max-w-[150px]"
+                        />
                       </td>
                       <td className="px-3 py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap hidden md:table-cell">
                         {formatDate(d.updatedAt)}
@@ -519,6 +606,23 @@ export default function ActiveDealsPage() {
             </tbody>
           </table>
         </Card>
+      )}
+
+      {/* Mark-as-funded modal: collects merchant contact + funding details
+          so the deal lands on the Funded Deals page complete. Cancel just
+          closes — the status change isn't committed unless the user saves. */}
+      {markingFunded && (
+        <MarkFundedModal
+          deal={markingFunded}
+          onClose={() => setMarkingFunded(null)}
+          onSaved={(updatedFields) => {
+            setDeals((arr) => arr.map((x) =>
+              x.id === markingFunded.id ? { ...x, ...updatedFields, status: 'funded' } : x
+            ));
+            setMarkingFunded(null);
+            toast.success('Marked as funded.');
+          }}
+        />
       )}
     </div>
   );
@@ -1067,6 +1171,147 @@ function Metric({ label, value }: { label: string; value: string }) {
     <div>
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</div>
       <div className="tabular-nums font-medium mt-0.5">{value}</div>
+    </div>
+  );
+}
+
+/**
+ * Modal that opens when an Active Deal is being moved to "funded" status.
+ *
+ * Collects the data needed for the Funded Deals page in one shot:
+ *   - Merchant contact (first/last/phone/email) — frequently missing on
+ *     deals that came through the system as cold criteria + funder shop.
+ *   - Funded amount, fee%, factor, funding date, term type, # of payments —
+ *     the paydown engine needs all of these to compute balance/payoff.
+ *
+ * Cancel closes without committing the status change. Save persists every
+ * touched field PLUS sets status='funded' in one PATCH so the deal moves
+ * to /portfolio fully populated.
+ */
+function MarkFundedModal({
+  deal,
+  onClose,
+  onSaved,
+}: {
+  deal: Deal;
+  onClose: () => void;
+  onSaved: (patch: Partial<Deal>) => void;
+}) {
+  const toast = useToast();
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    merchantFirstName: deal.merchantFirstName ?? '',
+    merchantLastName: deal.merchantLastName ?? '',
+    merchantPhone: deal.merchantPhone ?? '',
+    merchantEmail: deal.merchantEmail ?? '',
+    fundedAmount: deal.fundedAmount ?? '',
+    feePct: deal.feePct ?? '',
+    factorRate: deal.factorRate ?? '',
+    termMode: deal.termMode ?? 'weekly',
+    termCount: deal.termCount ?? '',
+    fundingDate: deal.fundingDate ? String(deal.fundingDate).slice(0, 10) : '',
+  });
+
+  async function save() {
+    if (!form.fundedAmount || !form.fundingDate) {
+      toast.error('Funded amount and funding date are required.');
+      return;
+    }
+    setSaving(true);
+    const body: Record<string, unknown> = {
+      status: 'funded',
+      merchantFirstName: form.merchantFirstName.trim() || null,
+      merchantLastName: form.merchantLastName.trim() || null,
+      merchantPhone: form.merchantPhone.trim() || null,
+      merchantEmail: form.merchantEmail.trim() || null,
+      fundedAmount: form.fundedAmount || null,
+      feePct: form.feePct || null,
+      factorRate: form.factorRate || null,
+      termMode: form.termMode,
+      termCount: form.termCount || null,
+      fundingDate: form.fundingDate || null,
+    };
+    const res = await fetch(`/api/deals/${deal.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || 'Could not save.');
+      return;
+    }
+    onSaved(body as Partial<Deal>);
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex justify-end" onClick={onClose}>
+      <div
+        className="w-full max-w-xl bg-background border-l border-border h-full overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 bg-background border-b border-border px-6 py-4 flex items-center justify-between z-10">
+          <div>
+            <h2 className="text-lg font-semibold">Move to funded</h2>
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">{deal.name}</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
+            <Button size="sm" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Mark funded'}</Button>
+          </div>
+        </div>
+        <div className="p-6 space-y-5">
+          <section>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground/70 mb-2">Merchant contact</div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="First name">
+                <Input value={form.merchantFirstName} onChange={(e) => setForm({ ...form, merchantFirstName: e.target.value })} />
+              </Field>
+              <Field label="Last name">
+                <Input value={form.merchantLastName} onChange={(e) => setForm({ ...form, merchantLastName: e.target.value })} />
+              </Field>
+              <Field label="Phone">
+                <Input value={form.merchantPhone} onChange={(e) => setForm({ ...form, merchantPhone: e.target.value })} placeholder="(555) 555-5555" />
+              </Field>
+              <Field label="Email">
+                <Input type="email" value={form.merchantEmail} onChange={(e) => setForm({ ...form, merchantEmail: e.target.value })} placeholder="merchant@business.com" />
+              </Field>
+            </div>
+          </section>
+
+          <section>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground/70 mb-2">Funding details</div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Funded amount" required>
+                <CurrencyInput value={form.fundedAmount} onChange={(v) => setForm({ ...form, fundedAmount: v })} placeholder="50,000" />
+              </Field>
+              <Field label="Fee">
+                <PercentInput value={form.feePct} onChange={(v) => setForm({ ...form, feePct: v })} placeholder="5" />
+              </Field>
+              <Field label="Factor rate">
+                <Input inputMode="decimal" value={form.factorRate} onChange={(e) => setForm({ ...form, factorRate: e.target.value })} placeholder="1.40" />
+              </Field>
+              <Field label="Funding date" required>
+                <Input type="date" value={form.fundingDate} onChange={(e) => setForm({ ...form, fundingDate: e.target.value })} />
+              </Field>
+              <Field label="Term type">
+                <select
+                  value={form.termMode}
+                  onChange={(e) => setForm({ ...form, termMode: e.target.value })}
+                  className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+                >
+                  <option value="weekly">Weekly</option>
+                  <option value="daily">Daily</option>
+                </select>
+              </Field>
+              <Field label="# of payments">
+                <Input inputMode="numeric" value={form.termCount} onChange={(e) => setForm({ ...form, termCount: e.target.value })} placeholder="26" />
+              </Field>
+            </div>
+          </section>
+        </div>
+      </div>
     </div>
   );
 }

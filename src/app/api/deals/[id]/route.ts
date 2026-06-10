@@ -8,12 +8,44 @@ import { apiError } from '@/lib/api/errors';
 import { fromDateInput } from '@/lib/dates';
 import { triggerSync } from '@/lib/sheets/sync';
 
+/**
+ * Returns true when the given user is allowed to read/write the given deal.
+ * Admins (master_admin / company_admin) bypass the check. Reps and other
+ * non-admins must be the deal's assignedRepId. Lead-source accounts can't
+ * touch deals here at all — they use the lead-source portal.
+ *
+ * Centralized so every handler in this file applies the SAME rule (defense
+ * in depth — the GET, PATCH, and DELETE handlers historically allowed any
+ * authenticated user with the right permission flag to touch any deal in
+ * the company).
+ */
+async function ensureDealAccess(
+  ctx: Awaited<ReturnType<typeof requireTenantContext>>,
+  dealId: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const [d] = await db
+    .select({ id: deals.id, assignedRepId: deals.assignedRepId })
+    .from(deals)
+    .where(and(eq(deals.id, dealId), eq(deals.companyId, ctx.companyId), eq(deals.isDeleted, false)))
+    .limit(1);
+  if (!d) return { ok: false, status: 404, error: 'Not found' };
+  const isAdmin = ctx.user.role === 'master_admin' || ctx.user.role === 'company_admin';
+  if (isAdmin) return { ok: true };
+  if (ctx.user.role === 'lead_source') return { ok: false, status: 403, error: 'Forbidden' };
+  // Non-admin: must own this deal.
+  if (d.assignedRepId === ctx.user.id) return { ok: true };
+  // Returning 404 (not 403) on purpose — don't reveal that the deal exists
+  // to someone who isn't supposed to see it.
+  return { ok: false, status: 404, error: 'Not found' };
+}
+
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const ctx = await requireTenantContext();
+    const access = await ensureDealAccess(ctx, params.id);
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
     const [d] = await db.select().from(deals)
       .where(and(eq(deals.id, params.id), eq(deals.companyId, ctx.companyId), eq(deals.isDeleted, false))).limit(1);
-    if (!d) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ deal: d });
   } catch (e) { return apiError(e); }
 }
@@ -21,7 +53,18 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const ctx = await requirePermission('deals.edit');
+    // Same scope check as GET — having `deals.edit` permission isn't enough,
+    // the rep also has to be the assigned owner of THIS specific deal.
+    const access = await ensureDealAccess(ctx, params.id);
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
     const body = upsertDealSchema.partial().parse(await req.json());
+
+    // Non-admins can't reassign deals to other reps — that's an admin
+    // function. Strip the field if a rep tries to pass it.
+    const isAdmin = ctx.user.role === 'master_admin' || ctx.user.role === 'company_admin';
+    if (!isAdmin && body.assignedRepId !== undefined && body.assignedRepId !== ctx.user.id) {
+      return NextResponse.json({ error: 'Only admins can reassign deals.' }, { status: 403 });
+    }
 
     // Verify assignedRepId is in this company
     if (body.assignedRepId) {
@@ -64,6 +107,14 @@ export const PUT = PATCH;
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const ctx = await requirePermission('deals.edit');
+    // Only admins can delete deals. A rep with the deals.edit permission can
+    // still edit their own deals, but deletion is a destructive admin action.
+    const isAdmin = ctx.user.role === 'master_admin' || ctx.user.role === 'company_admin';
+    if (!isAdmin) {
+      return NextResponse.json({ error: 'Only admins can delete deals.' }, { status: 403 });
+    }
+    const access = await ensureDealAccess(ctx, params.id);
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
 
     // Soft-delete the deal AND every dependent record so it disappears from
     // every list, dropdown, commission view, accounting page, lead source

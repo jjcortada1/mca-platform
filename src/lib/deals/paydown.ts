@@ -63,7 +63,8 @@ function addWeeks(start: Date, weeks: number): Date {
   return d;
 }
 
-/** Count business days elapsed between two dates (cap at 0). */
+/** Count business days elapsed between two dates (cap at 0). Counts the day
+ *  AFTER `start` as day 1 if it's a business day, etc. */
 function businessDaysBetween(start: Date, end: Date): number {
   if (end <= start) return 0;
   let count = 0;
@@ -76,13 +77,104 @@ function businessDaysBetween(start: Date, end: Date): number {
   return count;
 }
 
+/** First scheduled payment date.
+ *
+ *   • daily   → next business day AFTER funding (Mon–Fri; if funded Friday,
+ *               first payment is Monday)
+ *   • weekly  → exactly 7 calendar days after funding (same day of week)
+ *
+ * Used to determine when the first payment actually pulls — before this
+ * date, paymentsMade is 0 even if `now` is past the funding date.
+ */
+function firstScheduledPayment(funding: Date, mode: 'daily' | 'weekly'): Date {
+  const d = new Date(funding);
+  if (mode === 'daily') {
+    do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6);
+  } else {
+    d.setDate(d.getDate() + 7);
+  }
+  return d;
+}
+
+/** How many scheduled payments have occurred between funding and `now`.
+ *
+ * Same-day rule: a deal funded TODAY has 0 payments pulled today, even if
+ * `now` is hours after funding. The first payment doesn't pull until the
+ * scheduled first-payment date arrives.
+ *
+ *   • daily:   0 if now < firstPayment; otherwise count business days from
+ *              firstPayment to now (inclusive), capped at termCount.
+ *   • weekly:  0 if now < firstPayment; otherwise floor((now-firstPayment)/7d) + 1,
+ *              capped at termCount.
+ */
+function paymentsElapsed(
+  funding: Date,
+  now: Date,
+  mode: 'daily' | 'weekly',
+  termCount: number,
+): number {
+  const first = firstScheduledPayment(funding, mode);
+  if (now < first) return 0;
+  if (mode === 'daily') {
+    // businessDaysBetween counts the day after `start`. Calling with
+    // (first - 1day, now) gives the count of business days from first→now
+    // inclusive. Simpler: use businessDaysBetween(funding, now) which
+    // already counts business days after funding, equivalent to position
+    // in the schedule.
+    return Math.min(termCount, businessDaysBetween(funding, now));
+  } else {
+    const weeksSinceFirst = Math.floor((now.getTime() - first.getTime()) / (7 * MS_PER_DAY));
+    return Math.min(termCount, weeksSinceFirst + 1);
+  }
+}
+
 export function computePaydown(inputs: PaydownInputs, now: Date = new Date()): Paydown {
   const fundedAmount = n(inputs.fundedAmount);
   const factorRate = n(inputs.factorRate);
   const termMode = (inputs.termMode === 'daily' || inputs.termMode === 'weekly') ? inputs.termMode : null;
   const termCount = n(inputs.termCount);
-  const fundingDate = inputs.fundingDate ? new Date(inputs.fundingDate) : null;
-  const fdValid = fundingDate && !isNaN(fundingDate.getTime()) ? fundingDate : null;
+
+  // ----------------------------------------------------------------------
+  // Date normalization — same-day payment bug fix.
+  //
+  // `new Date("2026-06-09")` parses YYYY-MM-DD as UTC midnight, which is
+  // the PREVIOUS calendar day in any timezone west of UTC. That caused
+  // computePaydown to think the first scheduled payment had already
+  // arrived a few hours after funding ("a payment was pulled same day").
+  //
+  // Fix: collapse any incoming funding value to LOCAL MIDNIGHT of its
+  // intended calendar day, so cursor arithmetic + comparisons against
+  // `now` operate at full-day granularity. Same for `now` — we anchor
+  // both to local-midnight so a deal funded TODAY shows 0 pulls until
+  // tomorrow rolls over, regardless of what hour the user is checking.
+  // ----------------------------------------------------------------------
+  let fdValid: Date | null = null;
+  if (inputs.fundingDate) {
+    if (typeof inputs.fundingDate === 'string') {
+      // "YYYY-MM-DD" → parse the literal y/m/d components into a LOCAL Date
+      // so we never lose a day to UTC conversion. Anything that's not in
+      // that exact shape falls through to normal Date parsing.
+      const ymd = inputs.fundingDate.slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+        const [y, m, d] = ymd.split('-').map(Number);
+        fdValid = new Date(y, m - 1, d); // local midnight
+      } else {
+        const parsed = new Date(inputs.fundingDate);
+        if (!isNaN(parsed.getTime())) {
+          fdValid = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+        }
+      }
+    } else {
+      // Date object — re-anchor to its local-midnight to drop any time
+      // component a caller may have included.
+      const parsed = inputs.fundingDate as Date;
+      if (!isNaN(parsed.getTime())) {
+        fdValid = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+      }
+    }
+  }
+  // Anchor `now` to LOCAL midnight too, so the comparison is day-vs-day.
+  const nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
   const totalPayback = round2(fundedAmount * factorRate);
   const paymentsTotal = termMode === 'daily'
@@ -109,9 +201,9 @@ export function computePaydown(inputs: PaydownInputs, now: Date = new Date()): P
   if (collectedSupplied && paymentAmount > 0) {
     paymentsMade = Math.min(paymentsTotal, amountCollected / paymentAmount);
   } else if (fdValid && termMode && paymentAmount > 0) {
-    paymentsMade = termMode === 'daily'
-      ? Math.min(termCount, businessDaysBetween(fdValid, now))
-      : Math.min(termCount, Math.floor((now.getTime() - fdValid.getTime()) / (MS_PER_DAY * 7)));
+    // Same-day rule applied: paymentsElapsed returns 0 until the first
+    // scheduled payment date arrives. Funded today → 0 payments pulled.
+    paymentsMade = paymentsElapsed(fdValid, nowDay, termMode, termCount);
     amountCollected = round2(paymentsMade * paymentAmount);
   }
 

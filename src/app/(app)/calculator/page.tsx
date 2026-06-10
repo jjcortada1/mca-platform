@@ -323,10 +323,9 @@ function ReverseCalc() {
       ? estPayback / (pmt * BUSINESS_DAYS_PER_WEEK)
       : estPayback / pmt;
     if (estWks > 4 && estWks < 60) {
-      // Round to 1 decimal place to match the slider's display precision —
-      // this keeps the input compact without sacrificing penny accuracy
-      // (1.4 weeks gives sub-day precision on the schedule anyway).
-      setTermWeeks(Math.round(estWks * 10) / 10);
+      // Round to whole weeks — the slider now uses integer week increments
+      // so users see clean values (24 wks, not 23.7).
+      setTermWeeks(Math.round(estWks));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dep, pmt, freq]); // intentionally NOT autoSync/factorRate/feePct — those are user-driven
@@ -545,12 +544,12 @@ function ReverseCalc() {
                 value={factorRate}
                 min={1.10}
                 max={1.55}
-                step={0.001}
+                step={0.01}
                 onChange={setFactorRate}
-                format={(v) => v.toFixed(3)}
+                format={(v) => v.toFixed(2)}
                 cleanValues={[1.30, 1.35, 1.40, 1.45, 1.49]}
                 disabled={lockFactor}
-                precision={3}
+                precision={2}
               />
             </div>
 
@@ -564,12 +563,12 @@ function ReverseCalc() {
                 value={feePct}
                 min={0}
                 max={15}
-                step={0.05}
+                step={0.5}
                 onChange={setFeePct}
-                format={(v) => `${v.toFixed(2)}%`}
+                format={(v) => `${v.toFixed(1)}%`}
                 cleanValues={[3, 5, 7, 10]}
                 disabled={lockFee}
-                precision={2}
+                precision={1}
               />
             </div>
 
@@ -583,12 +582,12 @@ function ReverseCalc() {
                 value={termWeeks}
                 min={4}
                 max={60}
-                step={0.1}
+                step={1}
                 onChange={setTermWeeks}
-                format={(v) => `${v.toFixed(1)} wks`}
+                format={(v) => `${v.toFixed(0)} wks`}
                 cleanValues={[10, 12, 16, 20, 24, 30, 40]}
                 disabled={lockTerm}
-                precision={1}
+                precision={0}
               />
             </div>
           </CardContent>

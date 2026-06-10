@@ -30,11 +30,16 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   try {
     const ctx = await requirePermission('submissions.view');
 
-    // Verify the deal belongs to this tenant. Cheap single-row select.
+    // Verify the deal belongs to this tenant AND (for non-admins) is
+    // assigned to the calling rep. Without the rep-scope check, a rep
+    // could enumerate other reps' submissions by guessing deal IDs.
+    const isAdmin = ctx.user.role === 'master_admin' || ctx.user.role === 'company_admin';
+    const conds = [eq(deals.id, params.id), eq(deals.companyId, ctx.companyId)];
+    if (!isAdmin) conds.push(eq(deals.assignedRepId, ctx.user.id));
     const [deal] = await db
       .select({ id: deals.id })
       .from(deals)
-      .where(and(eq(deals.id, params.id), eq(deals.companyId, ctx.companyId)))
+      .where(and(...conds))
       .limit(1);
     if (!deal) return NextResponse.json({ data: [] });
 

@@ -9,6 +9,7 @@ import { computePaydown } from '@/lib/deals/paydown';
 import { exportCSV } from '@/lib/csv-export';
 import { Download } from 'lucide-react';
 import { formatCalendarDate, toDateInput } from '@/lib/dates';
+import { SearchableDealSelect } from '@/components/ui/searchable-deal-select';
 
 /* ---------- comma formatting helpers ---------- */
 // Display a numeric string with thousands separators while typing (keeps a
@@ -77,7 +78,14 @@ interface Commission {
   syncState: 'pending' | 'synced' | 'failed';
   updatedAt: string;
 }
-interface Deal { id: string; name: string; assignedRepId: string | null; }
+interface Deal {
+  id: string;
+  name: string;
+  assignedRepId: string | null;
+  merchantFirstName?: string | null;
+  merchantLastName?: string | null;
+  status?: string | null;
+}
 interface Rep { id: string; name: string; role: string; }
 interface LeadSource { id: string; name: string; contactEmail: string | null; contactPhone: string | null; isActive: boolean; }
 interface LSCommission {
@@ -459,8 +467,11 @@ export default function CommissionsPage() {
                   <thead><tr className="bg-muted/40 border-b border-border text-left">
                     <th className="px-4 py-2 th">Deal</th>
                     {isAdmin && <th className="px-3 py-2 th">Rep</th>}
-                    <th className="px-3 py-2 th text-right">Gross</th>
-                    <th className="px-3 py-2 th text-right">Split %</th>
+                    {/* Gross + Split % columns are admin-only — reps shouldn't
+                        be able to infer lead-source pay from the gross / split
+                        relationship. They still see Rep comm. (their take). */}
+                    {isAdmin && <th className="px-3 py-2 th text-right">Gross</th>}
+                    {isAdmin && <th className="px-3 py-2 th text-right">Split %</th>}
                     <th className="px-3 py-2 th text-right">Rep comm.</th>
                     <th className="px-3 py-2 th text-right">Paid</th>
                     <th className="px-3 py-2 th text-right">Owed</th>
@@ -473,8 +484,8 @@ export default function CommissionsPage() {
                         <tr key={r.id} className="hover:bg-muted/20">
                           <td className="px-4 py-2.5 font-medium">{r.dealName}</td>
                           {isAdmin && <td className="px-3 py-2.5 text-muted-foreground">{r.repName ?? '—'}</td>}
-                          <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(r.grossCommission))}</td>
-                          <td className="px-3 py-2.5 text-right tabular-nums">{Number(r.repSplitPct)}%</td>
+                          {isAdmin && <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(r.grossCommission))}</td>}
+                          {isAdmin && <td className="px-3 py-2.5 text-right tabular-nums">{Number(r.repSplitPct)}%</td>}
                           <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatCurrency(Number(r.repCommissionAmount))}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">{formatCurrency(Number(r.paidAmount))}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(r.owedAmount)}</td>
@@ -489,7 +500,7 @@ export default function CommissionsPage() {
                           </td>
                         </tr>
                         {expanded === r.id && (
-                          <tr className="bg-muted/10"><td colSpan={isAdmin ? 9 : 8} className="px-4 py-3">
+                          <tr className="bg-muted/10"><td colSpan={isAdmin ? 9 : 6} className="px-4 py-3">
                             <CommissionDetail r={r} isAdmin={isAdmin} reps={reps} onPatch={patch} onDelete={softDelete} onDealPatch={dealPatch} />
                           </td></tr>
                         )}
