@@ -219,10 +219,21 @@ export default function DealShopPage() {
     setExtraCc(extraCc.filter((e) => e !== email));
   }
   function onFilePick(files: FileList | null) {
-    if (!files) return;
+    if (!files || files.length === 0) return;
+    // CRITICAL: snapshot the FileList into a real array RIGHT NOW.
+    //
+    // FileList is live — it's a reference to `input.files`. Below we'll
+    // clear `input.value = ''` (so the same file can be re-selected later
+    // after removal), which also EMPTIES input.files. The setAttachments
+    // callback runs async (React batches state updates), so by the time
+    // it executes, `files` would already be empty and `Array.from(files)`
+    // would return `[]` — the picked files would silently vanish.
+    //
+    // This was the real reason "click to upload" wasn't attaching anything.
+    const picked = Array.from(files);
     setAttachments((prev) => {
       const next = [...prev];
-      for (const f of Array.from(files)) {
+      for (const f of picked) {
         if (!next.find((x) => x.name === f.name && x.size === f.size)) next.push(f);
       }
       return next;
