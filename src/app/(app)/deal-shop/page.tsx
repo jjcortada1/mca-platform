@@ -269,10 +269,27 @@ export default function DealShopPage() {
     }
 
     try {
-      const res = await fetch('/api/submissions/send', { method: 'POST', body: fd });
-      const json = await res.json();
+      // 90-second client-side abort so the user isn't stuck staring at
+      // "Sending…" if the server hangs or the network drops. The route's
+      // own maxDuration is 60s; this gives a small buffer above that so
+      // server-level errors come through before we abort.
+      const controller = new AbortController();
+      const abortTimer = setTimeout(() => controller.abort(), 90_000);
+
+      let res: Response;
+      try {
+        res = await fetch('/api/submissions/send', {
+          method: 'POST',
+          body: fd,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(abortTimer);
+      }
+
+      const json = await res.json().catch(() => ({ error: 'Server returned an invalid response.' }));
       if (!res.ok) {
-        alert(json.error || 'Send failed.');
+        alert(json.error || `Send failed (HTTP ${res.status}).`);
         setSending(false);
         return;
       }
@@ -290,7 +307,11 @@ export default function DealShopPage() {
         setShowPostSendConfirm(true);
       }
     } catch (err) {
-      alert('Network error: ' + (err as Error).message);
+      // AbortError = our 90s timeout. Anything else = network / fetch issue.
+      const msg = (err as Error).name === 'AbortError'
+        ? 'Send timed out after 90 seconds. The SMTP server may be slow or unreachable. Check your SMTP settings and try again.'
+        : 'Network error: ' + (err as Error).message;
+      alert(msg);
     } finally {
       setSending(false);
     }
@@ -750,7 +771,18 @@ export default function DealShopPage() {
               </div>
             </Field>
 
-            <Field label="Attachments (optional)">
+            <div className="flex flex-col gap-1.5">
+              {/*
+                Plain div instead of <Field label="…"> because Field renders a
+                <label> for its title. Nesting a <label htmlFor="…"> dropzone
+                inside another <label> is invalid HTML — the OUTER label
+                intercepts the click, so the file picker never opens. We render
+                a styled heading manually so the dropzone's <label> is the only
+                label in the tree and `htmlFor` actually triggers the picker.
+              */}
+              <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Attachments (optional)
+              </div>
               <div className="space-y-1.5">
                 {/* Click + drag-and-drop zone.
                     Using a <label htmlFor> wrapping the dropzone is the
@@ -826,7 +858,7 @@ export default function DealShopPage() {
                   </div>
                 )}
               </div>
-            </Field>
+            </div>
 
             <Button
               onClick={sendNow}
