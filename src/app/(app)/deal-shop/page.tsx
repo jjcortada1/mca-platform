@@ -140,6 +140,20 @@ export default function DealShopPage() {
   // browser confirm() popup that used to fire at the top of the page.
   const [showPostSendConfirm, setShowPostSendConfirm] = useState(false);
 
+  /**
+   * Manual / ad-hoc funders — typed-in names + emails for one-off sends to
+   * funders that aren't (yet) in the directory. These ride along with any
+   * directory funder selections on the same Send action. Each entry has a
+   * trash icon and isn't persisted anywhere; they live for this send only.
+   *
+   * The server already accepts entries without a `funderId` (uses
+   * `manualFunderName` + `toEmails`), so no API change is needed.
+   */
+  type ManualFunder = { id: string; name: string; email: string };
+  const [manualFunders, setManualFunders] = useState<ManualFunder[]>([]);
+  const [manualName, setManualName] = useState('');
+  const [manualEmail, setManualEmail] = useState('');
+
   // Load company users for the rep dropdown + auto-fill rep email into CC.
   useEffect(() => {
     fetch('/api/users')
@@ -226,7 +240,8 @@ export default function DealShopPage() {
    * on duplicate-detection + ASCII subject mode + plain-subject funders.
    */
   async function sendNow() {
-    if (selectedFunders.size === 0) return;
+    // At least one funder selected (directory or manual) is required.
+    if (selectedFunders.size === 0 && manualFunders.length === 0) return;
     if (smtpConfigured === false) {
       alert('Email is not configured yet. Set up SMTP first.');
       return;
@@ -238,8 +253,15 @@ export default function DealShopPage() {
     setSending(true);
     setSendResults(null);
 
-    // Build the funder targets from the selectedFunders set.
-    const targets: { funderId: string; toEmails: string[] }[] = [];
+    // Build the funder targets:
+    //   1. Directory funders → { funderId, toEmails }
+    //   2. Manual one-off funders → { manualFunderName, toEmails } (server
+    //      stores these on the submission row without persisting them to the
+    //      funder directory — purely for tracking this single send).
+    type Target =
+      | { funderId: string; toEmails: string[] }
+      | { manualFunderName: string; toEmails: string[] };
+    const targets: Target[] = [];
     for (const fid of Array.from(selectedFunders)) {
       const f = funderMap.get(fid);
       if (!f) continue;
@@ -250,6 +272,14 @@ export default function DealShopPage() {
         if (primary?.email) addrs.push(primary.email);
       }
       if (addrs.length > 0) targets.push({ funderId: fid, toEmails: addrs });
+    }
+    // Append manual funders. We trust the user's email on these (they typed
+    // it knowing it's a one-off); the server still validates with a hard
+    // regex + header-injection guard before sending.
+    for (const m of manualFunders) {
+      const trimmedEmail = m.email.trim();
+      if (!trimmedEmail.includes('@')) continue;
+      targets.push({ manualFunderName: m.name.trim() || trimmedEmail, toEmails: [trimmedEmail] });
     }
     if (targets.length === 0) {
       alert('None of the selected funders have a submission email configured.');
@@ -772,68 +802,60 @@ export default function DealShopPage() {
             </Field>
 
             <div className="flex flex-col gap-1.5">
-              {/*
-                Plain div instead of <Field label="…"> because Field renders a
-                <label> for its title. Nesting a <label htmlFor="…"> dropzone
-                inside another <label> is invalid HTML — the OUTER label
-                intercepts the click, so the file picker never opens. We render
-                a styled heading manually so the dropzone's <label> is the only
-                label in the tree and `htmlFor` actually triggers the picker.
-              */}
               <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 Attachments (optional)
               </div>
               <div className="space-y-1.5">
-                {/* Click + drag-and-drop zone.
-                    Using a <label htmlFor> wrapping the dropzone is the
-                    most reliable cross-browser pattern — clicking anywhere
-                    on the label natively opens the file picker, no JS
-                    .click() shim required (which was failing silently in
-                    some browsers).
-                    The hidden file input uses `sr-only` so it stays in the
-                    layout / accessible / clickable rather than being
-                    `display:none` (which breaks the label association in
-                    some Chromium builds).
-                    Drag handlers preventDefault on every event so the
-                    browser doesn't navigate away when a file drops outside
-                    the intended zone (default browser behavior is to OPEN
-                    the file in the current tab — really easy to lose work). */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  onChange={(e) => onFilePick(e.target.files)}
-                  className="sr-only"
-                  id="deal-shop-attach"
-                />
-                <label
-                  htmlFor="deal-shop-attach"
-                  onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
-                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
-                  onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setDragActive(false);
-                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                      onFilePick(e.dataTransfer.files);
-                    }
-                  }}
-                  className={cn(
-                    'flex flex-col items-center justify-center gap-1 px-3 py-4 rounded-md border-2 border-dashed cursor-pointer transition-colors',
-                    dragActive
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border bg-muted/20 hover:bg-muted/40 hover:border-foreground/30'
-                  )}
+                {/*
+                  Bulletproof file upload pattern:
+                  An <input type="file"> positioned absolutely with opacity:0
+                  COVERS the entire dropzone visual. The user clicks the visual,
+                  which is actually the invisible input — so the native file
+                  picker opens and onChange fires on the SAME element they
+                  clicked. No label, no htmlFor, no ref.click() shim, no
+                  nested-label conflicts.
+
+                  Bonus: file inputs natively accept drag-drop. Dropping files
+                  onto an <input type="file"> populates input.files and fires
+                  onChange — no separate drop handler needed. We still call
+                  preventDefault on dragover at the container level so the
+                  browser doesn't open the file in a new tab if the user
+                  misses the input.
+                */}
+                <div
+                  className="relative"
+                  onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+                  onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }}
+                  onDrop={() => setDragActive(false)}
                 >
-                  <Paperclip className="h-4 w-4 text-muted-foreground" />
-                  <div className="text-xs text-muted-foreground text-center">
-                    {dragActive
-                      ? 'Drop files here'
-                      : <><span className="font-medium text-foreground">Click to upload</span> or drag &amp; drop</>}
+                  <div
+                    className={cn(
+                      'flex flex-col items-center justify-center gap-1 px-3 py-4 rounded-md border-2 border-dashed pointer-events-none transition-colors',
+                      dragActive
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border bg-muted/20'
+                    )}
+                  >
+                    <Paperclip className="h-4 w-4 text-muted-foreground" />
+                    <div className="text-xs text-muted-foreground text-center">
+                      {dragActive
+                        ? 'Drop files here'
+                        : <><span className="font-medium text-foreground">Click to upload</span> or drag &amp; drop</>}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground/70">PDF, images, docs — up to 25MB each</div>
                   </div>
-                  <div className="text-[10px] text-muted-foreground/70">PDF, images, docs — up to 25MB each</div>
-                </label>
+                  {/* Transparent input layered on top — receives the click
+                      directly so the browser's "user gesture" guarantee for
+                      file pickers always holds. */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    onChange={(e) => onFilePick(e.target.files)}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    title="Click to attach files"
+                  />
+                </div>
                 {attachments.length > 0 && (
                   <div className="space-y-1">
                     {attachments.map((f, i) => (
@@ -842,7 +864,6 @@ export default function DealShopPage() {
                         <span className="text-muted-foreground tabular-nums">{(f.size / 1024).toFixed(0)} KB</span>
                         <button
                           onClick={(e) => {
-                            // Don't propagate to the label (which would open the picker).
                             e.preventDefault();
                             e.stopPropagation();
                             setAttachments(attachments.filter((_, x) => x !== i));
@@ -860,17 +881,90 @@ export default function DealShopPage() {
               </div>
             </div>
 
+            {/*
+              ───────── Manual / ad-hoc funders ─────────
+              For one-off sends to a funder that isn't in the directory.
+              The user types a name (optional — falls back to email) + an
+              email; we tack it onto the targets array at send time. Not
+              persisted — these don't get auto-added to /funders. If you
+              shop the same off-directory funder repeatedly, add them to
+              the directory the normal way.
+            */}
+            <div className="flex flex-col gap-1.5 pt-2 border-t border-border">
+              <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                One-off funder (not in directory)
+              </div>
+              {manualFunders.length > 0 && (
+                <div className="space-y-1">
+                  {manualFunders.map((m) => (
+                    <div key={m.id} className="flex items-center justify-between gap-2 py-0.5 px-2 rounded bg-amber-50 border border-amber-200 text-[11px]">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium truncate">{m.name || '(no name)'}</div>
+                        <div className="text-muted-foreground truncate break-all">{m.email}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setManualFunders(manualFunders.filter((x) => x.id !== m.id))}
+                        className="text-muted-foreground hover:text-destructive shrink-0"
+                        title="Remove"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5">
+                <Input
+                  value={manualName}
+                  onChange={(e) => setManualName(e.target.value)}
+                  placeholder="Funder name"
+                  className="h-8 text-xs"
+                />
+                <Input
+                  value={manualEmail}
+                  onChange={(e) => setManualEmail(e.target.value)}
+                  placeholder="email@funder.com"
+                  type="email"
+                  className="h-8 text-xs"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const email = manualEmail.trim();
+                      if (!email.includes('@')) return;
+                      setManualFunders([...manualFunders, { id: Math.random().toString(36).slice(2), name: manualName.trim(), email }]);
+                      setManualName('');
+                      setManualEmail('');
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const email = manualEmail.trim();
+                    if (!email.includes('@')) { alert('Enter a valid email.'); return; }
+                    setManualFunders([...manualFunders, { id: Math.random().toString(36).slice(2), name: manualName.trim(), email }]);
+                    setManualName('');
+                    setManualEmail('');
+                  }}
+                  className="h-8 px-2.5 rounded-md border border-input bg-card text-xs font-medium hover:bg-muted/40"
+                >
+                  + Add
+                </button>
+              </div>
+            </div>
+
             <Button
               onClick={sendNow}
-              disabled={sending || selectedFunders.size === 0 || smtpConfigured === false}
+              disabled={sending || (selectedFunders.size === 0 && manualFunders.length === 0) || smtpConfigured === false}
               className="w-full"
             >
               <Send className="h-4 w-4 mr-2" />
               {sending
                 ? 'Sending…'
-                : selectedFunders.size === 0
+                : (selectedFunders.size === 0 && manualFunders.length === 0)
                   ? 'Pick funders →'
-                  : `Send to ${selectedFunders.size} funder${selectedFunders.size === 1 ? '' : 's'}`}
+                  : `Send to ${selectedFunders.size + manualFunders.length} funder${(selectedFunders.size + manualFunders.length) === 1 ? '' : 's'}`}
             </Button>
 
             {sendResults && (
