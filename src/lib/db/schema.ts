@@ -333,6 +333,21 @@ export const deals = pgTable(
     // legacy funded deals don't need a migration. Additive — null treated
     // as 'active' in the UI.
     fundedSubStatus: varchar('funded_sub_status', { length: 24 }),
+    // Which funder ultimately funded this deal. Set when the user marks a
+    // deal as funded — we ask "Funded With ___" and store the FK here.
+    // Nullable for legacy rows + for the rare case where the funder isn't
+    // in the directory (then `fundedWithName` carries a free-text label).
+    // ON DELETE SET NULL so deleting a funder doesn't cascade-delete the
+    // history of every deal they funded.
+    fundedWithFunderId: uuid('funded_with_funder_id').references(() => funders.id, { onDelete: 'set null' }),
+    // Free-text fallback for off-directory funders, or to overlay a custom
+    // label when the directory name isn't quite right. Optional.
+    fundedWithName: varchar('funded_with_name', { length: 200 }),
+    // General-purpose notes attached to a funded deal — anything the user
+    // wants to remember (special terms, contact-of-record, "watch this one",
+    // etc). Surfaced in the funded-deal expand view AND in the rep
+    // commissions view so reps see the deal context next to their pay.
+    fundedNotes: text('funded_notes'),
     // Soft-delete flag. When true, the deal is treated as gone everywhere —
     // hidden from dropdowns, lists, commission views, accounting, etc. We
     // soft-delete instead of hard-delete so historical audit data is

@@ -38,6 +38,13 @@ export async function GET() {
         merchantPhone: deals.merchantPhone,
         merchantEmail: deals.merchantEmail,
         assignedRepId: deals.assignedRepId,
+        // Deal-level funding context — surfaced in the rep commission view
+        // so reps see when the deal funded and any notes attached to it.
+        // dealCommissions has its own `fundingDate` field too (which can be
+        // edited by admins), but the DEAL's fundingDate is the source of
+        // truth for display when there's no separate commission record date.
+        dealFundingDate: deals.fundingDate,
+        dealFundedNotes: deals.fundedNotes,
         repName: users.name,
       })
       .from(dealCommissions)
@@ -51,7 +58,7 @@ export async function GET() {
       .orderBy(desc(dealCommissions.updatedAt));
 
     const now = new Date();
-    const data = rows.map(({ c, dealName, merchantFirstName, merchantLastName, merchantPhone, merchantEmail, assignedRepId, repName }) => {
+    const data = rows.map(({ c, dealName, merchantFirstName, merchantLastName, merchantPhone, merchantEmail, assignedRepId, repName, dealFundingDate, dealFundedNotes }) => {
       const effectiveStatus = resolveAutoStatus(c.status, c.fundingDate, now);
       const amount = Number(c.repCommissionAmount);
       const paid = Number(c.paidAmount);
@@ -78,6 +85,9 @@ export async function GET() {
         owedAmount: effectiveStatus === 'clawed_back' ? 0 : Math.max(0, amount - paid),
         status: effectiveStatus,
         fundingDate: c.fundingDate,
+        // Deal-level fields surfaced for rep + admin views alike.
+        dealFundingDate,
+        dealFundedNotes,
         clearedDate: c.clearedDate,
         earlyPayoffDiscount: c.earlyPayoffDiscount,
         notes: c.notes,

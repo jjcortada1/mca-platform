@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, Button, Input, Field, Badge, PageHeader } from '@/components/ui/primitives';
+import { Card, CardContent, Button, Input, Field, Badge, PageHeader, CurrencyInput } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { formatCurrency } from '@/lib/utils';
 import { Search, Download } from 'lucide-react';
@@ -234,7 +234,7 @@ function EditPaymentModal({ payment, onClose, onSaved }: { payment: Payment; onC
           <p className="text-xs text-muted-foreground mt-1">Payee: {payment.payeeName}{payment.dealName ? ` · ${payment.dealName}` : ''}</p>
         </div>
         <div className="p-6 space-y-3">
-          <Field label="Amount ($)"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+          <Field label="Amount"><CurrencyInput value={amount} onChange={(v) => setAmount(v)} placeholder="10,000" /></Field>
           <Field label="Date"><Input type="date" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} /></Field>
           <Field label="Method">
             <select value={method} onChange={(e) => setMethod(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">

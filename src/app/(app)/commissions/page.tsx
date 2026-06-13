@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, Button, Input, Field, PageHeader, Badge } from '@/components/ui/primitives';
+import { Card, CardContent, Button, Input, Field, PageHeader, Badge, PercentInput, CurrencyInput } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { cn } from '@/lib/utils';
@@ -72,6 +72,10 @@ interface Commission {
   owedAmount: number;
   status: 'pending' | 'cleared' | 'clawed_back';
   fundingDate: string | null;
+  // Funding date + notes from the underlying deal record. Surfaced for
+  // both admin and rep views so the rep sees deal context next to pay.
+  dealFundingDate?: string | null;
+  dealFundedNotes?: string | null;
   clearedDate: string | null;
   earlyPayoffDiscount: string | null;
   notes: string | null;
@@ -729,10 +733,16 @@ function AddCommissionModal({ deals, reps, onClose, onSaved }: { deals: Deal[]; 
           <Input inputMode="decimal" value={f.termCount} onChange={(e) => setF({ ...f, termCount: e.target.value })} placeholder={f.termMode === 'daily' ? '120' : '24'} />
         </Field>
 
-        <MoneyField label="Fees ($)" value={f.fees} onChange={(v) => setF({ ...f, fees: v })} placeholder="0" />
+        {/* Fees is a PERCENTAGE field, not a dollar amount — represents the
+            origination / funding fee on the deal. Switched from MoneyField
+            ($ prefix) to a percent-suffixed input to match how it's quoted
+            in the industry and how the calculator treats fees too. */}
+        <Field label="Funding fee">
+          <PercentInput value={f.fees ?? ''} onChange={(v) => setF({ ...f, fees: v })} placeholder="5" />
+        </Field>
         <MoneyField label="Gross commission ($)" value={f.grossCommission} onChange={(v) => setF({ ...f, grossCommission: v })} placeholder="10,000" />
         <MoneyField label="Broker fee ($)" value={f.brokerFee} onChange={(v) => setF({ ...f, brokerFee: v })} placeholder="0" />
-        <Field label="Rep split %"><Input inputMode="decimal" value={f.repSplitPct} onChange={(e) => setF({ ...f, repSplitPct: e.target.value })} placeholder="30" /></Field>
+        <Field label="Rep split"><PercentInput value={f.repSplitPct} onChange={(v) => setF({ ...f, repSplitPct: v })} placeholder="30" /></Field>
 
         {/* Lead source (optional) */}
         <Field label="Lead source commission">
@@ -742,7 +752,7 @@ function AddCommissionModal({ deals, reps, onClose, onSaved }: { deals: Deal[]; 
             <option value="flat">Flat amount</option>
           </select>
         </Field>
-        {f.leadSourceMode === 'split' && <Field label="Lead source split %"><Input inputMode="decimal" value={f.leadSourceSplitPct} onChange={(e) => setF({ ...f, leadSourceSplitPct: e.target.value })} placeholder="10" /></Field>}
+        {f.leadSourceMode === 'split' && <Field label="Lead source split"><PercentInput value={f.leadSourceSplitPct} onChange={(v) => setF({ ...f, leadSourceSplitPct: v })} placeholder="10" /></Field>}
         {f.leadSourceMode === 'flat' && <MoneyField label="Lead source flat ($)" value={f.leadSourceFlatAmount} onChange={(v) => setF({ ...f, leadSourceFlatAmount: v })} placeholder="500" />}
 
         <Field label="Early payoff discount"><Input value={f.earlyPayoffDiscount} onChange={(e) => setF({ ...f, earlyPayoffDiscount: e.target.value })} placeholder="optional" /></Field>
@@ -1071,10 +1081,25 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
         <Detail label="Funded amount" value={r.fundedAmount ? formatCurrency(Number(r.fundedAmount)) : '—'} />
         <Detail label="Rate" value={r.rate ?? '—'} />
         <Detail label="Term" value={r.termMode && r.termCount ? `${Number(r.termCount)} ${r.termMode === 'daily' ? 'days' : 'weeks'}` : (r.termMonths ? `${r.termMonths} mo` : '—')} />
-        <Detail label="Fees" value={r.fees ? formatCurrency(Number(r.fees)) : '—'} />
+        <Detail label="Funding fee" value={r.fees ? `${Number(r.fees)}%` : '—'} />
+        {/* Date funded — comes from the deal record, not the commission row.
+            The commission's own fundingDate is admin-editable; this is the
+            source-of-truth date for the underlying funded deal. */}
+        <Detail label="Date funded" value={r.dealFundingDate ? formatDate(r.dealFundingDate) : (r.fundingDate ? formatDate(r.fundingDate) : '—')} />
         <Detail label="Pending" value={formatCurrency(r.pendingAmount)} />
         <Detail label="Cleared date" value={r.clearedDate ? formatDate(r.clearedDate) : '—'} />
       </div>
+
+      {/* Funded-deal notes — surfaced from the deal record so the rep sees
+          deal-level context (special terms, watch-list flags, etc.) right
+          alongside their commission detail. Read-only here; edited from
+          the Funded Deals page. */}
+      {r.dealFundedNotes && (
+        <div className="text-xs">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-0.5">Deal notes</div>
+          <div className="whitespace-pre-wrap text-foreground bg-muted/30 border border-border rounded-md px-3 py-2">{r.dealFundedNotes}</div>
+        </div>
+      )}
 
       {isAdmin && (
         <>
@@ -1101,9 +1126,9 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
           <div className="space-y-3 pt-3 border-t border-border">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Commission math (editable)</div>
             <div className="flex flex-wrap items-end gap-3">
-              <Field label="Total commission ($)" className="w-40"><Input inputMode="decimal" value={gross} onChange={(e) => setGross(e.target.value)} placeholder="10000" /></Field>
-              <Field label="Broker fee ($)" className="w-32"><Input inputMode="decimal" value={brokerFee} onChange={(e) => setBrokerFee(e.target.value)} placeholder="2000" /></Field>
-              <Field label="Rep split %" className="w-28"><Input inputMode="decimal" value={splitPct} onChange={(e) => setSplitPct(e.target.value)} placeholder="50" /></Field>
+              <Field label="Total commission" className="w-40"><CurrencyInput value={gross} onChange={(v) => setGross(v)} placeholder="10,000" /></Field>
+              <Field label="Broker fee" className="w-32"><CurrencyInput value={brokerFee} onChange={(v) => setBrokerFee(v)} placeholder="2,000" /></Field>
+              <Field label="Rep split" className="w-28"><PercentInput value={splitPct} onChange={(v) => setSplitPct(v)} placeholder="50" /></Field>
               <Field label="Funded date" className="w-40"><Input type="date" value={fundingDate} onChange={(e) => setFundingDate(e.target.value)} /></Field>
               <div className="px-3 py-2 rounded bg-muted/40 text-xs">
                 <span className="text-muted-foreground">Rep gets: </span>
@@ -1113,7 +1138,7 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
 
             {/* Status / paid / notes / early payoff */}
             <div className="flex flex-wrap items-end gap-3">
-              <Field label="Paid amount" className="w-36"><Input inputMode="decimal" value={paid} onChange={(e) => setPaid(e.target.value)} /></Field>
+              <Field label="Paid amount" className="w-36"><CurrencyInput value={paid} onChange={(v) => setPaid(v)} placeholder="0" /></Field>
               <Field label="Status" className="w-40">
                 <select value={status} onChange={(e) => setStatus(e.target.value as Commission['status'])} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
                   <option value="pending">Pending</option><option value="cleared">Cleared</option><option value="clawed_back">Clawed Back</option>
@@ -1203,7 +1228,7 @@ function LogPaymentInline({ commissionId, repId, onLogged }: { commissionId: str
         <button onClick={() => setOpen(true)} className="text-xs text-primary hover:underline">+ Log a payment</button>
       ) : (
         <div className="flex flex-wrap items-end gap-2">
-          <Field label="Amount" className="w-28"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000" /></Field>
+          <Field label="Amount" className="w-32"><CurrencyInput value={amount} onChange={(v) => setAmount(v)} placeholder="1,000" /></Field>
           <Field label="Method" className="w-28">
             <select value={method} onChange={(e) => setMethod(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
               {['ach', 'wire', 'check', 'cash', 'zelle', 'other'].map((m) => <option key={m} value={m}>{m.toUpperCase()}</option>)}
@@ -1333,8 +1358,8 @@ function LSCommissionDetail({
       <div className="pt-2 border-t border-dashed border-border">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Commission math (editable)</div>
         <div className="flex flex-wrap items-end gap-2">
-          <Field label="Total commission ($)" className="w-40"><Input inputMode="decimal" value={gross} onChange={(e) => setGross(e.target.value)} placeholder="10000" /></Field>
-          <Field label="Broker fee ($)" className="w-32"><Input inputMode="decimal" value={brokerFee} onChange={(e) => setBrokerFee(e.target.value)} placeholder="2000" /></Field>
+          <Field label="Total commission" className="w-40"><CurrencyInput value={gross} onChange={(v) => setGross(v)} placeholder="10,000" /></Field>
+          <Field label="Broker fee" className="w-32"><CurrencyInput value={brokerFee} onChange={(v) => setBrokerFee(v)} placeholder="2,000" /></Field>
           <Field label="Funded date" className="w-40"><Input type="date" value={fundingDate} onChange={(e) => setFundingDate(e.target.value)} /></Field>
         </div>
         <div className="flex flex-wrap items-end gap-2 mt-2">
@@ -1445,7 +1470,7 @@ function LogLSPaymentInline({ lsCommissionId, onLogged }: { lsCommissionId: stri
         <button onClick={() => setOpen(true)} className="text-xs text-primary hover:underline">+ Log a payment</button>
       ) : (
         <div className="flex flex-wrap items-end gap-2">
-          <Field label="Amount" className="w-28"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000" /></Field>
+          <Field label="Amount" className="w-32"><CurrencyInput value={amount} onChange={(v) => setAmount(v)} placeholder="1,000" /></Field>
           <Field label="Method" className="w-28">
             <select value={method} onChange={(e) => setMethod(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
               {['ach', 'wire', 'check', 'cash', 'zelle', 'other'].map((m) => <option key={m} value={m}>{m.toUpperCase()}</option>)}

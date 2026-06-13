@@ -36,6 +36,13 @@ interface Deal {
   assignedRepName?: string | null;
   // Funded-deal sub-status. Null/missing → treated as 'active' in UI.
   fundedSubStatus?: 'active' | 'refi_eligible' | 'payment_issues' | 'default' | null;
+  // Which funder ultimately funded this deal. Either an FK to a directory
+  // funder OR a free-text label (the funder isn't in the directory).
+  fundedWithFunderId?: string | null;
+  fundedWithName?: string | null;
+  // General-purpose notes on this funded deal — surfaced here AND in the
+  // rep commission view so reps have deal context alongside their pay.
+  fundedNotes?: string | null;
   // Free-text fields displayed in the expand panel.
   notes?: string | null;
   renewalNotes?: string | null;
@@ -61,7 +68,7 @@ const TONE_CLASS: Record<string, string> = {
   cyan: 'bg-cyan-100 text-cyan-800 border-cyan-200',
 };
 
-type SortKey = 'recent' | 'pct_desc' | 'pct_asc' | 'balance_desc' | 'funded_desc';
+type SortKey = 'recent' | 'oldest' | 'pct_desc' | 'pct_asc' | 'balance_desc' | 'funded_desc';
 
 export default function PortfolioPage() {
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -71,6 +78,8 @@ export default function PortfolioPage() {
   const [sort, setSort] = useState<SortKey>('recent');
   // Roster for the rep-assignment dropdown on each funded deal row.
   const [reps, setReps] = useState<{ id: string; name: string }[]>([]);
+  // Funder directory for the "Funded With" picker on the funded-deal editor.
+  const [funders, setFunders] = useState<{ id: string; name: string }[]>([]);
   // Delete confirmation state. When non-null, the ConfirmDialog renders and
   // the user can review the action before destruction. Reusable component
   // replaces native browser confirm() so the dialog doesn't appear in the
@@ -109,6 +118,17 @@ export default function PortfolioPage() {
       setReps(list
         .filter((u) => u.role !== 'lead_source')
         .map((u) => ({ id: u.id, name: u.name || u.email }))
+        .sort((a, b) => a.name.localeCompare(b.name)));
+    }).catch(() => {});
+
+    // Funder directory for the "Funded With" dropdown on each funded-deal
+    // editor + the add-funded-deal drawer. We want active funders only
+    // (and the response is already filtered to !isDeleted on the server).
+    fetch('/api/funders', { cache: 'no-store' }).then((r) => r.json()).then((j) => {
+      const list = (j.data ?? j.funders ?? []) as { id: string; name: string; isActive?: boolean }[];
+      setFunders(list
+        .filter((f) => f.isActive !== false)
+        .map((f) => ({ id: f.id, name: f.name }))
         .sort((a, b) => a.name.localeCompare(b.name)));
     }).catch(() => {});
   }, []);
@@ -179,6 +199,9 @@ export default function PortfolioPage() {
       case 'pct_asc': sorted.sort((a, b) => a.p.pctPaidIn - b.p.pctPaidIn); break;
       case 'balance_desc': sorted.sort((a, b) => b.p.remainingBalance - a.p.remainingBalance); break;
       case 'funded_desc': sorted.sort((a, b) => b.p.fundedAmount - a.p.fundedAmount); break;
+      // 'oldest' = ascending funding date (earliest first). 'recent' is the
+      // descending default — newest funded first.
+      case 'oldest': sorted.sort((a, b) => (new Date(a.deal.fundingDate ?? 0).getTime()) - (new Date(b.deal.fundingDate ?? 0).getTime())); break;
       default: sorted.sort((a, b) => (new Date(b.deal.fundingDate ?? 0).getTime()) - (new Date(a.deal.fundingDate ?? 0).getTime()));
     }
     // Push deals without structure to the bottom of any non-pct sort so the
@@ -233,6 +256,7 @@ export default function PortfolioPage() {
         <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}
           className="h-8 rounded-full border border-input bg-card px-3 text-xs text-muted-foreground">
           <option value="recent">Newest funded</option>
+          <option value="oldest">Oldest funded</option>
           <option value="pct_desc">Most paid down</option>
           <option value="pct_asc">Least paid down</option>
           <option value="balance_desc">Highest balance</option>
@@ -248,8 +272,6 @@ export default function PortfolioPage() {
             title="Filter funded deals by rep"
           >
             <option value="">All reps</option>
-            <option value="mine">My deals only</option>
-            <option disabled>──────────</option>
             {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         )}
@@ -273,7 +295,22 @@ export default function PortfolioPage() {
                 <th className="w-8 px-2 py-2"></th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Deal</th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Status</th>
-                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 hidden md:table-cell">Funded</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 hidden md:table-cell">
+                  {/* Click to toggle Date Funded sort:
+                      first click  → newest first (recent)
+                      second click → oldest first (oldest)
+                      Visual chevron reflects the current direction. */}
+                  <button
+                    type="button"
+                    onClick={() => setSort(sort === 'recent' ? 'oldest' : 'recent')}
+                    className="inline-flex items-center gap-1 hover:text-foreground"
+                    title="Sort by funded date"
+                  >
+                    Funded
+                    {sort === 'recent' && <span className="text-foreground">↓</span>}
+                    {sort === 'oldest' && <span className="text-foreground">↑</span>}
+                  </button>
+                </th>
                 <th className="text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Funded $</th>
                 <th className="text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 hidden lg:table-cell">Payback $</th>
                 <th className="text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 hidden lg:table-cell">Term</th>
@@ -290,6 +327,7 @@ export default function PortfolioPage() {
                   deal={deal}
                   p={p}
                   reps={reps}
+                  funders={funders}
                   onUpdated={(patched) => {
                     setDeals((arr) => arr.map((d) => d.id === deal.id ? { ...d, ...patched } : d));
                   }}
@@ -319,6 +357,7 @@ export default function PortfolioPage() {
       {showAdd && (
         <AddFundedDealDrawer
           reps={reps}
+          funders={funders}
           onClose={() => setShowAdd(false)}
           onCreated={(d) => {
             setDeals((arr) => [d, ...arr]);
@@ -381,12 +420,14 @@ function FundedDealRow({
   deal,
   p,
   reps,
+  funders,
   onUpdated,
   onRequestDelete,
 }: {
   deal: Deal;
   p: ReturnType<typeof computePaydown>;
   reps: { id: string; name: string }[];
+  funders: { id: string; name: string }[];
   onUpdated: (patch: Partial<Deal>) => void;
   onRequestDelete: () => void;
 }) {
@@ -404,7 +445,19 @@ function FundedDealRow({
   const [expanded, setExpanded] = useState(!p.hasStructure);
   const [editing, setEditing] = useState(!p.hasStructure);
   const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState({
+  const [draft, setDraft] = useState<{
+    fundedAmount: string;
+    feePct: string;
+    factorRate: string;
+    termMode: string;
+    termCount: string;
+    fundingDate: string;
+    amountCollected: string;
+    fundedSubStatus: 'active' | 'refi_eligible' | 'payment_issues' | 'default';
+    assignedRepId: string;
+    fundedWithFunderId: string | null;
+    fundedNotes: string;
+  }>({
     fundedAmount: deal.fundedAmount ?? '',
     feePct: deal.feePct ?? '',
     factorRate: deal.factorRate ?? '',
@@ -416,6 +469,10 @@ function FundedDealRow({
     // the user can change everything in one save round-trip.
     fundedSubStatus: subStatusKey as 'active' | 'refi_eligible' | 'payment_issues' | 'default',
     assignedRepId: deal.assignedRepId ?? '',
+    // Funded With + Notes — surfaced in the editor, persisted to the
+    // deals row, exposed in commissions for reps.
+    fundedWithFunderId: deal.fundedWithFunderId ?? null,
+    fundedNotes: deal.fundedNotes ?? '',
   });
 
   // Inline sub-status changer — small select on the table row that PATCHes
@@ -453,6 +510,12 @@ function FundedDealRow({
     if (body.fundingDate === '') body.fundingDate = null;
     // Empty rep id → unassign (null) so the column clears.
     if (body.assignedRepId === '') body.assignedRepId = null;
+    // Empty / null funded-with → clear FK on save.
+    if (body.fundedWithFunderId === '') body.fundedWithFunderId = null;
+    // Trim notes; empty string → null so it doesn't render as " " on display.
+    if (typeof body.fundedNotes === 'string') {
+      body.fundedNotes = body.fundedNotes.trim() || null;
+    }
     const res = await fetch(`/api/deals/${deal.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -650,10 +713,29 @@ function FundedDealRow({
                     </>
                   )}
 
-                  {(deal.notes || deal.renewalNotes) && (
+                  {(deal.notes || deal.renewalNotes || deal.fundedNotes || deal.fundedWithFunderId || deal.fundedWithName) && (
                     <>
-                      <SectionLabel>Notes</SectionLabel>
+                      <SectionLabel>Notes &amp; funder</SectionLabel>
+                      {(deal.fundedWithFunderId || deal.fundedWithName) && (
+                        <div className="text-xs">
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-0.5">Funded with</div>
+                          <div className="text-foreground font-medium">
+                            {funders.find((f) => f.id === deal.fundedWithFunderId)?.name
+                              ?? deal.fundedWithName
+                              ?? '—'}
+                          </div>
+                        </div>
+                      )}
                       <div className="space-y-2 text-xs">
+                        {/* The user's primary notes field on a funded deal —
+                            also surfaced in /commissions next to the deal so
+                            reps see the deal context alongside their pay. */}
+                        {deal.fundedNotes && (
+                          <div>
+                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-0.5">Notes</div>
+                            <div className="whitespace-pre-wrap text-foreground">{deal.fundedNotes}</div>
+                          </div>
+                        )}
                         {deal.notes && (
                           <div>
                             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-0.5">Deal notes</div>
@@ -757,6 +839,32 @@ function FundedDealRow({
                         <option value="default">Default</option>
                       </select>
                     </Field>
+                    {/* Funded With — which funder actually funded the deal.
+                        Picked from the active funder directory. Defaults to
+                        unset on legacy rows. */}
+                    <Field label="Funded with">
+                      <select
+                        value={draft.fundedWithFunderId ?? ''}
+                        onChange={(e) => setDraft({ ...draft, fundedWithFunderId: e.target.value || null })}
+                        className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+                      >
+                        <option value="">— pick a funder —</option>
+                        {funders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                      </select>
+                    </Field>
+                  </div>
+                  {/* Notes — free-text, full-width below the field grid. Also
+                      surfaced in the rep commission view, so reps see deal
+                      context alongside their pay. */}
+                  <div>
+                    <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">Notes</div>
+                    <textarea
+                      value={draft.fundedNotes ?? ''}
+                      onChange={(e) => setDraft({ ...draft, fundedNotes: e.target.value })}
+                      rows={3}
+                      className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm resize-y"
+                      placeholder="Anything to remember about this deal — special terms, contact-of-record, watch list, etc."
+                    />
                   </div>
                   <div className="flex justify-end gap-2 pt-1">
                     {p.hasStructure && (
@@ -853,10 +961,12 @@ function Field({ label, children, required, className }: {
  */
 function AddFundedDealDrawer({
   reps,
+  funders,
   onClose,
   onCreated,
 }: {
   reps: { id: string; name: string }[];
+  funders: { id: string; name: string }[];
   onClose: () => void;
   onCreated: (deal: Deal) => void;
 }) {
@@ -878,7 +988,8 @@ function AddFundedDealDrawer({
     amountCollected: '',
     assignedRepId: '',
     fundedSubStatus: 'active' as 'active' | 'refi_eligible' | 'payment_issues' | 'default',
-    notes: '',
+    fundedWithFunderId: '',
+    fundedNotes: '',
   });
 
   async function submit() {
@@ -904,7 +1015,10 @@ function AddFundedDealDrawer({
       amountCollected: form.amountCollected || null,
       assignedRepId: form.assignedRepId || null,
       fundedSubStatus: form.fundedSubStatus,
-      notes: form.notes.trim() || null,
+      // Funded With + Notes go on the deal record directly so they appear in
+      // the funded-deal expand view AND in the rep commission view.
+      fundedWithFunderId: form.fundedWithFunderId || null,
+      fundedNotes: form.fundedNotes.trim() || null,
     };
     const res = await fetch('/api/deals', {
       method: 'POST',
@@ -1017,16 +1131,26 @@ function AddFundedDealDrawer({
             <Field label="Amount collected" className="col-span-2">
               <CurrencyInput value={form.amountCollected} onChange={(v) => setForm({ ...form, amountCollected: v })} placeholder="auto if blank" />
             </Field>
+            <Field label="Funded with" className="col-span-2">
+              <select
+                value={form.fundedWithFunderId}
+                onChange={(e) => setForm({ ...form, fundedWithFunderId: e.target.value })}
+                className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+              >
+                <option value="">— pick a funder —</option>
+                {funders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </Field>
           </div>
 
           <SectionLabel>Notes</SectionLabel>
           <Field label="">
             <textarea
-              value={form.notes}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              value={form.fundedNotes}
+              onChange={(e) => setForm({ ...form, fundedNotes: e.target.value })}
               rows={3}
               className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm resize-y"
-              placeholder="Optional context — funder name, special terms, etc."
+              placeholder="Anything to remember about this deal — special terms, watch list, etc. Shown alongside this deal in the rep commission view."
             />
           </Field>
         </div>

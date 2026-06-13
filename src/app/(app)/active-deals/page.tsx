@@ -835,8 +835,8 @@ function OffersManager({ dealId }: { dealId: string }) {
       {adding && (
         <div className="rounded-md border border-border bg-card p-3 space-y-2">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <OfferField label="Funding amount ($)">
-              <Input inputMode="decimal" value={String(draft.fundingAmount ?? '')} onChange={(e) => setDraft({ ...draft, fundingAmount: e.target.value })} placeholder="50000" />
+            <OfferField label="Funding amount">
+              <CurrencyInput value={String(draft.fundingAmount ?? '')} onChange={(v) => setDraft({ ...draft, fundingAmount: v })} placeholder="50,000" />
             </OfferField>
             <OfferField label="Factor rate">
               <Input inputMode="decimal" value={String(draft.factorRate ?? '')} onChange={(e) => setDraft({ ...draft, factorRate: e.target.value })} placeholder="1.40" />
@@ -851,11 +851,14 @@ function OffersManager({ dealId }: { dealId: string }) {
                 </select>
               </div>
             </OfferField>
-            <OfferField label="Fees ($)">
-              <Input inputMode="decimal" value={String(draft.fees ?? '')} onChange={(e) => setDraft({ ...draft, fees: e.target.value })} placeholder="1500" />
+            {/* Fees is a PERCENTAGE on a deal offer — not a dollar amount.
+                Funding fee % is how lenders quote it; storing as a dollar
+                here lost meaning when the funded amount changed. */}
+            <OfferField label="Fee">
+              <PercentInput value={String(draft.fees ?? '')} onChange={(v) => setDraft({ ...draft, fees: v })} placeholder="5" />
             </OfferField>
-            <OfferField label="Payment ($)">
-              <Input inputMode="decimal" value={String(draft.paymentAmount ?? '')} onChange={(e) => setDraft({ ...draft, paymentAmount: e.target.value })} placeholder="2692" />
+            <OfferField label="Payment">
+              <CurrencyInput value={String(draft.paymentAmount ?? '')} onChange={(v) => setDraft({ ...draft, paymentAmount: v })} placeholder="2,692" />
             </OfferField>
           </div>
           <OfferField label="Notes">

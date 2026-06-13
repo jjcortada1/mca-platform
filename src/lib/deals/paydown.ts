@@ -251,9 +251,13 @@ export const DEAL_STATUS_META: Record<string, { label: string; tone: string }> =
   dead: { label: 'Declined (legacy)', tone: 'rose' },
 };
 
-/** The ONLY statuses shown in editors/filters. */
+/** The ONLY statuses shown in editors/filters.
+ *  Note: 'waiting_on_offer' was removed — a submitted deal is implicitly
+ *  waiting on an offer, so the extra status was redundant. The enum value
+ *  is retained in the DB / META lookup so any legacy rows still display
+ *  correctly. New deals use 'submitted' until they get an actual 'offer'. */
 export const DEAL_STATUS_OPTIONS = [
-  'submitted', 'waiting_on_offer', 'offer', 'funded', 'declined',
+  'submitted', 'offer', 'funded', 'declined',
 ] as const;
 
 export interface ScheduledPayment {
