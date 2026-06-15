@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, Button, Input, Textarea, Badge, PageHeader, EmptyState, Field, CurrencyInput, PercentInput } from '@/components/ui/primitives';
 import { RepPicker } from '@/components/ui/rep-picker';
+import { triggerFundingCelebration } from '@/components/funding-celebration';
 import { exportCSV } from '@/lib/csv-export';
 import { useToast } from '@/components/toast';
 import { formatDate, formatCurrency } from '@/lib/utils';
@@ -616,11 +617,16 @@ export default function ActiveDealsPage() {
           deal={markingFunded}
           onClose={() => setMarkingFunded(null)}
           onSaved={(updatedFields) => {
+            const dealName = markingFunded.name;
             setDeals((arr) => arr.map((x) =>
               x.id === markingFunded.id ? { ...x, ...updatedFields, status: 'funded' } : x
             ));
             setMarkingFunded(null);
             toast.success('Marked as funded.');
+            // Premium celebration. Fires globally — confetti + custom
+            // message overlay rendered by FundingCelebration in the layout.
+            // The deal name appears as a subtitle under the message.
+            triggerFundingCelebration({ dealName });
           }}
         />
       )}

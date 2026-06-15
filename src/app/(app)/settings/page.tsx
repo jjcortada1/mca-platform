@@ -9,10 +9,10 @@ import { useToast } from '@/components/toast';
 import {
   Palette, Mail, Send, FileText, DollarSign, Layers, ListChecks,
   Users as UsersIcon, GitBranch, Database, ShieldCheck, Menu as MenuIcon,
-  Trash2,
+  Trash2, Sparkles,
 } from 'lucide-react';
 
-type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar';
+type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar' | 'celebration';
 
 // Flatter, friendlier settings nav. Each entry has an icon + one-line
 // description so the user can scan and find what they want without reading
@@ -26,6 +26,11 @@ const TAB_GROUPS: {
     tabs: [
       { key: 'branding', label: 'Branding', icon: Palette, description: 'Logo, colors, company name' },
       { key: 'sidebar', label: 'Sidebar order', icon: MenuIcon, description: 'Rearrange the left navigation menu' },
+      // Funded celebration is admin-customizable — confetti + message text.
+      // Lives in General because it's a company-wide personality knob, like
+      // branding. Hidden behind admin gating (settings page itself is admin
+      // only via permissions.manage).
+      { key: 'celebration', label: 'Funded celebration', icon: Sparkles, description: 'Confetti + message when a deal funds' },
       { key: 'security', label: 'Security', icon: ShieldCheck, description: 'Your password and audit log' },
     ],
   },
@@ -122,6 +127,7 @@ export default function SettingsPage() {
 
           {tab === 'branding' && <BrandingSection />}
           {tab === 'sidebar' && <SidebarOrderSection />}
+          {tab === 'celebration' && <CelebrationSection />}
           {tab === 'email' && <EmailModeSection />}
           {tab === 'smtp' && <SmtpSection />}
           {tab === 'commission' && <CommissionRulesSection />}
@@ -2425,8 +2431,138 @@ import { ALL_NAV_ITEMS, DEFAULT_CATEGORIES } from '@/components/sidebar';
 import { SIDEBAR_ICON_NAMES, resolveIcon } from '@/lib/sidebar-icons';
 import { cn } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { triggerFundingCelebration } from '@/components/funding-celebration';
 
 interface EditCategory { id: string; label: string; items: string[] }
+
+/**
+ * CelebrationSection — admin-only knobs that drive the funded-deal
+ * celebration overlay shown app-wide when a deal status flips to 'funded'.
+ *
+ * Three controls + a live preview button:
+ *   • celebrationEnabled — master switch
+ *   • confettiEnabled    — toggle particles independently of the message
+ *   • celebrationMessage — free text (default: "Fundeddddd!!!!")
+ *
+ * The preview button dispatches the same event the real funded flow uses,
+ * but with `previewOverride` so the in-progress draft renders without
+ * saving. Settings persist to /api/settings/company.
+ */
+function CelebrationSection() {
+  const toast = useToast();
+  const [celebrationEnabled, setCelebrationEnabled] = useState(true);
+  const [confettiEnabled, setConfettiEnabled] = useState(true);
+  const [celebrationMessage, setCelebrationMessage] = useState('Fundeddddd!!!!');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/settings/company')
+      .then((r) => r.json())
+      .then((j) => {
+        const d = j.data ?? {};
+        if (typeof d.celebrationEnabled === 'boolean') setCelebrationEnabled(d.celebrationEnabled);
+        if (typeof d.confettiEnabled === 'boolean') setConfettiEnabled(d.confettiEnabled);
+        if (typeof d.celebrationMessage === 'string') setCelebrationMessage(d.celebrationMessage);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    const res = await fetch('/api/settings/company', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        celebrationEnabled,
+        confettiEnabled,
+        // Empty → fall back to default on the server side. We trim here so
+        // a message of "   " doesn't show as visible whitespace.
+        celebrationMessage: celebrationMessage.trim() || 'Fundeddddd!!!!',
+      }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || 'Save failed.');
+      return;
+    }
+    toast.success('Celebration settings saved.');
+  }
+
+  function preview() {
+    // Fire the same event the real flow uses, but with the draft override
+    // so the user sees their pending changes — even without saving.
+    triggerFundingCelebration({
+      dealName: 'Acme Pizza (preview)',
+      previewOverride: {
+        celebrationEnabled: true,  // force on so preview always runs
+        confettiEnabled,
+        celebrationMessage: celebrationMessage.trim() || 'Fundeddddd!!!!',
+      },
+    });
+  }
+
+  if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Funded celebration</CardTitle>
+          <CardDescription>
+            Show a confetti animation + custom message when any deal in your
+            company is marked Funded. Every user sees the same celebration.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Master toggle — when off, no celebration plays regardless of the
+              confetti checkbox. */}
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={celebrationEnabled}
+              onChange={(e) => setCelebrationEnabled(e.target.checked)}
+              className="h-4 w-4"
+            />
+            <span className="text-sm font-medium">Show a celebration when a deal funds</span>
+          </label>
+
+          <label className={cn('flex items-center gap-2 cursor-pointer', !celebrationEnabled && 'opacity-50')}>
+            <input
+              type="checkbox"
+              checked={confettiEnabled}
+              onChange={(e) => setConfettiEnabled(e.target.checked)}
+              disabled={!celebrationEnabled}
+              className="h-4 w-4"
+            />
+            <span className="text-sm">Include confetti animation</span>
+          </label>
+
+          <Field label="Celebration message">
+            <Input
+              value={celebrationMessage}
+              onChange={(e) => setCelebrationMessage(e.target.value)}
+              disabled={!celebrationEnabled}
+              placeholder="Fundeddddd!!!!"
+              maxLength={200}
+            />
+          </Field>
+          <div className="text-[11px] text-muted-foreground -mt-2">
+            Shown as a big colorful banner. Max 200 characters. Empty falls
+            back to "Fundeddddd!!!!".
+          </div>
+
+          <div className="flex items-center gap-2 pt-2 border-t border-border">
+            <Button variant="outline" onClick={preview}>Preview</Button>
+            <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
 function SidebarOrderSection() {
   const toast = useToast();

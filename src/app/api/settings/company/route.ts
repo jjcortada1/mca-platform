@@ -25,6 +25,9 @@ export async function GET() {
         logoUrl: c.logoUrl ?? null,
         primaryColor: c.primaryColor ?? null,
         emailSignature: c.emailSignature ?? null,
+        celebrationEnabled: c.celebrationEnabled,
+        confettiEnabled: c.confettiEnabled,
+        celebrationMessage: c.celebrationMessage,
       },
     });
   } catch (e) {
@@ -57,6 +60,11 @@ const patchSchema = z.object({
     .nullable()
     .or(z.literal('')),
   emailSignature: z.string().max(2000).optional().nullable(),
+  // Celebration knobs — bools default to true on the column, message has a
+  // sane default. Capped at 200 chars to keep the overlay readable.
+  celebrationEnabled: z.boolean().optional(),
+  confettiEnabled: z.boolean().optional(),
+  celebrationMessage: z.string().max(200).optional(),
 });
 
 export async function PATCH(req: NextRequest) {

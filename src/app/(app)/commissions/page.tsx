@@ -471,6 +471,10 @@ export default function CommissionsPage() {
                   <thead><tr className="bg-muted/40 border-b border-border text-left">
                     <th className="px-4 py-2 th">Deal</th>
                     {isAdmin && <th className="px-3 py-2 th">Rep</th>}
+                    {/* Date Funded — visible to BOTH reps and admins so the
+                        rep can see when their deal funded without expanding
+                        the row. Pulled from the joined deal record. */}
+                    <th className="px-3 py-2 th">Date funded</th>
                     {/* Gross + Split % columns are admin-only — reps shouldn't
                         be able to infer lead-source pay from the gross / split
                         relationship. They still see Rep comm. (their take). */}
@@ -485,9 +489,16 @@ export default function CommissionsPage() {
                   <tbody className="divide-y divide-border/60">
                     {filteredRows.map((r) => (
                       <>
-                        <tr key={r.id} className="hover:bg-muted/20">
+                        <tr
+                          key={r.id}
+                          className="hover:bg-muted/20 cursor-pointer"
+                          onClick={() => setExpanded(expanded === r.id ? null : r.id)}
+                        >
                           <td className="px-4 py-2.5 font-medium">{r.dealName}</td>
                           {isAdmin && <td className="px-3 py-2.5 text-muted-foreground">{r.repName ?? '—'}</td>}
+                          <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
+                            {r.dealFundingDate ? formatDate(r.dealFundingDate) : (r.fundingDate ? formatDate(r.fundingDate) : '—')}
+                          </td>
                           {isAdmin && <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(r.grossCommission))}</td>}
                           {isAdmin && <td className="px-3 py-2.5 text-right tabular-nums">{Number(r.repSplitPct)}%</td>}
                           <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatCurrency(Number(r.repCommissionAmount))}</td>
@@ -495,16 +506,21 @@ export default function CommissionsPage() {
                           <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(r.owedAmount)}</td>
                           <td className="px-3 py-2.5"><Badge variant={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge></td>
                           <td className="px-3 py-2.5 text-right">
+                            {/* Click the row OR this chevron to expand into
+                                the read-only Details view. Edit mode is
+                                entered from inside that panel — view and
+                                edit are now separate actions. */}
                             <button
-                              onClick={() => setExpanded(expanded === r.id ? null : r.id)}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setExpanded(expanded === r.id ? null : r.id); }}
                               className="text-xs font-medium text-primary hover:underline"
                             >
-                              {expanded === r.id ? 'Close' : (isAdmin ? 'Edit' : 'Details')}
+                              {expanded === r.id ? 'Close' : 'Details'}
                             </button>
                           </td>
                         </tr>
                         {expanded === r.id && (
-                          <tr className="bg-muted/10"><td colSpan={isAdmin ? 9 : 6} className="px-4 py-3">
+                          <tr className="bg-muted/10"><td colSpan={isAdmin ? 10 : 7} className="px-4 py-3">
                             <CommissionDetail r={r} isAdmin={isAdmin} reps={reps} onPatch={patch} onDelete={softDelete} onDealPatch={dealPatch} />
                           </td></tr>
                         )}
@@ -1031,6 +1047,12 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
   onDelete: (id: string) => void;
   onDealPatch: (dealId: string, body: Record<string, unknown>) => Promise<boolean>;
 }) {
+  // Edit mode is OFF by default — clicking the row expands into the
+  // read-only Details view. Admins click "Edit" inside the panel to
+  // switch into the editable form. Viewing and editing are now distinct
+  // actions, never combined.
+  const [editing, setEditing] = useState(false);
+
   const [paid, setPaid] = useState(r.paidAmount);
   const [status, setStatus] = useState(r.status);
   const [notes, setNotes] = useState(r.notes ?? '');
@@ -1101,8 +1123,22 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
         </div>
       )}
 
-      {isAdmin && (
+      {/* Admin-only Edit toggle. Default is read-only details; admin clicks
+          to expose the editable forms below. Keeps view ≠ edit. */}
+      {isAdmin && !editing && (
+        <div className="flex justify-end">
+          <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+            Edit details
+          </Button>
+        </div>
+      )}
+
+      {isAdmin && editing && (
         <>
+          <div className="flex items-center justify-between pt-3 border-t border-border">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Editing — changes save with the buttons below each section</div>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Done editing</Button>
+          </div>
           {/* Editable deal details — patches the underlying deal record */}
           <div className="space-y-3 pt-3 border-t border-border">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Deal details (editable)</div>

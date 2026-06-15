@@ -97,6 +97,15 @@ export const companies = pgTable('companies', {
   // built-in defaults. Additive — null = no overrides, every tab uses its
   // default label/icon.
   sidebarItemOverrides: jsonb('sidebar_item_overrides').$type<Record<string, { label?: string; icon?: string }>>(),
+  // ---- Funded-deal celebration settings ----------------------------------
+  // Triggered when a deal status flips to 'funded' (from /active-deals,
+  // /portfolio, or the deal API). Admin can edit, preview, and disable
+  // independently in Settings. Defaults: confetti on, message on, message
+  // = "Fundeddddd!!!!".
+  celebrationEnabled: boolean('celebration_enabled').notNull().default(true),
+  confettiEnabled: boolean('confetti_enabled').notNull().default(true),
+  // Free text — shown as a banner overlay when a deal is funded.
+  celebrationMessage: varchar('celebration_message', { length: 200 }).notNull().default('Fundeddddd!!!!'),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
