@@ -76,24 +76,19 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const safeColor = sanitizeCssColor(branding.primaryColor);
 
   return (
-    // `dark` class on <html> turns on the premium dark palette by default.
-    // A theme toggle (added in the next iteration) can flip this off the
-    // root element to fall back to the light palette. We also persist the
-    // user's choice via a small inline script so the page doesn't flash
-    // the wrong palette on reload.
-    <html lang="en" className="dark">
+    <html lang="en">
       <head>
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="format-detection" content="telephone=no" />
-        {/* Inline pre-paint script — reads the saved theme preference from
-            localStorage and applies it BEFORE the body renders, so users
-            who chose light mode don't see a dark flash on every page load.
-            Defaults to dark if no preference is set. */}
+        {/* Pre-paint theme script. Defaults to LIGHT mode (JJ reverted the
+            dark-default). Dark mode is still available as an opt-in via the
+            sidebar toggle, but it's no longer applied unless the user has
+            explicitly chosen it. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('mca-theme');var r=document.documentElement;if(t==='light'){r.classList.remove('dark');}else{r.classList.add('dark');}}catch(e){}})();`,
+            __html: `(function(){try{var t=localStorage.getItem('mca-theme');var r=document.documentElement;if(t==='dark'){r.classList.add('dark');}else{r.classList.remove('dark');}}catch(e){}})();`,
           }}
         />
       </head>

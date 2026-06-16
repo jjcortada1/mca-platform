@@ -5,7 +5,7 @@ import { signOut } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import {
   ShoppingBag, Send, Inbox, Briefcase, Users, TrendingUp, Calculator, BookOpen,
-  Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle, Sun, Moon,
+  Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolveIcon } from '@/lib/sidebar-icons';
@@ -471,7 +471,6 @@ function SidebarBody({
             <div className="text-[10.5px] text-muted-foreground truncate mt-0.5">{user.email}</div>
           </div>
         </div>
-        <ThemeToggle />
         <button
           onClick={() => signOut({ callbackUrl: '/login' })}
           className="w-full nav-item nav-item-inactive"
@@ -481,48 +480,5 @@ function SidebarBody({
         </button>
       </div>
     </>
-  );
-}
-
-/**
- * ThemeToggle — flips the `dark` class on the <html> element and persists
- * the choice to localStorage so the next page load applies the right
- * palette before paint (see the inline script in app/layout.tsx).
- *
- * Sits inline in the sidebar footer above Sign Out — same visual weight as
- * a nav item, never calling undue attention to itself.
- */
-function ThemeToggle() {
-  const [isDark, setIsDark] = useState(true);
-
-  useEffect(() => {
-    // Sync from the DOM on mount so the toggle reflects whatever the
-    // pre-paint script applied (dark by default, light if the user opted in).
-    setIsDark(document.documentElement.classList.contains('dark'));
-  }, []);
-
-  function toggle() {
-    const root = document.documentElement;
-    const next = !isDark;
-    if (next) {
-      root.classList.add('dark');
-      try { localStorage.setItem('mca-theme', 'dark'); } catch {}
-    } else {
-      root.classList.remove('dark');
-      try { localStorage.setItem('mca-theme', 'light'); } catch {}
-    }
-    setIsDark(next);
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={toggle}
-      className="w-full nav-item nav-item-inactive"
-      title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
-    >
-      {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-      <span>{isDark ? 'Light mode' : 'Dark mode'}</span>
-    </button>
   );
 }

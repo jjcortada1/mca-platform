@@ -17,12 +17,12 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // Primary — blue accent (#3B82F6). Stripe-/Linear-style filled CTA.
-        // Inner highlight + drop shadow give the button just enough depth
-        // without feeling pillowy.
-        default: 'bg-primary text-primary-foreground shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.12),_0_1px_2px_0_hsl(220_16%_0%/0.20)] hover:bg-primary/90 hover:shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.16),_0_3px_8px_-1px_hsl(217_91%_30%/0.35)]',
+        // Primary — uses the theme's primary color (dark navy in light mode,
+        // accent blue in dark mode). Inner highlight + drop shadow give the
+        // button depth without feeling pillowy.
+        default: 'bg-primary text-primary-foreground shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.12),_0_1px_2px_0_hsl(222_47%_11%/0.10)] hover:bg-primary/90 hover:shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.16),_0_3px_8px_-1px_hsl(222_47%_11%/0.18)]',
         // Destructive — red, same internal structure as primary.
-        destructive: 'bg-destructive text-destructive-foreground shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.12),_0_1px_2px_0_hsl(220_16%_0%/0.20)] hover:bg-destructive/90',
+        destructive: 'bg-destructive text-destructive-foreground shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.12),_0_1px_2px_0_hsl(222_47%_11%/0.10)] hover:bg-destructive/90',
         // Outline — quiet secondary. Border barely visible at rest, brightens
         // on hover. Background fill on hover for crisp feedback.
         outline: 'border border-border bg-transparent text-foreground hover:bg-muted/50 hover:border-foreground/25',
