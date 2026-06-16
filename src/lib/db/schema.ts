@@ -104,6 +104,10 @@ export const companies = pgTable('companies', {
   // = "Fundeddddd!!!!".
   celebrationEnabled: boolean('celebration_enabled').notNull().default(true),
   confettiEnabled: boolean('confetti_enabled').notNull().default(true),
+  // Optional funded sound — disabled by default since some users will work
+  // in shared offices. When enabled, a brief "ka-ching" plays alongside the
+  // confetti / message overlay.
+  celebrationSoundEnabled: boolean('celebration_sound_enabled').notNull().default(false),
   // Free text — shown as a banner overlay when a deal is funded.
   celebrationMessage: varchar('celebration_message', { length: 200 }).notNull().default('Fundeddddd!!!!'),
   isActive: boolean('is_active').notNull().default(true),

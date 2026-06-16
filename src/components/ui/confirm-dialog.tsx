@@ -66,11 +66,15 @@ export function ConfirmDialog({
       className="fixed inset-0 z-[100] flex items-center justify-center p-4"
       onClick={onCancel}
     >
-      {/* Backdrop — separate div so click-outside cancellation is reliable. */}
-      <div className="absolute inset-0 bg-black/40" />
-      {/* Card — stopPropagation so clicks inside don't trigger backdrop cancel. */}
+      {/* Backdrop — separate div so click-outside cancellation is reliable.
+          `animate-fade-in` smooths the appearance so the dialog never just
+          snaps in. */}
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-fade-in" />
+      {/* Card — stopPropagation so clicks inside don't trigger backdrop cancel.
+          Uses the global `animate-modal-in` keyframe for a soft scale + fade
+          arrival. Heavier shadow in dark mode comes from var(--shadow-xl). */}
       <div
-        className="relative bg-card rounded-lg border border-border shadow-xl max-w-sm w-full p-5 space-y-3"
+        className="relative bg-card rounded-xl border border-border max-w-sm w-full p-5 space-y-3 animate-modal-in [box-shadow:var(--shadow-xl)]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"

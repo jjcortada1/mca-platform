@@ -10,16 +10,28 @@ import { cn } from '@/lib/utils';
    ============================================================ */
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium ring-offset-background transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]',
+  // Base: rounded, medium weight, subtle scale-down on click, smooth motion.
+  // Transitions are 180ms cubic-bezier(0.16, 1, 0.3, 1) — same easing
+  // curve used everywhere in globals.css so motion feels consistent.
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.97] [transition:background-color_180ms_cubic-bezier(0.16,1,0.3,1),box-shadow_180ms_cubic-bezier(0.16,1,0.3,1),transform_120ms_cubic-bezier(0.16,1,0.3,1),border-color_180ms_cubic-bezier(0.16,1,0.3,1),color_180ms_cubic-bezier(0.16,1,0.3,1)]',
   {
     variants: {
       variant: {
-        default: 'bg-foreground text-background shadow-[inset_0_-1px_0_0_hsl(0_0%_0%/0.12),_0_1px_2px_0_hsl(222_47%_11%/0.08)] hover:bg-foreground/90',
-        destructive: 'bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90',
-        outline: 'border border-border bg-card text-foreground shadow-[0_1px_2px_0_hsl(222_47%_11%/0.04)] hover:bg-muted/50 hover:border-foreground/20',
-        secondary: 'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80',
+        // Primary — blue accent (#3B82F6). Stripe-/Linear-style filled CTA.
+        // Inner highlight + drop shadow give the button just enough depth
+        // without feeling pillowy.
+        default: 'bg-primary text-primary-foreground shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.12),_0_1px_2px_0_hsl(220_16%_0%/0.20)] hover:bg-primary/90 hover:shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.16),_0_3px_8px_-1px_hsl(217_91%_30%/0.35)]',
+        // Destructive — red, same internal structure as primary.
+        destructive: 'bg-destructive text-destructive-foreground shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.12),_0_1px_2px_0_hsl(220_16%_0%/0.20)] hover:bg-destructive/90',
+        // Outline — quiet secondary. Border barely visible at rest, brightens
+        // on hover. Background fill on hover for crisp feedback.
+        outline: 'border border-border bg-transparent text-foreground hover:bg-muted/50 hover:border-foreground/25',
+        // Secondary — filled muted. Used when "outline" doesn't have enough
+        // weight (e.g. inside a card the outline would compete with the card border).
+        secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
+        // Ghost — no chrome, just hover wash. For nav-style chrome.
         ghost: 'hover:bg-muted hover:text-foreground',
-        link: 'text-foreground underline-offset-4 hover:underline',
+        link: 'text-primary underline-offset-4 hover:underline',
       },
       size: {
         default: 'h-9 px-4',
@@ -67,11 +79,18 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
       type={type}
       ref={ref}
       className={cn(
-        'flex h-10 w-full rounded-lg border border-input bg-card px-3 py-1 text-sm transition-all',
-        'shadow-[0_1px_2px_0_hsl(222_47%_11%/0.04)]',
+        // Slightly softer border (theme-driven so dark mode renders hairline),
+        // gentle inner shadow for depth, no harsh focus outline — we use a
+        // subtle ring + border tint at 220ms ease-out-quint so the focus
+        // transition is felt rather than seen.
+        'flex h-10 w-full rounded-lg border border-input bg-card px-3 py-1 text-sm',
+        '[transition:border-color_220ms_cubic-bezier(0.16,1,0.3,1),box-shadow_220ms_cubic-bezier(0.16,1,0.3,1),background-color_220ms_cubic-bezier(0.16,1,0.3,1)]',
         'file:border-0 file:bg-transparent file:text-sm file:font-medium',
-        'placeholder:text-muted-foreground/60',
-        'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 focus-visible:border-foreground/30',
+        'placeholder:text-muted-foreground/50',
+        // Focus: 3px tinted ring + brightened border. Color comes from --ring
+        // which is the accent blue, so the focus state coordinates with the
+        // primary button across the app.
+        'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 focus-visible:border-ring/60',
         'disabled:cursor-not-allowed disabled:opacity-50 tabular-nums',
         className
       )}
@@ -144,10 +163,10 @@ export const CurrencyInput = React.forwardRef<HTMLInputElement, CurrencyInputPro
         value={addCommasToDigitString(value ?? '')}
         onChange={(e) => onChange(stripFormat(e.target.value))}
         className={cn(
-          'flex h-10 w-full rounded-lg border border-input bg-card pl-7 pr-3 py-1 text-sm transition-all',
-          'shadow-[0_1px_2px_0_hsl(222_47%_11%/0.04)]',
-          'placeholder:text-muted-foreground/60',
-          'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 focus-visible:border-foreground/30',
+          'flex h-10 w-full rounded-lg border border-input bg-card pl-7 pr-3 py-1 text-sm',
+          '[transition:border-color_220ms_cubic-bezier(0.16,1,0.3,1),box-shadow_220ms_cubic-bezier(0.16,1,0.3,1),background-color_220ms_cubic-bezier(0.16,1,0.3,1)]',
+          'placeholder:text-muted-foreground/50',
+          'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 focus-visible:border-ring/60',
           'disabled:cursor-not-allowed disabled:opacity-50 tabular-nums',
           className
         )}
@@ -186,10 +205,10 @@ export const PercentInput = React.forwardRef<HTMLInputElement, PercentInputProps
           onChange(cleaned);
         }}
         className={cn(
-          'flex h-10 w-full rounded-lg border border-input bg-card px-3 pr-7 py-1 text-sm transition-all',
-          'shadow-[0_1px_2px_0_hsl(222_47%_11%/0.04)]',
-          'placeholder:text-muted-foreground/60',
-          'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 focus-visible:border-foreground/30',
+          'flex h-10 w-full rounded-lg border border-input bg-card px-3 pr-7 py-1 text-sm',
+          '[transition:border-color_220ms_cubic-bezier(0.16,1,0.3,1),box-shadow_220ms_cubic-bezier(0.16,1,0.3,1),background-color_220ms_cubic-bezier(0.16,1,0.3,1)]',
+          'placeholder:text-muted-foreground/50',
+          'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 focus-visible:border-ring/60',
           'disabled:cursor-not-allowed disabled:opacity-50 tabular-nums',
           className
         )}
@@ -334,9 +353,13 @@ export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElemen
   return (
     <div
       className={cn(
-        'rounded-xl border border-border bg-card text-card-foreground transition-shadow',
-        'shadow-[0_1px_2px_0_hsl(222_47%_11%/0.04)]',
-        'hover:shadow-[0_1px_3px_0_hsl(222_47%_11%/0.06),_0_4px_8px_-2px_hsl(222_47%_11%/0.06)]',
+        // Theme-driven shadow tokens (defined in globals.css). Dark mode
+        // uses heavier shadows because dark backgrounds need more elevation
+        // contrast to feel layered. Easing matches the global motion curve.
+        'rounded-xl border border-border bg-card text-card-foreground',
+        '[box-shadow:var(--shadow-xs)]',
+        '[transition:box-shadow_220ms_cubic-bezier(0.16,1,0.3,1)]',
+        'hover:[box-shadow:var(--shadow-sm)]',
         className
       )}
       {...props}

@@ -32,6 +32,7 @@ import { useEffect, useRef, useState } from 'react';
 type CelebrationSettings = {
   celebrationEnabled: boolean;
   confettiEnabled: boolean;
+  celebrationSoundEnabled: boolean;
   celebrationMessage: string;
 };
 
@@ -43,6 +44,7 @@ interface PreviewDetail {
 const DEFAULT_SETTINGS: CelebrationSettings = {
   celebrationEnabled: true,
   confettiEnabled: true,
+  celebrationSoundEnabled: false,
   celebrationMessage: 'Fundeddddd!!!!',
 };
 
@@ -64,6 +66,7 @@ export function FundingCelebration() {
         setSettings({
           celebrationEnabled: j.company.celebrationEnabled ?? DEFAULT_SETTINGS.celebrationEnabled,
           confettiEnabled: j.company.confettiEnabled ?? DEFAULT_SETTINGS.confettiEnabled,
+          celebrationSoundEnabled: j.company.celebrationSoundEnabled ?? DEFAULT_SETTINGS.celebrationSoundEnabled,
           celebrationMessage: j.company.celebrationMessage ?? DEFAULT_SETTINGS.celebrationMessage,
         });
       })
@@ -74,8 +77,6 @@ export function FundingCelebration() {
   useEffect(() => {
     function onEvent(e: Event) {
       const detail = (e as CustomEvent<PreviewDetail>).detail ?? {};
-      // Apply preview overrides if provided (used by the Settings preview
-      // button to test the in-progress message without saving).
       const effective: CelebrationSettings = {
         ...settings,
         ...(detail.previewOverride ?? {}),
@@ -85,7 +86,12 @@ export function FundingCelebration() {
       setMessage(detail.dealName ? `${msg}\n${detail.dealName}` : msg);
       setShowConfetti(effective.confettiEnabled);
       setVisible(true);
-      // Auto-dismiss after the animation completes.
+      // Optional sound — synthesized inline using Web Audio so there's no
+      // asset to ship. Two-tone bright chord, ~600ms. Skip entirely if the
+      // user hasn't opted in (audio in shared offices is a faux pas).
+      if (effective.celebrationSoundEnabled) {
+        playFundedChime();
+      }
       const t = setTimeout(() => setVisible(false), 3200);
       return () => clearTimeout(t);
     }
@@ -227,4 +233,51 @@ function Confetti() {
 export function triggerFundingCelebration(detail?: PreviewDetail) {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent('mca:funded-deal', { detail: detail ?? {} }));
+}
+
+/**
+ * Synthesized "funded" chime using the Web Audio API.
+ *
+ * Plays a bright two-note chord (C5 + G5) with a quick attack and a tail
+ * that decays over ~600ms. We don't ship an audio asset — building it
+ * inline keeps the bundle small and means the sound is consistent across
+ * every browser without worrying about codec support.
+ *
+ * Web Audio context is created lazily inside the function: browsers
+ * require a user gesture (click) before allowing audio, and this is
+ * always called from a click-triggered code path (mark as funded), so
+ * we're inside the permitted window.
+ */
+function playFundedChime() {
+  try {
+    const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AC) return;
+    const ctx = new AC();
+    const now = ctx.currentTime;
+
+    // Two oscillators tuned a perfect fifth apart — a bright, optimistic
+    // interval that reads as "good news" without being jingle-y.
+    const freqs = [523.25 /* C5 */, 783.99 /* G5 */];
+    for (const f of freqs) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = f;
+      // Quick attack → exponential decay. The 0.0001 floor avoids the
+      // dreaded Web Audio click on cutoff.
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.6);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.65);
+    }
+    // Auto-close the context once playback finishes so we don't accumulate
+    // dangling contexts across many funded events.
+    setTimeout(() => { ctx.close().catch(() => {}); }, 800);
+  } catch {
+    // Audio is purely decorative — never let an audio failure block the
+    // celebration overlay from rendering.
+  }
 }

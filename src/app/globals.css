@@ -2,92 +2,123 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Geist — Linear/Vercel modern SaaS standard, loaded from CDN */
-@import url('https://cdn.jsdelivr.net/npm/geist-font@1.4.0/dist/geist.css');
-@import url('https://cdn.jsdelivr.net/npm/geist-font@1.4.0/dist/geist-mono.css');
+/*
+ * Premium type stack — Inter loaded as a webfont for the modern hairline
+ * feel. JetBrains Mono is the tabular companion. Geist (the legacy stack)
+ * is still available as a fallback for any explicit references in code.
+ */
+@import url('https://rsms.me/inter/inter.css');
 
 @layer base {
   :root {
+    /* LIGHT THEME — preserved as a fallback. Primary look-and-feel target
+     * is the dark theme defined below. */
     --background: 220 20% 98.5%;
     --foreground: 222 47% 11%;
     --card: 0 0% 100%;
     --card-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
-    --primary: 222 47% 17%;
-    --primary-foreground: 220 20% 99%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 220 14% 96%;
     --secondary-foreground: 222 47% 11%;
     --muted: 220 14% 96.5%;
     --muted-foreground: 222 13% 45%;
-    --accent: 222 47% 17%;
-    --accent-foreground: 220 20% 99%;
-    --destructive: 0 75% 47%;
-    --destructive-foreground: 220 20% 98%;
-    --success: 150 60% 32%;
-    --warning: 35 85% 50%;
+    --accent: 217 91% 60%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 70% 45%;
+    --warning: 38 92% 50%;
     --border: 220 13% 91%;
     --input: 220 13% 89%;
-    --ring: 222 47% 25%;
-    --radius: 0.5rem;
+    --ring: 217 91% 60%;
+    --radius: 0.625rem;
     --shadow-xs: 0 1px 2px 0 hsl(222 47% 11% / 0.04);
-    --shadow-sm: 0 1px 2px 0 hsl(222 47% 11% / 0.04), 0 1px 3px 0 hsl(222 47% 11% / 0.06);
-    --shadow-md: 0 4px 6px -1px hsl(222 47% 11% / 0.06), 0 2px 4px -2px hsl(222 47% 11% / 0.05);
-    --shadow-lg: 0 10px 20px -5px hsl(222 47% 11% / 0.08), 0 4px 8px -4px hsl(222 47% 11% / 0.06);
-    --shadow-xl: 0 20px 40px -10px hsl(222 47% 11% / 0.12), 0 8px 16px -8px hsl(222 47% 11% / 0.08);
+    --shadow-sm: 0 1px 3px 0 hsl(222 47% 11% / 0.05), 0 1px 2px -1px hsl(222 47% 11% / 0.04);
+    --shadow-md: 0 4px 12px -2px hsl(222 47% 11% / 0.06), 0 2px 6px -2px hsl(222 47% 11% / 0.04);
+    --shadow-lg: 0 12px 28px -8px hsl(222 47% 11% / 0.10), 0 4px 12px -4px hsl(222 47% 11% / 0.06);
+    --shadow-xl: 0 24px 48px -12px hsl(222 47% 11% / 0.15), 0 8px 16px -8px hsl(222 47% 11% / 0.08);
   }
+
+  /* DARK THEME — the premium look.
+   *   #0F1115  base                  → 220 16% 7%
+   *   #161A22  secondary surface     → 220 20% 11%
+   *   #1D2330  elevated card         → 220 25% 15%
+   *   #3B82F6  accent                → 217 91% 60%
+   *   #22C55E / #F59E0B / #EF4444    → success / warning / error
+   *   #A1A1AA  text secondary        → 240 5% 65%
+   * Hairline borders ~10–15% over the surface so they read as separation
+   * not boxes. */
   .dark {
-    --background: 224 30% 7%;
-    --foreground: 220 16% 96%;
-    --card: 224 26% 10%;
-    --card-foreground: 220 16% 96%;
-    --popover: 224 26% 10%;
-    --popover-foreground: 220 16% 96%;
-    --primary: 220 16% 96%;
-    --primary-foreground: 224 30% 7%;
-    --secondary: 224 20% 15%;
-    --secondary-foreground: 220 16% 96%;
-    --muted: 224 20% 15%;
-    --muted-foreground: 220 10% 65%;
-    --accent: 220 16% 96%;
-    --accent-foreground: 224 30% 7%;
-    --destructive: 0 65% 55%;
-    --destructive-foreground: 220 16% 96%;
-    --border: 224 20% 17%;
-    --input: 224 20% 19%;
-    --ring: 220 16% 60%;
+    --background: 220 16% 7%;
+    --foreground: 0 0% 100%;
+    --card: 220 25% 15%;
+    --card-foreground: 0 0% 100%;
+    --popover: 220 25% 15%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 20% 11%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 220 20% 13%;
+    --muted-foreground: 240 5% 65%;
+    --accent: 217 91% 60%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 70% 45%;
+    --warning: 38 92% 50%;
+    --border: 220 20% 22%;
+    --input: 220 20% 18%;
+    --ring: 217 91% 60%;
+    --shadow-xs: 0 1px 2px 0 hsl(220 16% 0% / 0.30);
+    --shadow-sm: 0 2px 4px 0 hsl(220 16% 0% / 0.35), 0 1px 2px -1px hsl(220 16% 0% / 0.25);
+    --shadow-md: 0 6px 14px -3px hsl(220 16% 0% / 0.45), 0 2px 6px -2px hsl(220 16% 0% / 0.30);
+    --shadow-lg: 0 16px 36px -10px hsl(220 16% 0% / 0.55), 0 6px 14px -6px hsl(220 16% 0% / 0.40);
+    --shadow-xl: 0 28px 56px -14px hsl(220 16% 0% / 0.70), 0 10px 20px -10px hsl(220 16% 0% / 0.50);
   }
+
   * { @apply border-border; }
+
   html {
     @apply antialiased;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    color-scheme: light dark;
   }
+
   body {
     @apply bg-background text-foreground;
-    font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
-    font-feature-settings: 'ss01', 'cv11';
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
+    font-feature-settings: 'cv11', 'ss01', 'ss03';
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
   }
+
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
     letter-spacing: -0.022em;
     @apply font-semibold text-foreground;
   }
-  h1 { letter-spacing: -0.03em; font-weight: 600; }
-  h2 { letter-spacing: -0.025em; }
+  h1 { letter-spacing: -0.034em; font-weight: 700; }
+  h2 { letter-spacing: -0.028em; font-weight: 650; }
+  h3 { letter-spacing: -0.022em; }
+
   .font-mono {
-    font-family: 'Geist Mono', 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-family: 'JetBrains Mono', 'Geist Mono', 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
   .tabular-nums { font-variant-numeric: tabular-nums; }
+
   ::selection {
-    background: hsl(var(--primary) / 0.15);
+    background: hsl(var(--primary) / 0.25);
     color: hsl(var(--foreground));
   }
+
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
@@ -98,6 +129,7 @@
   ::-webkit-scrollbar-thumb:hover {
     background: hsl(var(--muted-foreground) / 0.4);
   }
+
   input:-webkit-autofill,
   input:-webkit-autofill:hover,
   input:-webkit-autofill:focus {
@@ -105,6 +137,7 @@
     -webkit-box-shadow: 0 0 0px 1000px hsl(var(--card)) inset;
     transition: background-color 5000s ease-in-out 0s;
   }
+
   *:focus-visible {
     outline: 2px solid hsl(var(--ring) / 0.5);
     outline-offset: 2px;
@@ -113,51 +146,75 @@
 }
 
 @layer components {
+  /* Layered card system — `.card-refined` for flush panels, `.card-elevated`
+   * for floating ones. Both grow shadow on hover (no border color change). */
   .card-refined {
     @apply rounded-xl border border-border bg-card;
     box-shadow: var(--shadow-xs);
+    transition: box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1),
+                transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
   }
-  .card-refined:hover {
-    box-shadow: var(--shadow-sm);
+  .card-refined:hover { box-shadow: var(--shadow-sm); }
+  .card-elevated {
+    @apply rounded-xl bg-card;
+    border: 1px solid hsl(var(--border) / 0.6);
+    box-shadow: var(--shadow-md);
+    transition: box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1),
+                transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
   }
+  .card-elevated:hover {
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-1px);
+  }
+
   .data-grid { @apply w-full border-collapse text-sm; }
   .data-grid th {
     @apply text-left font-medium text-muted-foreground uppercase tracking-wider text-[11px] py-2.5 px-3 border-b border-border bg-muted/30;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    backdrop-filter: blur(8px);
   }
-  .data-grid td {
-    @apply py-3 px-3 border-b border-border/60 align-middle;
-  }
-  .data-grid tr:hover td { @apply bg-muted/50; }
+  .data-grid td { @apply py-3 px-3 border-b border-border/40 align-middle; }
+  .data-grid tr:hover td { @apply bg-muted/30; }
   .data-grid tr:last-child td { @apply border-b-0; }
+
   .badge-status {
     @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium;
   }
+
   .kpi-tile {
-    @apply rounded-xl border border-border bg-card p-5 transition-all;
-    box-shadow: var(--shadow-xs);
+    @apply rounded-xl border border-border bg-card p-5;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1),
+                transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
   }
   .kpi-tile:hover {
-    box-shadow: var(--shadow-sm);
-    @apply border-foreground/15;
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
   }
+
   .nav-item {
     @apply flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-all duration-150;
   }
-  .nav-item-active { @apply bg-foreground/[0.06] text-foreground; }
+  .nav-item-active   { @apply bg-foreground/[0.08] text-foreground; }
   .nav-item-inactive { @apply text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground; }
+
   .bg-grid {
     background-image:
-      linear-gradient(to right, hsl(var(--border) / 0.5) 1px, transparent 1px),
-      linear-gradient(to bottom, hsl(var(--border) / 0.5) 1px, transparent 1px);
+      linear-gradient(to right, hsl(var(--border) / 0.4) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.4) 1px, transparent 1px);
     background-size: 48px 48px;
   }
   .bg-halo {
     background:
-      radial-gradient(ellipse 80% 50% at 50% -20%, hsl(var(--primary) / 0.08), transparent),
-      radial-gradient(ellipse 60% 50% at 80% 100%, hsl(var(--primary) / 0.05), transparent);
+      radial-gradient(ellipse 80% 50% at 50% -20%, hsl(var(--primary) / 0.10), transparent),
+      radial-gradient(ellipse 60% 50% at 80% 100%, hsl(var(--primary) / 0.06), transparent);
   }
 }
 
+/* Motion library — all animations use ease-out-quint so cadence is
+ * consistent. Durations: 180–280ms. Anything slower feels sluggish. */
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
@@ -170,6 +227,30 @@
 
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  to   { opacity: 1; transform: translateY(0); }
 }
-.animate-fade-up { animation: fade-up 0.4s ease-out both; }
+.animate-fade-up { animation: fade-up 240ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-modal-in { animation: modal-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-fade-in { animation: fade-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes dropdown-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-dropdown-in { animation: dropdown-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes row-expand {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-row-expand { animation: row-expand 200ms cubic-bezier(0.16, 1, 0.3, 1) both; }

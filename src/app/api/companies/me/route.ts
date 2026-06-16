@@ -36,6 +36,7 @@ export async function GET() {
         // PATCH /api/companies/[id] (admin-only).
         celebrationEnabled: companies.celebrationEnabled,
         confettiEnabled: companies.confettiEnabled,
+        celebrationSoundEnabled: companies.celebrationSoundEnabled,
         celebrationMessage: companies.celebrationMessage,
       })
       .from(companies)

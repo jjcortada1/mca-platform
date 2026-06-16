@@ -2452,6 +2452,7 @@ function CelebrationSection() {
   const toast = useToast();
   const [celebrationEnabled, setCelebrationEnabled] = useState(true);
   const [confettiEnabled, setConfettiEnabled] = useState(true);
+  const [celebrationSoundEnabled, setCelebrationSoundEnabled] = useState(false);
   const [celebrationMessage, setCelebrationMessage] = useState('Fundeddddd!!!!');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2463,6 +2464,7 @@ function CelebrationSection() {
         const d = j.data ?? {};
         if (typeof d.celebrationEnabled === 'boolean') setCelebrationEnabled(d.celebrationEnabled);
         if (typeof d.confettiEnabled === 'boolean') setConfettiEnabled(d.confettiEnabled);
+        if (typeof d.celebrationSoundEnabled === 'boolean') setCelebrationSoundEnabled(d.celebrationSoundEnabled);
         if (typeof d.celebrationMessage === 'string') setCelebrationMessage(d.celebrationMessage);
         setLoading(false);
       })
@@ -2477,8 +2479,7 @@ function CelebrationSection() {
       body: JSON.stringify({
         celebrationEnabled,
         confettiEnabled,
-        // Empty → fall back to default on the server side. We trim here so
-        // a message of "   " doesn't show as visible whitespace.
+        celebrationSoundEnabled,
         celebrationMessage: celebrationMessage.trim() || 'Fundeddddd!!!!',
       }),
     });
@@ -2492,13 +2493,12 @@ function CelebrationSection() {
   }
 
   function preview() {
-    // Fire the same event the real flow uses, but with the draft override
-    // so the user sees their pending changes — even without saving.
     triggerFundingCelebration({
       dealName: 'Acme Pizza (preview)',
       previewOverride: {
-        celebrationEnabled: true,  // force on so preview always runs
+        celebrationEnabled: true,
         confettiEnabled,
+        celebrationSoundEnabled,
         celebrationMessage: celebrationMessage.trim() || 'Fundeddddd!!!!',
       },
     });
@@ -2517,8 +2517,6 @@ function CelebrationSection() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Master toggle — when off, no celebration plays regardless of the
-              confetti checkbox. */}
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -2538,6 +2536,20 @@ function CelebrationSection() {
               className="h-4 w-4"
             />
             <span className="text-sm">Include confetti animation</span>
+          </label>
+
+          {/* Optional sound — off by default. The chime is synthesized inline
+              (no audio asset to ship) and is short (~600ms). Use sparingly
+              in shared workspaces. */}
+          <label className={cn('flex items-center gap-2 cursor-pointer', !celebrationEnabled && 'opacity-50')}>
+            <input
+              type="checkbox"
+              checked={celebrationSoundEnabled}
+              onChange={(e) => setCelebrationSoundEnabled(e.target.checked)}
+              disabled={!celebrationEnabled}
+              className="h-4 w-4"
+            />
+            <span className="text-sm">Play funded sound (brief chime)</span>
           </label>
 
           <Field label="Celebration message">

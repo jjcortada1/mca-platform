@@ -27,6 +27,7 @@ export async function GET() {
         emailSignature: c.emailSignature ?? null,
         celebrationEnabled: c.celebrationEnabled,
         confettiEnabled: c.confettiEnabled,
+        celebrationSoundEnabled: c.celebrationSoundEnabled,
         celebrationMessage: c.celebrationMessage,
       },
     });
@@ -64,6 +65,7 @@ const patchSchema = z.object({
   // sane default. Capped at 200 chars to keep the overlay readable.
   celebrationEnabled: z.boolean().optional(),
   confettiEnabled: z.boolean().optional(),
+  celebrationSoundEnabled: z.boolean().optional(),
   celebrationMessage: z.string().max(200).optional(),
 });
 

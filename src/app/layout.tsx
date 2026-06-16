@@ -34,7 +34,9 @@ export const viewport: Viewport = {
   maximumScale: 5,
   themeColor: [
     { media: '(prefers-color-scheme: light)', color: '#ffffff' },
-    { media: '(prefers-color-scheme: dark)', color: '#0b1020' },
+    // Updated to match the new premium dark base (#0F1115). Browsers use
+    // this to tint the mobile address bar / PWA chrome.
+    { media: '(prefers-color-scheme: dark)', color: '#0F1115' },
   ],
 };
 
@@ -74,12 +76,26 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const safeColor = sanitizeCssColor(branding.primaryColor);
 
   return (
-    <html lang="en">
+    // `dark` class on <html> turns on the premium dark palette by default.
+    // A theme toggle (added in the next iteration) can flip this off the
+    // root element to fall back to the light palette. We also persist the
+    // user's choice via a small inline script so the page doesn't flash
+    // the wrong palette on reload.
+    <html lang="en" className="dark">
       <head>
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="format-detection" content="telephone=no" />
+        {/* Inline pre-paint script — reads the saved theme preference from
+            localStorage and applies it BEFORE the body renders, so users
+            who chose light mode don't see a dark flash on every page load.
+            Defaults to dark if no preference is set. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('mca-theme');var r=document.documentElement;if(t==='light'){r.classList.remove('dark');}else{r.classList.add('dark');}}catch(e){}})();`,
+          }}
+        />
       </head>
       <body>
         {safeColor && (
