@@ -2538,9 +2538,13 @@ function CelebrationSection() {
             <span className="text-sm">Include confetti animation</span>
           </label>
 
-          {/* Optional sound — off by default. The chime is synthesized inline
-              (no audio asset to ship) and is short (~600ms). Use sparingly
-              in shared workspaces. */}
+          {/* Optional gong sound — off by default. The gong is synthesized
+              inline (no audio asset to ship): 110Hz fundamental + four
+              inharmonic partials decaying over ~2.4s for the
+              characteristic bronze resonance. Use sparingly in shared
+              workspaces. The Preview button below plays the full
+              celebration (animation + sound if enabled) so the user can
+              audition the sound before saving. */}
           <label className={cn('flex items-center gap-2 cursor-pointer', !celebrationEnabled && 'opacity-50')}>
             <input
               type="checkbox"
@@ -2549,7 +2553,7 @@ function CelebrationSection() {
               disabled={!celebrationEnabled}
               className="h-4 w-4"
             />
-            <span className="text-sm">Play funded sound (brief chime)</span>
+            <span className="text-sm">Play gong sound on funded deal</span>
           </label>
 
           <Field label="Celebration message">

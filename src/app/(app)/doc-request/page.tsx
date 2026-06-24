@@ -23,13 +23,23 @@ import { Plus, Trash2, Copy } from 'lucide-react';
  */
 export default function DocRequestPage() {
   const toast = useToast();
+  // Core financial fields
   const [fundingAmount, setFundingAmount] = useState<string>('');
   const [rate, setRate] = useState<string>('');
   const [feePct, setFeePct] = useState<string>('');
   const [termCount, setTermCount] = useState<string>('');
   const [termUnit, setTermUnit] = useState<'days' | 'weeks'>('days');
+  // Merchant contact
   const [merchantEmail, setMerchantEmail] = useState<string>('');
+  // Phone is stored raw (digits + formatting) — formatted live as the
+  // user types via formatPhone() below.
   const [merchantCell, setMerchantCell] = useState<string>('');
+  // Extra detail fields — common adds brokers asked for. All optional;
+  // skipped from the generated message when blank.
+  const [businessName, setBusinessName] = useState<string>('');
+  const [position, setPosition] = useState<string>('');
+  const [holdbackPct, setHoldbackPct] = useState<string>('');
+  const [notes, setNotes] = useState<string>('');
 
   /**
    * EPO rows — dynamic array. Each row is "X days → factor Y".
@@ -70,28 +80,32 @@ export default function DocRequestPage() {
     const lines: string[] = [];
     const moneyStr = fmtMoney(fundingAmount);
     if (moneyStr) lines.push(`Send docs for ${moneyStr}`);
+    if (businessName) lines.push(`Business: ${businessName.trim()}`);
     if (rate)     lines.push(`Rate: ${rate}`);
     if (feePct)   lines.push(`Fee: ${feePct}%`);
     if (termCount) lines.push(`Term: ${termCount} ${termUnit}`);
+    if (position) lines.push(`Position: ${position.trim()}`);
+    if (holdbackPct) lines.push(`Holdback: ${holdbackPct}%`);
 
     // EPO line — flatten populated rows into one line.
-    //   "EPO: 30 days - 1.10, 60 days - 1.20, 90 days - 1.30"
-    // Per spec the format is space-separated within a row and
-    // comma-separated between rows. Days come from the user's typed
-    // number; factor is verbatim (the broker decides the precision).
+    //   "EPO: 1.10 / 30 days, 1.20 / 60 days, 1.30 / 90 days"
+    // Format is "factor / days" per spec — factor first because that's
+    // what the funder cares about (the price point); days second is
+    // context (when that price kicks in).
     const epoParts = epos
       .map((r) => ({ d: r.days.trim(), f: r.factor.trim() }))
       .filter((r) => r.d && r.f)
-      .map((r) => `${r.d} days - ${r.f}`);
+      .map((r) => `${r.f} / ${r.d} days`);
     if (epoParts.length > 0) {
       lines.push(`EPO: ${epoParts.join(', ')}`);
     }
 
     if (merchantEmail) lines.push(`Merchant Email: ${merchantEmail.trim()}`);
     if (merchantCell)  lines.push(`Merchant Cell: ${merchantCell.trim()}`);
+    if (notes) lines.push(`Notes: ${notes.trim()}`);
 
     return lines.join('\n');
-  }, [fundingAmount, rate, feePct, termCount, termUnit, epos, merchantEmail, merchantCell]);
+  }, [fundingAmount, rate, feePct, termCount, termUnit, epos, merchantEmail, merchantCell, businessName, position, holdbackPct, notes]);
 
   async function copyMessage() {
     if (!message) {
@@ -126,6 +140,16 @@ export default function DocRequestPage() {
           <CardContent className="p-5 space-y-4">
             <div className="text-sm font-semibold">Deal details</div>
 
+            <Field label="Business name">
+              {/* Optional but commonly the first thing a funder asks for.
+                  Free text so DBAs + variations are fine. */}
+              <Input
+                value={businessName}
+                onChange={(e) => setBusinessName(e.target.value)}
+                placeholder="Acme Pizza LLC"
+              />
+            </Field>
+
             <Field label="Funding amount">
               {/* CurrencyInput adds $ prefix + commas as the user types. */}
               <CurrencyInput
@@ -152,6 +176,26 @@ export default function DocRequestPage() {
                   value={feePct}
                   onChange={setFeePct}
                   placeholder="5"
+                />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Position">
+                {/* Position in stack — 1st, 2nd, 3rd, etc. Free text so
+                    "1st", "1", or "first" all work — the broker decides
+                    the convention. */}
+                <Input
+                  value={position}
+                  onChange={(e) => setPosition(e.target.value)}
+                  placeholder="1st"
+                />
+              </Field>
+              <Field label="Holdback (%)">
+                <PercentInput
+                  value={holdbackPct}
+                  onChange={setHoldbackPct}
+                  placeholder="12"
                 />
               </Field>
             </div>
@@ -210,6 +254,19 @@ export default function DocRequestPage() {
               <div className="space-y-2">
                 {epos.map((row, i) => (
                   <div key={row.id} className="flex items-center gap-2">
+                    {/* Factor first (left), days second (right) — mirrors
+                        the generated output format "1.10 / 30 days" so
+                        what the broker sees in the form matches what
+                        ends up in the message. */}
+                    <Input
+                      value={row.factor}
+                      onChange={(e) => updateEpo(row.id, { factor: e.target.value })}
+                      placeholder={`${(1.10 + i * 0.1).toFixed(2)}`}
+                      inputMode="decimal"
+                      className="w-24"
+                      aria-label={`EPO ${i + 1} factor`}
+                    />
+                    <span className="text-muted-foreground">/</span>
                     <Input
                       value={row.days}
                       onChange={(e) => updateEpo(row.id, { days: e.target.value })}
@@ -219,15 +276,6 @@ export default function DocRequestPage() {
                       aria-label={`EPO ${i + 1} days`}
                     />
                     <span className="text-xs text-muted-foreground">days</span>
-                    <span className="text-muted-foreground">—</span>
-                    <Input
-                      value={row.factor}
-                      onChange={(e) => updateEpo(row.id, { factor: e.target.value })}
-                      placeholder={`${(1.10 + i * 0.1).toFixed(2)}`}
-                      inputMode="decimal"
-                      className="w-24"
-                      aria-label={`EPO ${i + 1} factor`}
-                    />
                     <button
                       type="button"
                       onClick={() => removeEpo(row.id)}
@@ -253,11 +301,25 @@ export default function DocRequestPage() {
                 />
               </Field>
               <Field label="Merchant cell">
+                {/* Auto-formats the phone as the user types. Backing state
+                    holds the formatted string directly so what's shown
+                    is what gets serialized into the message. */}
                 <Input
                   type="tel"
                   value={merchantCell}
-                  onChange={(e) => setMerchantCell(e.target.value)}
-                  placeholder="305-000-0000"
+                  onChange={(e) => setMerchantCell(formatPhone(e.target.value))}
+                  placeholder="(305) 000-0000"
+                  inputMode="tel"
+                  maxLength={14}
+                />
+              </Field>
+              <Field label="Notes">
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Anything else the funder should know (special instructions, situation, etc.)"
+                  rows={3}
+                  className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-y"
                 />
               </Field>
             </div>
@@ -304,4 +366,28 @@ function cryptoId(): string {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/**
+ * Format a US phone number as the user types.
+ *
+ * Strips all non-digit characters, takes the first 10 digits, and
+ * groups them as `(AAA) BBB-CCCC`. Partial inputs format progressively:
+ *   "3"           → "(3"
+ *   "30"          → "(30"
+ *   "305"         → "(305) "
+ *   "30500"       → "(305) 00"
+ *   "3050001234"  → "(305) 000-1234"
+ *
+ * Extra digits beyond the 10th are dropped silently — the input also
+ * has maxLength so the user can't keep typing past a valid US number.
+ * If the raw input is shorter than 4 digits we return the partial
+ * "(NNN" so backspacing through the format characters works naturally.
+ */
+function formatPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 10);
+  if (digits.length === 0) return '';
+  if (digits.length < 4) return `(${digits}`;
+  if (digits.length < 7) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }

@@ -376,6 +376,45 @@ export const deals = pgTable(
   })
 );
 
+/* ---------- Deal Syndications ----------
+   When a rep puts up some of the capital on a funded deal, the deal is
+   "syndicated" to them. We record each rep's contribution as its own row
+   so a single deal can have multiple syndicators with different amounts.
+   Soft-deleted via isDeleted; no cascade — preserving the audit trail
+   if a deal gets removed is more important than tidy CASCADE deletes. */
+
+export const dealSyndications = pgTable(
+  'deal_syndications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    dealId: uuid('deal_id').notNull().references(() => deals.id, { onDelete: 'cascade' }),
+    // The user (rep) putting up capital. Nullable+set-null on delete so
+    // we keep the syndication record visible (with no payee) if the
+    // user account is later removed — bookkeeping doesn't lie just
+    // because someone left the company.
+    repId: uuid('rep_id').references(() => users.id, { onDelete: 'set null' }),
+    // The principal the rep contributed to this deal. Their proportional
+    // return is computed at read time (amount / fundedAmount) × the
+    // contracted factor. Stored as numeric so we don't lose pennies.
+    syndicatedAmount: numeric('syndicated_amount', { precision: 14, scale: 2 }).notNull(),
+    // When the syndication was funded. Distinct from the deal's funding
+    // date because a deal can be syndicated separately from when it
+    // was originally funded.
+    syndicatedDate: timestamp('syndicated_date', { withTimezone: true }),
+    // Free-text — for "syndication terms differ from base deal" kinds of
+    // notes that don't fit anywhere else.
+    notes: text('notes'),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    dealIdx: index('deal_syndications_deal_idx').on(t.dealId),
+    companyIdx: index('deal_syndications_company_idx').on(t.companyId),
+  })
+);
+
 /* ---------- Submissions ----------
    ONE submission row per deal, ever. Re-shopping adds new submission_funders rows. */
 

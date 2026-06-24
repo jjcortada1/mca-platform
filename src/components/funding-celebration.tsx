@@ -75,10 +75,33 @@ export function FundingCelebration() {
 
   // Listen for funded-deal events.
   useEffect(() => {
-    function onEvent(e: Event) {
+    async function onEvent(e: Event) {
       const detail = (e as CustomEvent<PreviewDetail>).detail ?? {};
+      // Re-fetch settings on every event so toggling the sound on/off in
+      // /settings takes effect without requiring a page reload. Falls
+      // back to the cached settings if the fetch fails (network blip,
+      // etc) — we never want a transient API failure to suppress the
+      // celebration entirely.
+      let live = settings;
+      try {
+        const r = await fetch('/api/companies/me', { cache: 'no-store' });
+        if (r.ok) {
+          const j = await r.json();
+          if (j?.company) {
+            live = {
+              celebrationEnabled: j.company.celebrationEnabled ?? DEFAULT_SETTINGS.celebrationEnabled,
+              confettiEnabled: j.company.confettiEnabled ?? DEFAULT_SETTINGS.confettiEnabled,
+              celebrationSoundEnabled: j.company.celebrationSoundEnabled ?? DEFAULT_SETTINGS.celebrationSoundEnabled,
+              celebrationMessage: j.company.celebrationMessage ?? DEFAULT_SETTINGS.celebrationMessage,
+            };
+            setSettings(live);
+          }
+        }
+      } catch {
+        // Stay with cached settings.
+      }
       const effective: CelebrationSettings = {
-        ...settings,
+        ...live,
         ...(detail.previewOverride ?? {}),
       };
       if (!effective.celebrationEnabled) return;
@@ -143,12 +166,23 @@ export function FundingCelebration() {
               <circle cx="100" cy="105" r="45" fill="none" stroke="#78350f" strokeWidth="1.5" opacity="0.5" />
               <circle cx="100" cy="105" r="25" fill="url(#gongInner)" stroke="#451a03" strokeWidth="2" />
             </g>
-            {/* Hammer — swings in from the right, strikes the disc center,
-                bounces back. Pivots around its handle end. */}
-            <g className="gong-hammer">
-              <line x1="0" y1="0" x2="60" y2="0" stroke="#451a03" strokeWidth="5" strokeLinecap="round" />
-              <ellipse cx="62" cy="0" rx="14" ry="10" fill="#451a03" stroke="#1c1917" strokeWidth="1.5" />
-              <ellipse cx="62" cy="-3" rx="11" ry="6" fill="#78716c" opacity="0.4" />
+            {/* Hammer — swings in from the upper-right, strikes the disc
+                center, bounces back. SVG transform places the pivot in
+                viewBox coordinates (so it actually appears inside the
+                visible area); CSS only animates rotation. The previous
+                version used CSS px values which don't map to viewBox
+                units and put the hammer off-screen. Hammer extends LEFT
+                from the pivot so the head lands on the disc center. */}
+            <g transform="translate(175 55)">
+              <g className="gong-hammer">
+                {/* Handle: from pivot (0,0) extending left to (-55, 0).
+                    The pivot is the user's grip point (end of handle). */}
+                <line x1="0" y1="0" x2="-55" y2="0" stroke="#451a03" strokeWidth="6" strokeLinecap="round" />
+                {/* Head — slightly larger so it's clearly visible at the
+                    small sizes the gong renders at on mobile. */}
+                <ellipse cx="-62" cy="0" rx="16" ry="11" fill="#451a03" stroke="#1c1917" strokeWidth="1.5" />
+                <ellipse cx="-62" cy="-3" rx="13" ry="7" fill="#78716c" opacity="0.5" />
+              </g>
             </g>
             {/* Impact ripples — three expanding rings that fade out as
                 they grow, suggesting the gong's resonance. */}
@@ -191,16 +225,20 @@ export function FundingCelebration() {
         :global(.animate-gong-fade-in) {
           animation: gongFadeIn 3.2s ease-out forwards;
         }
-        /* Hammer swing — comes from the right at a high arc, strikes the
-            center of the disc, bounces back. Pivot is the handle end at
-            the right edge. */
+        /* Hammer swing — pure rotation around the SVG-positioned pivot
+            (175, 55 in viewBox units). Starts cocked back at -60° (above
+            and to the right), arcs forward through 0°, strikes the disc
+            at 60° rotation (handle horizontal, head pointing into the
+            center), then bounces back gently. Rotation only — the
+            translate is handled by the SVG <g> wrapper so the hammer
+            stays inside the viewBox. */
         @keyframes gongHammerSwing {
-          0%   { transform: translate(165px, 50px) rotate(60deg); }
-          22%  { transform: translate(165px, 50px) rotate(60deg); }
-          32%  { transform: translate(165px, 50px) rotate(-30deg); }  /* impact */
-          40%  { transform: translate(165px, 50px) rotate(-10deg); }  /* bounce */
-          48%  { transform: translate(165px, 50px) rotate(-20deg); }
-          100% { transform: translate(165px, 50px) rotate(-15deg); }
+          0%   { transform: rotate(-90deg); }
+          22%  { transform: rotate(-90deg); }
+          32%  { transform: rotate(60deg); }   /* impact */
+          40%  { transform: rotate(40deg); }   /* bounce */
+          48%  { transform: rotate(55deg); }
+          100% { transform: rotate(50deg); }
         }
         :global(.gong-hammer) {
           transform-origin: 0 0;
@@ -361,6 +399,16 @@ function playFundedChime() {
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AC) return;
     const ctx = new AC();
+    // Browser autoplay policy: a freshly-created AudioContext may be
+    // in "suspended" state until a user gesture resumes it. The funded
+    // event IS triggered from a click, but the click-handler chain
+    // might happen across multiple async hops (fetch, state set, then
+    // dispatch event), and by then some browsers (notably iOS Safari)
+    // consider the gesture "stale" and refuse to play audio. Calling
+    // resume() proactively is harmless when not suspended.
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
     const now = ctx.currentTime;
 
     // Gong: low fundamental + several inharmonic partials with slight

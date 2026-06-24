@@ -245,3 +245,15 @@ export const emailModeSchema = z.object({
   emailMode: z.enum(['shared', 'per_rep']),
   globalCcEmails: z.array(z.string().email()).default([]),
 });
+
+/**
+ * Syndication input — used by POST /api/deals/[id]/syndications.
+ * The route fills in dealId + companyId from the URL + session; the
+ * client only sends the rep + amount + optional date/notes.
+ */
+export const dealSyndicationInputSchema = z.object({
+  repId: z.string().uuid(),
+  syndicatedAmount: z.coerce.number().positive(),
+  syndicatedDate: z.string().optional().nullable(),
+  notes: z.string().max(2000).optional().nullable(),
+});

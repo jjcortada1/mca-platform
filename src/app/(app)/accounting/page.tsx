@@ -68,6 +68,13 @@ export default function AccountingPage() {
   // Commission pay filter (avoids the network hit on first paint).
   const [commissionPays, setCommissionPays] = useState<CommissionPayment[]>([]);
   const [loadingCp, setLoadingCp] = useState(false);
+  // Inline "Log commission payment" drawer state. Opens when the user
+  // clicks "+ Log commission payment" on the commission_pay view.
+  const [logCpOpen, setLogCpOpen] = useState(false);
+  // Reps + lead sources for the payee picker — fetched once when the
+  // log drawer is first opened, then cached.
+  const [reps, setReps] = useState<{ id: string; name: string }[]>([]);
+  const [leadSourcesList, setLeadSourcesList] = useState<{ id: string; name: string }[]>([]);
 
   async function load() {
     setLoading(true);
@@ -102,6 +109,22 @@ export default function AccountingPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
+  // First time the log drawer opens, fetch reps + lead sources for the
+  // payee picker. Cached afterwards so subsequent opens are instant.
+  useEffect(() => {
+    if (!logCpOpen) return;
+    if (reps.length > 0 || leadSourcesList.length > 0) return;
+    Promise.all([
+      fetch('/api/users', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({ data: [] })),
+      fetch('/api/lead-sources', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({ data: [] })),
+    ]).then(([u, l]) => {
+      const userRows = u.data ?? u.users ?? [];
+      setReps(userRows.map((x: { id: string; name: string }) => ({ id: x.id, name: x.name })));
+      const lsRows = l.data ?? l.leadSources ?? [];
+      setLeadSourcesList(lsRows.map((x: { id: string; name: string }) => ({ id: x.id, name: x.name })));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logCpOpen]);
 
   const filtered = useMemo(() => {
     // Commission_pay is rendered from a separate dataset below — not
@@ -208,18 +231,20 @@ export default function AccountingPage() {
             {label}
           </button>
         ))}
-        {/* When viewing commission pay, surface a quick link to the
-            existing /payments page (which has the full logging form).
-            We don't duplicate that form here — single source of truth
-            for the commission-payment editor. */}
+        {/* Inline commission-pay logger — was previously a link to the
+            /payments page. The user asked to log a payment directly from
+            Accounting, so the form opens here in a drawer modal. POSTs
+            to the same /api/commission-payments endpoint as /payments,
+            then refreshes the list. */}
         {filter === 'commission_pay' && (
-          <a
-            href="/payments"
+          <button
+            type="button"
+            onClick={() => setLogCpOpen(true)}
             className="px-3 py-1.5 rounded-full border border-primary bg-primary/5 text-primary text-xs font-medium hover:bg-primary/10"
-            title="Open the payments page to log a new commission payment"
+            title="Log a new commission payment"
           >
             + Log commission payment
-          </a>
+          </button>
         )}
         <div className="ml-auto relative w-full sm:w-auto sm:min-w-[240px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -332,6 +357,19 @@ export default function AccountingPage() {
           onSaved={() => { setCreating(false); setEditing(null); load(); }}
         />
       )}
+
+      {/* Inline log-commission-payment drawer. Posts to the same
+          /api/commission-payments endpoint as the /payments page.
+          Stays open until either Cancel or successful save. */}
+      {logCpOpen && (
+        <LogCommissionPayModal
+          reps={reps}
+          leadSourcesList={leadSourcesList}
+          deals={deals}
+          onClose={() => setLogCpOpen(false)}
+          onSaved={() => { setLogCpOpen(false); loadCommissionPays(); }}
+        />
+      )}
     </div>
   );
 }
@@ -413,6 +451,219 @@ function EntryModal({ entry, deals, onClose, onSaved }: { entry: Entry | null; d
         <div className="px-6 py-3 border-t border-border flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button onClick={save} loading={saving}>{entry ? 'Save' : 'Log entry'}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Modal form to log a commission payment directly from the Accounting page.
+ *
+ * Why inline here instead of routing to /payments: the user reported the
+ * link round-trip was confusing and they couldn't find where to log a
+ * rep payment. Surfacing the same form right where they look for it
+ * removes the navigation hop entirely.
+ *
+ * POSTs to /api/commission-payments — same endpoint /payments uses. We
+ * do NOT duplicate the validation logic; the API does it. On success
+ * the parent's `onSaved` callback closes the modal and re-fetches the
+ * commission-pay list so the new row appears immediately.
+ *
+ * Payee selection: rep OR lead source (radio). Both pickers visible
+ * regardless of which is selected — switching between them doesn't
+ * clear the form, just changes which ID gets sent on save.
+ */
+function LogCommissionPayModal({
+  reps,
+  leadSourcesList,
+  deals,
+  onClose,
+  onSaved,
+}: {
+  reps: { id: string; name: string }[];
+  leadSourcesList: { id: string; name: string }[];
+  deals: DealOpt[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const toast = useToast();
+  const [payeeType, setPayeeType] = useState<'rep' | 'lead_source'>('rep');
+  const [repId, setRepId] = useState('');
+  const [leadSourceId, setLeadSourceId] = useState('');
+  const [amount, setAmount] = useState('');
+  const [paidDate, setPaidDate] = useState(new Date().toISOString().slice(0, 10));
+  const [method, setMethod] = useState<typeof METHODS[number]>('ach');
+  const [confirmationNumber, setConfirmationNumber] = useState('');
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    const numAmount = Number(amount.replace(/[^0-9.]/g, ''));
+    if (!numAmount || numAmount <= 0) {
+      toast.error('Enter a payment amount.');
+      return;
+    }
+    if (payeeType === 'rep' && !repId) {
+      toast.error('Pick which rep was paid.');
+      return;
+    }
+    if (payeeType === 'lead_source' && !leadSourceId) {
+      toast.error('Pick which lead source was paid.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = {
+        amount: numAmount,
+        paidDate: paidDate || null,
+        method,
+        confirmationNumber: confirmationNumber.trim() || null,
+        notes: notes.trim() || null,
+      };
+      if (payeeType === 'rep') body.repId = repId;
+      else body.leadSourceId = leadSourceId;
+      const res = await fetch('/api/commission-payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        toast.error(j.error || 'Could not log payment.');
+        return;
+      }
+      toast.success('Payment logged.');
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+      onClick={() => !saving && onClose()}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="absolute inset-0 bg-black/40" />
+      <div
+        className="relative bg-card rounded-lg border border-border shadow-xl max-w-lg w-full p-5 space-y-4 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div>
+          <div className="text-base font-semibold">Log commission payment</div>
+          <div className="text-xs text-muted-foreground">Record a payment you sent to a rep or lead source.</div>
+        </div>
+
+        {/* Payee type — rep vs lead source. Pill toggle with radios for
+            keyboard support and screenreaders. */}
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Payee type</div>
+          <div className="inline-flex rounded-md border border-input bg-card p-0.5" role="radiogroup" aria-label="Payee type">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={payeeType === 'rep'}
+              onClick={() => setPayeeType('rep')}
+              className={`h-9 px-4 rounded text-xs font-medium transition-colors ${
+                payeeType === 'rep' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Rep
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={payeeType === 'lead_source'}
+              onClick={() => setPayeeType('lead_source')}
+              className={`h-9 px-4 rounded text-xs font-medium transition-colors ${
+                payeeType === 'lead_source' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Lead source
+            </button>
+          </div>
+        </div>
+
+        <Field label={payeeType === 'rep' ? 'Rep' : 'Lead source'}>
+          {payeeType === 'rep' ? (
+            <select
+              value={repId}
+              onChange={(e) => setRepId(e.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">Select a rep…</option>
+              {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          ) : (
+            <select
+              value={leadSourceId}
+              onChange={(e) => setLeadSourceId(e.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">Select a lead source…</option>
+              {leadSourcesList.map((ls) => <option key={ls.id} value={ls.id}>{ls.name}</option>)}
+            </select>
+          )}
+        </Field>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Amount">
+            <CurrencyInput value={amount} onChange={setAmount} placeholder="2,500" />
+          </Field>
+          <Field label="Paid date">
+            <input
+              type="date"
+              value={paidDate}
+              onChange={(e) => setPaidDate(e.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Method">
+            <select
+              value={method}
+              onChange={(e) => setMethod(e.target.value as typeof METHODS[number])}
+              className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm uppercase focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              {METHODS.map((m) => <option key={m} value={m}>{m.toUpperCase()}</option>)}
+            </select>
+          </Field>
+          <Field label="Confirmation #">
+            <Input
+              value={confirmationNumber}
+              onChange={(e) => setConfirmationNumber(e.target.value)}
+              placeholder="optional"
+            />
+          </Field>
+        </div>
+
+        <Field label="Notes">
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="optional"
+            rows={3}
+            className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-y"
+          />
+        </Field>
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-border">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="h-9 px-4 rounded-md text-sm font-medium hover:bg-muted text-muted-foreground"
+          >
+            Cancel
+          </button>
+          <Button onClick={submit} disabled={saving}>
+            {saving ? 'Saving…' : 'Log payment'}
+          </Button>
         </div>
       </div>
     </div>

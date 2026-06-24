@@ -675,6 +675,17 @@ function FundedDealRow({
    * and the existing /active-deals create drawer.
    */
   async function markRefinanced() {
+    // Hard guard against double-mark: if the deal is already refinanced
+    // OR if a previous mark request is still in flight, bail. The button
+    // is also hidden in the UI when subStatusKey === 'refinanced', but
+    // this is the defense-in-depth check that protects against fast
+    // double-clicks (button hidden between clicks but not yet aware of
+    // the state change in the async window).
+    if (subStatusKey === 'refinanced') {
+      setRefiOpen(false);
+      return;
+    }
+    if (refiSaving) return;
     setRefiSaving(true);
     const funded = Number(deal.fundedAmount ?? 0);
     const factor = Number(deal.factorRate ?? 0);
@@ -775,7 +786,11 @@ function FundedDealRow({
 
   // Inline sub-status changer — small select on the table row that PATCHes
   // immediately so the user doesn't need to expand the row to update it.
-  async function quickSetSubStatus(next: 'active' | 'refi_eligible' | 'payment_issues' | 'default') {
+  // Accepts 'refinanced' from the dropdown directly too: per spec, the
+  // status itself is editable. The Mark-as-refinanced BUTTON elsewhere
+  // is a separate action that ALSO opens the new-deal pre-fill flow;
+  // setting the status from the dropdown only changes the label.
+  async function quickSetSubStatus(next: 'active' | 'refi_eligible' | 'payment_issues' | 'default' | 'refinanced') {
     // Optimistic local update for instant feedback.
     onUpdated({ fundedSubStatus: next });
     const res = await fetch(`/api/deals/${deal.id}`, {
@@ -874,7 +889,7 @@ function FundedDealRow({
               the row jumping open. Patches immediately via quickSetSubStatus. */}
           <select
             value={subStatusKey}
-            onChange={(e) => quickSetSubStatus(e.target.value as 'active' | 'refi_eligible' | 'payment_issues' | 'default')}
+            onChange={(e) => quickSetSubStatus(e.target.value as 'active' | 'refi_eligible' | 'payment_issues' | 'default' | 'refinanced')}
             className={cn(
               'rounded-full border px-2 py-0.5 text-[10px] font-medium cursor-pointer whitespace-nowrap',
               TONE_CLASS[subMeta.tone] ?? TONE_CLASS.gray
@@ -885,6 +900,11 @@ function FundedDealRow({
             <option value="refi_eligible">Refi Eligible</option>
             <option value="payment_issues">Payment Issues</option>
             <option value="default">Default</option>
+            {/* Refinanced — terminal status. Once chosen here the deal
+                stops showing as refi-eligible (paydown logic short-circuits).
+                The Mark-as-refinanced button is the richer flow that ALSO
+                opens the new-deal form; this dropdown option just labels. */}
+            <option value="refinanced">Refinanced</option>
           </select>
         </td>
         <td className="px-3 py-2 text-xs text-muted-foreground tabular-nums whitespace-nowrap hidden md:table-cell">
@@ -1104,6 +1124,19 @@ function FundedDealRow({
                 </div>
               )}
 
+              {/* Syndications panel — visible whether editing or not, so
+                  the user can see who else has skin in this deal at all
+                  times. The component handles its own fetch + form
+                  state internally so the parent doesn't have to manage
+                  syndication state per row. */}
+              <SyndicationsPanel
+                dealId={deal.id}
+                fundedAmount={p.fundedAmount}
+                factorRate={p.factorRate}
+                amountCollected={p.amountCollected}
+                reps={reps}
+              />
+
               {editing && (
                 <div className="space-y-2">
                   <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Funding details</div>
@@ -1145,13 +1178,14 @@ function FundedDealRow({
                     <Field label="Status">
                       <select
                         value={draft.fundedSubStatus}
-                        onChange={(e) => setDraft({ ...draft, fundedSubStatus: e.target.value as 'active' | 'refi_eligible' | 'payment_issues' | 'default' })}
+                        onChange={(e) => setDraft({ ...draft, fundedSubStatus: e.target.value as 'active' | 'refi_eligible' | 'payment_issues' | 'default' | 'refinanced' })}
                         className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
                       >
                         <option value="active">Active</option>
                         <option value="refi_eligible">Refi Eligible</option>
                         <option value="payment_issues">Payment Issues</option>
                         <option value="default">Default</option>
+                        <option value="refinanced">Refinanced</option>
                       </select>
                     </Field>
                     {/* Funded With — which funder actually funded the deal.
@@ -2002,6 +2036,266 @@ function KPI({
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</div>
       <div className={cn('text-xl font-semibold tabular-nums mt-0.5', valueColor)}>{value}</div>
       {sublabel && <div className="text-[10px] text-muted-foreground mt-0.5 truncate">{sublabel}</div>}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Syndications panel
+ * ─────────────────────────────────────────────────────────────────────
+ * Slim section on the funded-deal expand row that lists each rep who's
+ * syndicated capital into the deal, plus their amount, share %, current
+ * proportional return (based on what's been collected so far), expected
+ * total return (their share × the contracted factor), and remaining.
+ *
+ * "+ Add syndication" opens an inline form right under the panel:
+ *   • Rep picker (admin only)
+ *   • Amount (CurrencyInput)
+ *   • Notes (optional, single line)
+ * On save, POSTs to /api/deals/[id]/syndications, reloads the list.
+ *
+ * Soft-delete via trash icon per row — admin only. Confirms inline so
+ * we don't fire a browser popup mid-edit.
+ *
+ * Math reference (per-row):
+ *   share = syndicatedAmount / fundedAmount
+ *   expectedReturn = syndicatedAmount * factorRate
+ *   collectedShare = amountCollected * share   (their cut of collections so far)
+ *   remaining      = expectedReturn - collectedShare
+ *
+ * If fundedAmount or factorRate aren't yet known (the deal hasn't been
+ * fully populated), we skip the math and just show the dollar amount.
+ * ───────────────────────────────────────────────────────────────────── */
+
+interface Syndication {
+  id: string;
+  dealId: string;
+  repId: string | null;
+  repName: string | null;
+  syndicatedAmount: string;
+  syndicatedDate: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function SyndicationsPanel({
+  dealId,
+  fundedAmount,
+  factorRate,
+  amountCollected,
+  reps,
+}: {
+  dealId: string;
+  fundedAmount: number;
+  factorRate: number;
+  amountCollected: number;
+  reps: { id: string; name: string }[];
+}) {
+  const [syndications, setSyndications] = useState<Syndication[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [newRepId, setNewRepId] = useState('');
+  const [newAmount, setNewAmount] = useState('');
+  const [newNotes, setNewNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/deals/${dealId}/syndications`, { cache: 'no-store' });
+      if (!r.ok) { setSyndications([]); return; }
+      const j = await r.json();
+      setSyndications(j.syndications ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [dealId]);
+
+  async function addSyndication() {
+    setError(null);
+    if (!newRepId) { setError('Pick a rep.'); return; }
+    const amt = Number(newAmount.replace(/[^0-9.]/g, ''));
+    if (!amt || amt <= 0) { setError('Enter a syndication amount.'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/deals/${dealId}/syndications`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repId: newRepId,
+          syndicatedAmount: amt,
+          notes: newNotes.trim() || null,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(j.error || 'Could not save syndication.');
+        return;
+      }
+      setNewRepId('');
+      setNewAmount('');
+      setNewNotes('');
+      setShowForm(false);
+      load();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteSyndication(sid: string) {
+    if (!confirm('Remove this syndication?')) return;
+    const res = await fetch(`/api/deals/${dealId}/syndications/${sid}`, { method: 'DELETE' });
+    if (!res.ok) return;
+    load();
+  }
+
+  // Totals across all rows — used in the header + footer of the panel.
+  const totalSyndicated = syndications.reduce((s, x) => s + Number(x.syndicatedAmount || 0), 0);
+  const hasStructure = fundedAmount > 0 && factorRate > 0;
+
+  return (
+    <div className="border border-border rounded-md bg-card/50 p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Syndications</div>
+          {syndications.length > 0 && (
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              Total syndicated: <span className="tabular-nums font-medium">{formatCurrency(totalSyndicated)}</span>
+              {hasStructure && fundedAmount > 0 && (
+                <> · {Math.round((totalSyndicated / fundedAmount) * 100)}% of funded</>
+              )}
+            </div>
+          )}
+        </div>
+        {!showForm && (
+          <button
+            type="button"
+            onClick={() => setShowForm(true)}
+            className="text-xs font-medium text-primary hover:underline"
+          >
+            + Add syndication
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="text-[11px] text-muted-foreground">Loading…</div>
+      ) : syndications.length === 0 && !showForm ? (
+        <div className="text-[11px] text-muted-foreground italic">
+          No syndications on this deal yet.
+        </div>
+      ) : (
+        <div className="overflow-x-auto -mx-1 px-1">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60">
+                <th className="py-1.5 pr-2 font-semibold">Rep</th>
+                <th className="py-1.5 px-2 text-right font-semibold">Syndicated</th>
+                <th className="py-1.5 px-2 text-right font-semibold">Share</th>
+                <th className="py-1.5 px-2 text-right font-semibold">Expected return</th>
+                <th className="py-1.5 px-2 text-right font-semibold">Collected so far</th>
+                <th className="py-1.5 px-2 text-right font-semibold">Remaining</th>
+                <th className="w-6"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {syndications.map((s) => {
+                const amt = Number(s.syndicatedAmount);
+                const share = hasStructure ? amt / fundedAmount : 0;
+                const expectedReturn = hasStructure ? amt * factorRate : 0;
+                const collectedShare = hasStructure ? amountCollected * share : 0;
+                const remaining = Math.max(0, expectedReturn - collectedShare);
+                return (
+                  <tr key={s.id}>
+                    <td className="py-1.5 pr-2">
+                      <div className="font-medium">{s.repName ?? <span className="italic text-muted-foreground">removed rep</span>}</div>
+                      {s.notes && <div className="text-[10px] text-muted-foreground truncate max-w-[200px]">{s.notes}</div>}
+                    </td>
+                    <td className="py-1.5 px-2 text-right tabular-nums">{formatCurrency(amt)}</td>
+                    <td className="py-1.5 px-2 text-right tabular-nums text-muted-foreground">
+                      {hasStructure ? `${(share * 100).toFixed(1)}%` : '—'}
+                    </td>
+                    <td className="py-1.5 px-2 text-right tabular-nums">
+                      {hasStructure ? formatCurrency(expectedReturn) : '—'}
+                    </td>
+                    <td className="py-1.5 px-2 text-right tabular-nums text-emerald-700">
+                      {hasStructure ? formatCurrency(collectedShare) : '—'}
+                    </td>
+                    <td className="py-1.5 px-2 text-right tabular-nums">
+                      {hasStructure ? formatCurrency(remaining) : '—'}
+                    </td>
+                    <td className="py-1.5 pl-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => deleteSyndication(s.id)}
+                        title="Remove this syndication"
+                        className="text-muted-foreground hover:text-destructive p-0.5"
+                        aria-label="Remove syndication"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Inline add form. Slides into the panel rather than opening a
+          modal so the user can see the existing syndications while
+          adding a new one. */}
+      {showForm && (
+        <div className="border-t border-border pt-2 space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <Field label="Rep">
+              <select
+                value={newRepId}
+                onChange={(e) => setNewRepId(e.target.value)}
+                className="h-8 w-full rounded-md border border-input bg-card px-2 text-xs"
+              >
+                <option value="">Select a rep…</option>
+                {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Amount">
+              <CurrencyInput value={newAmount} onChange={setNewAmount} placeholder="20,000" />
+            </Field>
+            <Field label="Notes (optional)">
+              <input
+                value={newNotes}
+                onChange={(e) => setNewNotes(e.target.value)}
+                placeholder="optional"
+                className="h-8 w-full rounded-md border border-input bg-card px-2 text-xs"
+              />
+            </Field>
+          </div>
+          {error && <div className="text-[11px] text-destructive">{error}</div>}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setShowForm(false); setError(null); setNewRepId(''); setNewAmount(''); setNewNotes(''); }}
+              disabled={saving}
+              className="h-7 px-3 rounded-md text-xs text-muted-foreground hover:bg-muted"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={addSyndication}
+              disabled={saving}
+              className="h-7 px-3 rounded-md bg-foreground text-background text-xs font-medium hover:opacity-90 disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Add syndication'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
