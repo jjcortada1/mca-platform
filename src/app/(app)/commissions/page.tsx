@@ -134,15 +134,25 @@ export default function CommissionsPage() {
         setIsAdmin(admin);
         setMyUserId(me?.user?.id ?? null);
       }
-      const cRes = await fetch('/api/commissions');
+      // CRITICAL: every fetch below must use `cache: 'no-store'`.
+      //
+      // Next.js 14 App Router caches fetch responses with `force-cache`
+      // semantics by default. After a PATCH to /api/commissions/[id] (or
+      // any of these endpoints), calling load() WITHOUT no-store would
+      // return the cached pre-PATCH response, so the table would re-render
+      // showing the OLD date — even though the database was correctly
+      // updated. That's the "date funded only shows when expanded" bug:
+      // the expand panel's local input state holds the user's edit, but
+      // the table cell re-renders from the cached stale response.
+      const cRes = await fetch('/api/commissions', { cache: 'no-store' });
       setRows((await cRes.json()).commissions ?? []);
 
       if (admin) {
         const [dRes, uRes, lsRes, lscRes] = await Promise.all([
           fetch('/api/deals', { cache: 'no-store' }),
-          fetch('/api/users'),
-          fetch('/api/lead-sources'),
-          fetch('/api/lead-source-commissions'),
+          fetch('/api/users', { cache: 'no-store' }),
+          fetch('/api/lead-sources', { cache: 'no-store' }),
+          fetch('/api/lead-source-commissions', { cache: 'no-store' }),
         ]);
         const dJson = await dRes.json();
         const dealList = (dJson.data ?? dJson.deals ?? []) as Deal[];

@@ -40,7 +40,9 @@ export default function LeadSourcePortalPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/lead-source-portal')
+    // no-store so admin updates (clearings, payments, edits) reflect in
+    // the lead source's portal view without a manual refresh.
+    fetch('/api/lead-source-portal', { cache: 'no-store' })
       .then(async (r) => {
         if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Unable to load'); }
         return r.json();
