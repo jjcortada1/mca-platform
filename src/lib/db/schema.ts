@@ -317,7 +317,26 @@ export const deals = pgTable(
     fundingDate: timestamp('funding_date', { withTimezone: true }),
     // Total collected so far (drives the paydown tracker). Defaults handled in app.
     amountCollected: numeric('amount_collected', { precision: 14, scale: 2 }),
-    // ---- Paid-off tracking -----------------------------------------------
+    // ---- Funded-deal sub-status (added in earlier turn) ------------------
+    // Only meaningful when status='funded'. Tracks whether a funded deal
+    // is 'active' (paying normally), 'refi_eligible' (ready to renew),
+    // 'payment_issues' (struggling), or 'default' (stopped paying). Null
+    // is treated as 'active' in the UI. Kept here even though the UI that
+    // sets it may not be in this branch — production has user data in
+    // this column from prior versions.
+    fundedSubStatus: varchar('funded_sub_status', { length: 24 }),
+    // ---- Funded-with funder linkage (added in earlier turn) --------------
+    // FK to whichever funder ultimately funded the deal. ON DELETE SET NULL
+    // so deleting a funder doesn't cascade-delete the funded-deal history.
+    // Nullable for legacy + off-directory funders (use fundedWithName then).
+    fundedWithFunderId: uuid('funded_with_funder_id').references(() => funders.id, { onDelete: 'set null' }),
+    // Free-text fallback for off-directory funders. Production has data.
+    fundedWithName: varchar('funded_with_name', { length: 200 }),
+    // ---- Funded notes (added in earlier turn) ----------------------------
+    // General-purpose notes attached to a funded deal. Surfaced in funded
+    // deal cards AND in the rep commission view. Production has data.
+    fundedNotes: text('funded_notes'),
+    // ---- Paid-off tracking (NEW this turn) -------------------------------
     // True once the deal has been fully closed out. Separate from
     // status='funded' because a deal can stay 'funded' until it's actually
     // paid off — and we want to keep the funded status so the deal stays
