@@ -58,6 +58,23 @@ export interface FunderForMatching {
   tierMinCreditTier?: CreditTier | null;
 }
 
+/**
+ * Short categorical codes for restrictions. Used by the deal-shop UI to
+ * render a compact "why excluded" badge per funder (e.g. "Credit Too Low",
+ * "Revenue Too Low") instead of the long sentence-form reason text.
+ *
+ * One funder can match against multiple codes if several criteria fail.
+ * Codes are stable identifiers; the human label rendering is done in the UI.
+ */
+export type ExclusionCode =
+  | 'restricted_state'
+  | 'restricted_industry'
+  | 'credit_too_low'
+  | 'revenue_too_low'
+  | 'positions_too_high'
+  | 'reverse_unsupported'
+  | 'inactive';
+
 export interface MatchResult {
   funderId: string;
   funderName: string;
@@ -66,6 +83,9 @@ export interface MatchResult {
   tierName: string | null;
   matched: boolean;
   reasons: string[];
+  // Compact categorical codes for the reasons this match was EXCLUDED.
+  // Empty array for matched results. UI uses these to render short labels.
+  reasonCodes: ExclusionCode[];
   // Per-candidate effective values used for matching (after override resolution).
   effectiveMaxPositions: number;
   effectiveMinRevenue: number;
@@ -116,16 +136,18 @@ export function matchFunder(criteria: DealCriteria, funder: FunderForMatching): 
     tierName: funder.tierName ?? null,
     matched: true,
     reasons: [],
+    reasonCodes: [],
     effectiveMaxPositions,
     effectiveMinRevenue,
     effectiveMinCreditTier,
   };
 
   if (!funder.isActive) {
-    return { ...baseResult, matched: false, reasons: ['Funder inactive'] };
+    return { ...baseResult, matched: false, reasons: ['Funder inactive'], reasonCodes: ['inactive'] };
   }
 
   const reasons: string[] = [];
+  const reasonCodes: ExclusionCode[] = [];
   let matched = true;
 
   // Reverse consolidation gate
@@ -133,6 +155,7 @@ export function matchFunder(criteria: DealCriteria, funder: FunderForMatching): 
     if (!funder.supportsReverseConsolidation) {
       matched = false;
       reasons.push('Does not support reverse consolidation');
+      reasonCodes.push('reverse_unsupported');
     } else {
       reasons.push('Supports reverse consolidation');
     }
@@ -142,6 +165,7 @@ export function matchFunder(criteria: DealCriteria, funder: FunderForMatching): 
   if (criteria.monthlyRevenue < effectiveMinRevenue) {
     matched = false;
     reasons.push(`Min revenue ${fmtMoney(effectiveMinRevenue)}, deal has ${fmtMoney(criteria.monthlyRevenue)}`);
+    reasonCodes.push('revenue_too_low');
   } else {
     reasons.push(`Revenue OK (min ${fmtMoney(effectiveMinRevenue)})`);
   }
@@ -150,6 +174,7 @@ export function matchFunder(criteria: DealCriteria, funder: FunderForMatching): 
   if (criteria.positions > effectiveMaxPositions) {
     matched = false;
     reasons.push(`Max positions ${effectiveMaxPositions}${funder.tierName ? ` in ${funder.tierName}` : ''}, deal has ${criteria.positions}`);
+    reasonCodes.push('positions_too_high');
   } else {
     reasons.push(`Positions OK (max ${effectiveMaxPositions}${funder.tierName ? ` in ${funder.tierName}` : ''})`);
   }
@@ -162,6 +187,7 @@ export function matchFunder(criteria: DealCriteria, funder: FunderForMatching): 
     reasons.push(
       `Funder requires ${CREDIT_TIER_LABEL[effectiveMinCreditTier]}, deal scores ~${dealFloor}`
     );
+    reasonCodes.push('credit_too_low');
   } else if (dealFloor !== null && funderFloor !== null) {
     reasons.push(`Credit OK (need ≥${funderFloor}, have ≥${dealFloor})`);
   }
@@ -171,6 +197,7 @@ export function matchFunder(criteria: DealCriteria, funder: FunderForMatching): 
     if (funder.restrictedStates.map((s) => s.toUpperCase()).includes(criteria.state.toUpperCase())) {
       matched = false;
       reasons.push(`Funder does not lend in ${criteria.state}`);
+      reasonCodes.push('restricted_state');
     } else {
       reasons.push(`State OK (${criteria.state})`);
     }
@@ -182,12 +209,13 @@ export function matchFunder(criteria: DealCriteria, funder: FunderForMatching): 
     if (restricted.includes(criteria.industry.toLowerCase())) {
       matched = false;
       reasons.push(`Funder does not lend to ${criteria.industry}`);
+      reasonCodes.push('restricted_industry');
     } else {
       reasons.push(`Industry OK`);
     }
   }
 
-  return { ...baseResult, matched, reasons };
+  return { ...baseResult, matched, reasons, reasonCodes };
 }
 
 export function matchAll(criteria: DealCriteria, candidates: FunderForMatching[]): {

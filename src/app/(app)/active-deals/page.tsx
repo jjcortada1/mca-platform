@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
-import { Card, CardContent, Button, Input, Textarea, Badge, PageHeader, EmptyState } from '@/components/ui/primitives';
+import { Card, CardContent, Button, Input, Textarea, Badge, PageHeader, EmptyState, Field, CurrencyInput, PercentInput } from '@/components/ui/primitives';
+import { RepPicker } from '@/components/ui/rep-picker';
 import { exportCSV } from '@/lib/csv-export';
 import { useToast } from '@/components/toast';
 import { formatDate, formatCurrency } from '@/lib/utils';
-import { Plus, Trash2, Briefcase, Search, X, ChevronDown, ChevronRight, Download, LayoutGrid, List as ListIcon } from 'lucide-react';
+import { Plus, Trash2, Briefcase, Search, X, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { computePaydown, buildPaymentSchedule, DEAL_STATUS_META, DEAL_STATUS_OPTIONS } from '@/lib/deals/paydown';
 
@@ -80,18 +81,14 @@ export default function ActiveDealsPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
-
-  // List vs Card layout. Persisted in localStorage so the user's choice
-  // sticks across visits. Defaults to 'list' — easier to scan, no
-  // horizontal scroll, dense column packing. Card view keeps the previous
-  // grid-of-cards layout available for users who prefer it.
-  const [viewMode, setViewMode] = useState<'list' | 'card'>(() => {
-    if (typeof window === 'undefined') return 'list';
-    return (localStorage.getItem('mca-active-view') as 'list' | 'card') ?? 'list';
-  });
-  useEffect(() => {
-    try { localStorage.setItem('mca-active-view', viewMode); } catch {}
-  }, [viewMode]);
+  // Rep filter (admin-side narrowing). '' = all, 'mine' = current user,
+  // 'unassigned' = no rep, else specific repId.
+  const [repFilter, setRepFilter] = useState<string>('');
+  // Sort key — 'recent' (default), 'oldest', or 'rep' (group by rep name).
+  const [sortKey, setSortKey] = useState<'recent' | 'oldest' | 'rep'>('recent');
+  // Current user identity for the "mine" filter shortcut.
+  const [me, setMe] = useState<{ id: string; role: string } | null>(null);
+  const isAdmin = me?.role === 'master_admin' || me?.role === 'company_admin';
 
   // Inline edit state — what's being edited and pending changes
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -113,7 +110,17 @@ export default function ActiveDealsPage() {
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    // Fetch current user — used to drive the "My deals only" shortcut and
+    // to hide the rep filter from non-admin users (server-side scoping
+    // already restricts what they see, but we don't want the dropdown
+    // visible to suggest there's something to filter).
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => { if (j?.user) setMe({ id: j.user.id, role: j.user.role }); })
+      .catch(() => {});
+  }, []);
 
   function startEdit(d: Deal) {
     setExpandedId(d.id);
@@ -144,8 +151,23 @@ export default function ActiveDealsPage() {
     return true;
   }
 
+  // When the user marks a deal "funded" inline, we don't just flip the
+  // status — we collect merchant contact + funding details so the deal
+  // shows up correctly on /portfolio. Stores the in-progress deal until
+  // the user saves or cancels.
+  const [markingFunded, setMarkingFunded] = useState<Deal | null>(null);
+
   // Inline status change — saves immediately
   async function quickStatusChange(deal: Deal, status: Deal['status']) {
+    // Moving to "funded" ALWAYS opens the modal so the user can review /
+    // fill in merchant contact details, funding amount, fee, factor, term,
+    // funding date. Even if the deal already has funding details set,
+    // contact info often isn't collected until funding time — and the user
+    // wants to be able to add it at this point.
+    if (status === 'funded') {
+      setMarkingFunded(deal);
+      return;
+    }
     const ok = await persist(deal, { status });
     if (ok) {
       toast.success(`Marked as ${status}.`);
@@ -211,12 +233,23 @@ export default function ActiveDealsPage() {
     load();
   }
 
-  // Active Deals = pre-funded pipeline only. Funded deals live in /portfolio.
+  // Active Deals = pre-funded pipeline only. Funded deals live in /portfolio (labeled "Funded Deals" in the UI).
   const HIDDEN_FROM_ACTIVE = new Set(['funded', 'paid_off', 'closed']);
 
   const filtered = useMemo(() => {
     let arr = deals.filter((d) => !HIDDEN_FROM_ACTIVE.has(d.status));
     if (statusFilter !== 'all') arr = arr.filter((d) => d.status === statusFilter);
+    // Rep filter — '' = all reps (admin default); 'mine' = current user;
+    // any other value = specific rep id. The /api/deals endpoint already
+    // enforces server-side scoping for non-admin users; this client filter
+    // is purely a UX convenience for admins narrowing the list.
+    if (repFilter === 'mine') {
+      if (me) arr = arr.filter((d) => d.assignedRepId === me.id);
+    } else if (repFilter && repFilter !== 'unassigned') {
+      arr = arr.filter((d) => d.assignedRepId === repFilter);
+    } else if (repFilter === 'unassigned') {
+      arr = arr.filter((d) => !d.assignedRepId);
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       arr = arr.filter((d) =>
@@ -225,8 +258,26 @@ export default function ActiveDealsPage() {
         (d.merchantEmail ?? '').toLowerCase().includes(q)
       );
     }
+    // Sort. Default = most-recent first. Sort-by-rep groups by rep name
+    // (with unassigned last) for fast scanning of who owns what.
+    if (sortKey === 'rep') {
+      const repNameOf = (d: typeof arr[number]) => {
+        if (!d.assignedRepId) return '\uffff'; // sort unassigned last
+        return reps.find((r) => r.id === d.assignedRepId)?.name?.toLowerCase() ?? '\uffff';
+      };
+      arr = [...arr].sort((a, b) => {
+        const cmp = repNameOf(a).localeCompare(repNameOf(b));
+        if (cmp !== 0) return cmp;
+        // Tie-break: most recently updated first within a rep
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+    } else if (sortKey === 'oldest') {
+      arr = [...arr].sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime());
+    } else {
+      arr = [...arr].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    }
     return arr;
-  }, [deals, statusFilter, search]);
+  }, [deals, statusFilter, search, repFilter, me, sortKey, reps]);
 
   const counts = useMemo(() => {
     const pipeline = deals.filter((d) => !HIDDEN_FROM_ACTIVE.has(d.status));
@@ -287,36 +338,37 @@ export default function ActiveDealsPage() {
             tone={statusMeta(s).tone}
           />
         ))}
-        <div className="ml-auto flex items-center gap-2">
-          {/* List ↔ Card view toggle. Default 'list' so the user lands on
-              the dense, scrollable-free table. Choice persists across
-              visits via localStorage. */}
-          <div className="inline-flex rounded-md border border-input bg-card p-0.5" role="group">
-            <button
-              type="button"
-              onClick={() => setViewMode('list')}
-              className={cn(
-                'h-8 px-2.5 rounded text-xs font-medium transition-colors flex items-center gap-1.5',
-                viewMode === 'list' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'
-              )}
-              title="List view"
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {/* Sort key — including by rep so admins can see who's working
+              what at a glance. Default "recent" matches the prior behavior
+              so the page doesn't feel different to existing users. */}
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as 'recent' | 'oldest' | 'rep')}
+            className="h-9 rounded-md border border-input bg-card px-2 text-xs"
+            title="Sort"
+          >
+            <option value="recent">Recent first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="rep">By rep</option>
+          </select>
+          {/* Rep filter — admin-only (server-side scope already hides others'
+              deals from reps; showing the dropdown to a rep would be
+              misleading since they only see their own). */}
+          {isAdmin && (
+            <select
+              value={repFilter}
+              onChange={(e) => setRepFilter(e.target.value)}
+              className="h-9 rounded-md border border-input bg-card px-2 text-xs max-w-[180px]"
+              title="Filter by rep"
             >
-              <ListIcon className="h-3.5 w-3.5" />
-              List
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('card')}
-              className={cn(
-                'h-8 px-2.5 rounded text-xs font-medium transition-colors flex items-center gap-1.5',
-                viewMode === 'card' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'
-              )}
-              title="Card view"
-            >
-              <LayoutGrid className="h-3.5 w-3.5" />
-              Cards
-            </button>
-          </div>
+              <option value="">All reps</option>
+              <option value="mine">My deals only</option>
+              <option value="unassigned">Unassigned</option>
+              <option disabled>──────────</option>
+              {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          )}
           <div className="relative w-full sm:w-auto sm:min-w-[240px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -365,6 +417,18 @@ export default function ActiveDealsPage() {
                 value={creating.merchantPhone ?? ''}
                 onChange={(e) => setCreating({ ...creating, merchantPhone: e.target.value })}
               />
+              {/* Rep assignment at creation time — per spec, manually
+                  created deals should be assignable immediately. The
+                  selected rep flows through commissions, dashboards, and
+                  deal views the same as any other assigned deal. */}
+              <label className="space-y-1 sm:col-span-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Assign to rep</div>
+                <RepPicker
+                  value={creating.assignedRepId ?? ''}
+                  onChange={(v) => setCreating({ ...creating, assignedRepId: v || null })}
+                  reps={reps}
+                />
+              </label>
             </div>
             <div className="flex justify-end gap-2 pt-2 border-t border-border">
               <Button variant="outline" size="sm" onClick={() => setCreating(null)}>Cancel</Button>
@@ -390,12 +454,15 @@ export default function ActiveDealsPage() {
             />
           </CardContent>
         </Card>
-      ) : viewMode === 'list' ? (
-        // ── LIST VIEW ────────────────────────────────────────────────
-        // Dense column set that fits comfortably without horizontal scroll
-        // on any modern screen (>= 1024px). Merchant first/last/phone/email
-        // live in the expand panel below — clicking a row opens the full
-        // detail. Live-progress also moved into the expand to free space.
+      ) : (
+        // Compact responsive layout — fits a normal browser width without
+        // horizontal scrolling. Columns removed vs previous:
+        //   • First / Last → combined into a single "Merchant" column
+        //   • Phone / Email → moved into the expanded row (still editable)
+        //   • Live progress → removed (Active Deals is the PRE-funded
+        //     pipeline; funded deals live in /portfolio where the paydown
+        //     tracker lives). Keeping just Deal name, Merchant, Offers count,
+        //     Status, Rep, Updated keeps every row under ~960px wide.
         <Card>
           <table className="w-full text-sm">
             <thead>
@@ -403,16 +470,17 @@ export default function ActiveDealsPage() {
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-2 py-2 w-8"></th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Deal</th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Merchant</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 w-20">Offers</th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Status</th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Rep</th>
-                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 whitespace-nowrap">Updated</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 hidden md:table-cell">Updated</th>
                 <th className="w-8"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
               {filtered.map((d) => {
                 const isExpanded = expandedId === d.id;
-                const merchant = `${d.merchantFirstName ?? ''} ${d.merchantLastName ?? ''}`.trim() || (d.merchantPhone || d.merchantEmail || '—');
+                const fullName = [d.merchantFirstName, d.merchantLastName].filter(Boolean).join(' ') || '—';
                 return (
                   <>
                     <tr
@@ -426,8 +494,11 @@ export default function ActiveDealsPage() {
                       <td className="px-2 py-2.5 text-muted-foreground">
                         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                       </td>
-                      <td className="px-3 py-2.5 font-medium">{d.name}</td>
-                      <td className="px-3 py-2.5 text-foreground/80 truncate max-w-[200px]" title={merchant}>{merchant}</td>
+                      <td className="px-3 py-2.5 font-medium truncate max-w-[200px]">{d.name}</td>
+                      <td className="px-3 py-2.5 text-foreground/80 truncate max-w-[160px]">{fullName}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground tabular-nums" onClick={(e) => e.stopPropagation()}>
+                        <OfferCountBadge dealId={d.id} />
+                      </td>
                       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-2">
                           <StatusBadge status={d.status} />
@@ -446,19 +517,16 @@ export default function ActiveDealsPage() {
                         </div>
                       </td>
                       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                        <select
+                        <RepPicker
                           value={d.assignedRepId ?? ''}
-                          onChange={(e) => quickRepChange(d, e.target.value || null)}
+                          onChange={(v) => quickRepChange(d, v || null)}
+                          reps={reps}
+                          size="sm"
                           disabled={savingId === d.id}
-                          className="h-8 rounded-md border border-input bg-card px-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring max-w-[140px]"
-                        >
-                          <option value="">— unassigned —</option>
-                          {reps.map((r) => (
-                            <option key={r.id} value={r.id}>{r.name}</option>
-                          ))}
-                        </select>
+                          className="max-w-[150px]"
+                        />
                       </td>
-                      <td className="px-3 py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap hidden md:table-cell">
                         {formatDate(d.updatedAt)}
                       </td>
                       <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
@@ -473,106 +541,60 @@ export default function ActiveDealsPage() {
                     </tr>
                     {isExpanded && (
                       <tr className="bg-muted/20">
-                        <td colSpan={11} className="px-4 py-4">
-                          <div className="space-y-3 max-w-3xl">
+                        <td colSpan={8} className="px-4 py-4">
+                          <div className="space-y-4 max-w-4xl">
+                            {/* Merchant identity — phone/email moved here from the table */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               <LabeledInline label="Deal name">
-                                <Input
-                                  defaultValue={d.name}
-                                  onChange={(e) => patchDraft('name', e.target.value)}
-                                />
+                                <Input defaultValue={d.name} onChange={(e) => patchDraft('name', e.target.value)} />
                               </LabeledInline>
                               <LabeledInline label="Merchant first">
-                                <Input
-                                  defaultValue={d.merchantFirstName ?? ''}
-                                  onChange={(e) => patchDraft('merchantFirstName', e.target.value)}
-                                />
+                                <Input defaultValue={d.merchantFirstName ?? ''} onChange={(e) => patchDraft('merchantFirstName', e.target.value)} />
                               </LabeledInline>
                               <LabeledInline label="Merchant last">
-                                <Input
-                                  defaultValue={d.merchantLastName ?? ''}
-                                  onChange={(e) => patchDraft('merchantLastName', e.target.value)}
-                                />
-                              </LabeledInline>
-                              <LabeledInline label="Merchant email">
-                                <Input
-                                  type="email"
-                                  defaultValue={d.merchantEmail ?? ''}
-                                  onChange={(e) => patchDraft('merchantEmail', e.target.value)}
-                                />
+                                <Input defaultValue={d.merchantLastName ?? ''} onChange={(e) => patchDraft('merchantLastName', e.target.value)} />
                               </LabeledInline>
                               <LabeledInline label="Merchant phone">
-                                <Input
-                                  defaultValue={d.merchantPhone ?? ''}
-                                  onChange={(e) => patchDraft('merchantPhone', e.target.value)}
-                                />
+                                <Input defaultValue={d.merchantPhone ?? ''} onChange={(e) => patchDraft('merchantPhone', e.target.value)} />
+                              </LabeledInline>
+                              <LabeledInline label="Merchant email">
+                                <Input type="email" defaultValue={d.merchantEmail ?? ''} onChange={(e) => patchDraft('merchantEmail', e.target.value)} />
                               </LabeledInline>
                             </div>
-                            <LabeledInline label="Offer amount ($)">
-                              <Input
-                                type="text"
-                                inputMode="decimal"
-                                defaultValue={d.offerAmount ?? ''}
-                                placeholder="e.g. 50000"
-                                onChange={(e) => patchDraft('offerAmount', e.target.value)}
-                              />
-                            </LabeledInline>
 
-                            {/* Funding / paydown structure */}
-                            <div className="pt-3 border-t border-border">
-                              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Funding & paydown</div>
-                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                <LabeledInline label="Funded amount ($)">
-                                  <Input inputMode="decimal" defaultValue={d.fundedAmount ?? ''} placeholder="150000" onChange={(e) => patchDraft('fundedAmount', e.target.value)} />
-                                </LabeledInline>
-                                <LabeledInline label="Funding fee (%)">
-                                  <Input inputMode="decimal" defaultValue={d.feePct ?? ''} placeholder="5" onChange={(e) => patchDraft('feePct', e.target.value)} />
-                                </LabeledInline>
-                                <LabeledInline label="Factor rate">
-                                  <Input inputMode="decimal" defaultValue={d.factorRate ?? ''} placeholder="1.40" onChange={(e) => patchDraft('factorRate', e.target.value)} />
-                                </LabeledInline>
-                                <LabeledInline label="Term type">
-                                  <select
-                                    defaultValue={d.termMode ?? 'weekly'}
-                                    onChange={(e) => patchDraft('termMode', e.target.value)}
-                                    className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
-                                  >
-                                    <option value="weekly">Weekly</option>
-                                    <option value="daily">Daily</option>
-                                  </select>
-                                </LabeledInline>
-                                <LabeledInline label="# of payments">
-                                  <Input inputMode="decimal" defaultValue={d.termCount ?? ''} placeholder="26" onChange={(e) => patchDraft('termCount', e.target.value)} />
-                                </LabeledInline>
-                                <LabeledInline label="Funding date">
-                                  <Input type="date" defaultValue={d.fundingDate ? String(d.fundingDate).slice(0, 10) : ''} onChange={(e) => patchDraft('fundingDate', e.target.value)} />
-                                </LabeledInline>
-                                <LabeledInline label="Amount collected ($)">
-                                  <Input inputMode="decimal" defaultValue={d.amountCollected ?? ''} placeholder="auto from date if blank" onChange={(e) => patchDraft('amountCollected', e.target.value)} />
-                                </LabeledInline>
-                              </div>
+                            {/* Multi-offer manager — replaces the single
+                                offerAmount + offerNotes inputs. Each offer
+                                tracks funding amount, factor rate, term,
+                                fees, payment amount, and notes. The rep can
+                                mark one as accepted. Funding-detail entry
+                                (fundedAmount, feePct, fundingDate, etc) has
+                                been moved out of Active Deals — those only
+                                live on Funded Deals now per the spec. */}
+                            <OffersManager dealId={d.id} />
 
-                              {/* Live tracker */}
-                              <PaydownTracker deal={{ ...d, ...draft }} />
-                            </div>
-
-                            <LabeledInline label="Offer notes">
-                              <Textarea
-                                rows={3}
-                                defaultValue={d.offerNotes ?? ''}
-                                onChange={(e) => patchDraft('offerNotes', e.target.value)}
-                              />
-                            </LabeledInline>
-                            <div className="flex justify-end gap-2 pt-2 border-t border-border">
-                              <Button variant="outline" size="sm" onClick={cancelEdit}>Cancel</Button>
-                              <Button
-                                size="sm"
-                                onClick={() => saveDraft(d)}
-                                loading={savingId === d.id}
-                                disabled={Object.keys(draft).length === 0}
+                            <div className="flex justify-between items-center gap-2 pt-2 border-t border-border">
+                              {/* Quick path to the unified shop view with this
+                                  deal's context — opens the matching engine
+                                  pre-loaded with the deal's already-submitted
+                                  bucket so the user can see who's already seen
+                                  this file before picking new funders. */}
+                              <a
+                                href={`/deal-shop?dealId=${encodeURIComponent(d.id)}`}
+                                className="text-xs font-medium text-primary hover:underline"
                               >
-                                Save changes
-                              </Button>
+                                Shop this deal →
+                              </a>
+                              <div className="flex gap-2">
+                                <Button variant="outline" size="sm" onClick={cancelEdit}>Cancel</Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() => saveDraft(d)}
+                                  loading={savingId === d.id}
+                                  disabled={Object.keys(draft).length === 0}
+                                >
+                                  Save changes
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         </td>
@@ -584,57 +606,30 @@ export default function ActiveDealsPage() {
             </tbody>
           </table>
         </Card>
-      ) : (
-        // ── CARD VIEW ────────────────────────────────────────────────
-        // Grid of compact cards. Each card shows the same essential info as
-        // the list row (deal, merchant, status, rep, updated) but with
-        // more vertical breathing room. Click anywhere on a card to open
-        // the same expand panel used by the list view.
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-          {filtered.map((d) => {
-            const isExpanded = expandedId === d.id;
-            const merchant = `${d.merchantFirstName ?? ''} ${d.merchantLastName ?? ''}`.trim();
-            return (
-              <Card
-                key={d.id}
-                className={cn(
-                  'cursor-pointer transition-shadow hover:shadow-md',
-                  isExpanded && 'col-span-full ring-1 ring-primary/30'
-                )}
-                onClick={() => isExpanded ? cancelEdit() : startEdit(d)}
-              >
-                <CardContent className="p-4 space-y-2.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="font-semibold truncate">{d.name}</div>
-                      {merchant && <div className="text-xs text-muted-foreground truncate">{merchant}</div>}
-                    </div>
-                    <StatusBadge status={d.status} />
-                  </div>
-                  <div className="flex items-center justify-between gap-2 text-xs">
-                    <span className="text-muted-foreground truncate">
-                      {(reps.find((r) => r.id === d.assignedRepId)?.name) ?? <span className="italic">Unassigned</span>}
-                    </span>
-                    <span className="text-muted-foreground tabular-nums shrink-0">{formatDate(d.updatedAt)}</span>
-                  </div>
-                  {/* Inline expanded panel — reuses the same edit form as
-                      the list view (already mounted below in the table
-                      version), but we'd duplicate it here in a full
-                      implementation. For now the card view collapses
-                      back to list-style expand by widening to full row. */}
-                  {isExpanded && (
-                    <div
-                      className="pt-3 border-t border-border text-xs text-muted-foreground"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      Switch to <button onClick={() => setViewMode('list')} className="text-primary hover:underline">List view</button> to edit. Card-view editing coming in a follow-up.
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+      )}
+
+      {/* Mark-as-funded modal: collects merchant contact + funding details
+          so the deal lands on the Funded Deals page complete. Cancel just
+          closes — the status change isn't committed unless the user saves. */}
+      {markingFunded && (
+        <MarkFundedModal
+          deal={markingFunded}
+          onClose={() => setMarkingFunded(null)}
+          onSaved={(updatedFields) => {
+            setDeals((arr) => arr.map((x) =>
+              x.id === markingFunded.id ? { ...x, ...updatedFields, status: 'funded' } : x
+            ));
+            setMarkingFunded(null);
+            toast.success('Marked as funded.');
+            // NOTE: the celebration overlay is NOT triggered here. Per JJ's
+            // direction, it fires when a deal is added to the FUNDED BOARD
+            // (a separate flow on /funded-board), not when the deal status
+            // flips to funded in Active Deals. This avoids firing the
+            // celebration in the middle of a data-entry modal — the user
+            // wants it to happen at the moment the deal visibly lands on
+            // the board.
+          }}
+        />
       )}
     </div>
   );
@@ -676,6 +671,325 @@ function LabeledInline({ label, children }: { label: string; children: React.Rea
     </div>
   );
 }
+
+/* ---------- Multi-offer tracking ---------- */
+
+interface OfferRow {
+  id: string;
+  fundingAmount: string | null;
+  factorRate: string | null;
+  termCount: number | null;
+  termMode: string | null;
+  fees: string | null;
+  paymentAmount: string | null;
+  notes: string | null;
+  funderId: string | null;
+  isAccepted: boolean;
+  createdAt: string;
+}
+
+/**
+ * Tiny inline badge for the main table row — shows how many offers a deal has,
+ * with a green ring if one is marked accepted. Fetches per deal but the data
+ * is cached briefly so re-expanding doesn't refetch.
+ */
+const offerCountCache = new Map<string, { count: number; accepted: boolean }>();
+function OfferCountBadge({ dealId }: { dealId: string }) {
+  const [state, setState] = useState<{ count: number; accepted: boolean } | null>(
+    () => offerCountCache.get(dealId) ?? null
+  );
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/deals/${dealId}/offers`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled) return;
+        const rows = (j?.data ?? []) as OfferRow[];
+        const next = { count: rows.length, accepted: rows.some((r) => r.isAccepted) };
+        offerCountCache.set(dealId, next);
+        setState(next);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [dealId]);
+  if (!state) return <span className="text-muted-foreground">·</span>;
+  if (state.count === 0) return <span className="text-muted-foreground">0</span>;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 rounded text-[11px] font-semibold border',
+        state.accepted
+          ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+          : 'bg-blue-50 text-blue-700 border-blue-200'
+      )}
+      title={state.accepted ? `${state.count} offer(s), one accepted` : `${state.count} offer(s)`}
+    >
+      {state.count}
+    </span>
+  );
+}
+
+const blankOffer = (): Omit<OfferRow, 'id' | 'createdAt'> => ({
+  fundingAmount: '',
+  factorRate: '',
+  termCount: null,
+  termMode: 'weeks',
+  fees: '',
+  paymentAmount: '',
+  notes: '',
+  funderId: null,
+  isAccepted: false,
+});
+
+/**
+ * Multi-offer manager — lists all offers for a deal, lets the rep add new
+ * ones, edit existing ones inline, mark one as accepted, and compare them
+ * side-by-side. Replaces the old single-offerAmount / single-offerNotes
+ * inputs that used to live on Active Deals.
+ */
+function OffersManager({ dealId }: { dealId: string }) {
+  const toast = useToast();
+  const [offers, setOffers] = useState<OfferRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState(blankOffer());
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [compareMode, setCompareMode] = useState(false);
+
+  async function load() {
+    const r = await fetch(`/api/deals/${dealId}/offers`, { cache: 'no-store' });
+    const j = await r.json();
+    const rows = (j?.data ?? []) as OfferRow[];
+    setOffers(rows);
+    offerCountCache.set(dealId, { count: rows.length, accepted: rows.some((x) => x.isAccepted) });
+    setLoaded(true);
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [dealId]);
+
+  async function addOffer() {
+    setSavingId('__new');
+    const res = await fetch(`/api/deals/${dealId}/offers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft),
+    });
+    setSavingId(null);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || 'Could not save offer.');
+      return;
+    }
+    setAdding(false);
+    setDraft(blankOffer());
+    load();
+  }
+
+  async function updateOffer(id: string, patch: Partial<OfferRow>) {
+    // Optimistic local update — same pattern as submissions, keeps things snappy.
+    setOffers((prev) => prev.map((o) => o.id === id ? { ...o, ...patch } : o));
+    const res = await fetch(`/api/offers/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || 'Save failed — reloading.');
+      load();
+    } else if ('isAccepted' in patch) {
+      // Accepting an offer flips it on others — refetch to sync.
+      load();
+    }
+  }
+
+  async function deleteOffer(id: string) {
+    if (!confirm('Delete this offer?')) return;
+    await fetch(`/api/offers/${id}`, { method: 'DELETE' });
+    load();
+  }
+
+  if (!loaded) {
+    return (
+      <div className="pt-3 border-t border-border text-xs text-muted-foreground">Loading offers…</div>
+    );
+  }
+
+  return (
+    <div className="pt-3 border-t border-border space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Offers {offers.length > 0 && <span className="text-foreground/60 normal-case font-normal">— {offers.length} on file</span>}
+        </div>
+        <div className="flex items-center gap-1.5">
+          {offers.length > 1 && (
+            <Button size="sm" variant="outline" onClick={() => setCompareMode((v) => !v)}>
+              {compareMode ? 'List view' : 'Compare'}
+            </Button>
+          )}
+          {!adding && (
+            <Button size="sm" onClick={() => setAdding(true)} className="gap-1">
+              <Plus className="h-3.5 w-3.5" /> Add offer
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {offers.length === 0 && !adding && (
+        <div className="text-xs text-muted-foreground italic py-2">No offers yet. Add one as funders respond.</div>
+      )}
+
+      {/* Add-offer form */}
+      {adding && (
+        <div className="rounded-md border border-border bg-card p-3 space-y-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <OfferField label="Funding amount">
+              <CurrencyInput value={String(draft.fundingAmount ?? '')} onChange={(v) => setDraft({ ...draft, fundingAmount: v })} placeholder="50,000" />
+            </OfferField>
+            <OfferField label="Factor rate">
+              <Input inputMode="decimal" value={String(draft.factorRate ?? '')} onChange={(e) => setDraft({ ...draft, factorRate: e.target.value })} placeholder="1.40" />
+            </OfferField>
+            <OfferField label="Term">
+              <div className="flex gap-1">
+                <Input inputMode="numeric" className="flex-1" value={draft.termCount == null ? '' : String(draft.termCount)} onChange={(e) => setDraft({ ...draft, termCount: e.target.value === '' ? null : Number(e.target.value) })} placeholder="26" />
+                <select className="h-9 rounded-md border border-input bg-card px-1 text-xs" value={draft.termMode ?? 'weeks'} onChange={(e) => setDraft({ ...draft, termMode: e.target.value })}>
+                  <option value="days">days</option>
+                  <option value="weeks">wks</option>
+                  <option value="months">mos</option>
+                </select>
+              </div>
+            </OfferField>
+            {/* Fees is a PERCENTAGE on a deal offer — not a dollar amount.
+                Funding fee % is how lenders quote it; storing as a dollar
+                here lost meaning when the funded amount changed. */}
+            <OfferField label="Fee">
+              <PercentInput value={String(draft.fees ?? '')} onChange={(v) => setDraft({ ...draft, fees: v })} placeholder="5" />
+            </OfferField>
+            <OfferField label="Payment">
+              <CurrencyInput value={String(draft.paymentAmount ?? '')} onChange={(v) => setDraft({ ...draft, paymentAmount: v })} placeholder="2,692" />
+            </OfferField>
+          </div>
+          <OfferField label="Notes">
+            <Input value={draft.notes ?? ''} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} placeholder="Funder name, conditions, etc." />
+          </OfferField>
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="ghost" onClick={() => { setAdding(false); setDraft(blankOffer()); }}>Cancel</Button>
+            <Button size="sm" onClick={addOffer} loading={savingId === '__new'}>Save offer</Button>
+          </div>
+        </div>
+      )}
+
+      {/* Compare view — side-by-side table for fast eyeballing */}
+      {offers.length > 0 && compareMode && (
+        <div className="overflow-x-auto rounded-md border border-border">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-muted/40">
+                <th className="text-left px-2 py-1.5 font-semibold">Field</th>
+                {offers.map((o, i) => (
+                  <th key={o.id} className={cn('text-left px-2 py-1.5 font-semibold', o.isAccepted && 'text-emerald-700')}>
+                    Offer {i + 1}{o.isAccepted && ' ★'}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/50">
+              {[
+                { k: 'fundingAmount', label: 'Funding', fmt: (v: string | null) => v ? formatCurrency(Number(v)) : '—' },
+                { k: 'factorRate', label: 'Factor', fmt: (v: string | null) => v ?? '—' },
+                { k: 'termCount', label: 'Term', fmt: (v: number | null, o: OfferRow) => v != null ? `${v} ${o.termMode ?? ''}` : '—' },
+                { k: 'fees', label: 'Fees', fmt: (v: string | null) => v ? formatCurrency(Number(v)) : '—' },
+                { k: 'paymentAmount', label: 'Payment', fmt: (v: string | null) => v ? formatCurrency(Number(v)) : '—' },
+                { k: 'notes', label: 'Notes', fmt: (v: string | null) => v ?? '—' },
+              ].map((row) => (
+                <tr key={row.k}>
+                  <td className="px-2 py-1.5 text-muted-foreground font-medium">{row.label}</td>
+                  {offers.map((o) => (
+                    <td key={o.id} className="px-2 py-1.5">
+                      {/* @ts-expect-error — dynamic key lookup */}
+                      {row.fmt(o[row.k], o)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* List view — each offer is editable inline */}
+      {offers.length > 0 && !compareMode && (
+        <div className="space-y-2">
+          {offers.map((o, i) => (
+            <div
+              key={o.id}
+              className={cn(
+                'rounded-md border p-2.5 space-y-2',
+                o.isAccepted ? 'border-emerald-300 bg-emerald-50/40' : 'border-border bg-card'
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-semibold flex items-center gap-2">
+                  Offer {i + 1}
+                  {o.isAccepted && <Badge variant="success">Accepted</Badge>}
+                </div>
+                <div className="flex items-center gap-1">
+                  <label className="flex items-center gap-1 text-[11px] text-muted-foreground cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={o.isAccepted}
+                      onChange={(e) => updateOffer(o.id, { isAccepted: e.target.checked })}
+                    />
+                    Accept
+                  </label>
+                  <button onClick={() => deleteOffer(o.id)} className="text-muted-foreground hover:text-destructive p-1" title="Delete offer">
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <OfferField label="Funding ($)">
+                  <Input inputMode="decimal" defaultValue={o.fundingAmount ?? ''} onBlur={(e) => updateOffer(o.id, { fundingAmount: e.target.value || null })} className="h-8 text-xs" />
+                </OfferField>
+                <OfferField label="Factor">
+                  <Input inputMode="decimal" defaultValue={o.factorRate ?? ''} onBlur={(e) => updateOffer(o.id, { factorRate: e.target.value || null })} className="h-8 text-xs" />
+                </OfferField>
+                <OfferField label="Term">
+                  <div className="flex gap-1">
+                    <Input inputMode="numeric" defaultValue={o.termCount == null ? '' : String(o.termCount)} onBlur={(e) => updateOffer(o.id, { termCount: e.target.value === '' ? null : Number(e.target.value) })} className="h-8 text-xs flex-1" />
+                    <select defaultValue={o.termMode ?? 'weeks'} onChange={(e) => updateOffer(o.id, { termMode: e.target.value })} className="h-8 rounded-md border border-input bg-card px-1 text-[11px]">
+                      <option value="days">days</option>
+                      <option value="weeks">wks</option>
+                      <option value="months">mos</option>
+                    </select>
+                  </div>
+                </OfferField>
+                <OfferField label="Fees ($)">
+                  <Input inputMode="decimal" defaultValue={o.fees ?? ''} onBlur={(e) => updateOffer(o.id, { fees: e.target.value || null })} className="h-8 text-xs" />
+                </OfferField>
+                <OfferField label="Payment ($)">
+                  <Input inputMode="decimal" defaultValue={o.paymentAmount ?? ''} onBlur={(e) => updateOffer(o.id, { paymentAmount: e.target.value || null })} className="h-8 text-xs" />
+                </OfferField>
+              </div>
+              <OfferField label="Notes">
+                <Input defaultValue={o.notes ?? ''} onBlur={(e) => updateOffer(o.id, { notes: e.target.value || null })} className="h-8 text-xs" />
+              </OfferField>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OfferField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-0.5">
+      <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+      {children}
+    </div>
+  );
+}
+
 
 /* ---------- Live paydown tracker ---------- */
 function LiveProgressCell({ deal }: { deal: Deal }) {
@@ -867,6 +1181,147 @@ function Metric({ label, value }: { label: string; value: string }) {
     <div>
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</div>
       <div className="tabular-nums font-medium mt-0.5">{value}</div>
+    </div>
+  );
+}
+
+/**
+ * Modal that opens when an Active Deal is being moved to "funded" status.
+ *
+ * Collects the data needed for the Funded Deals page in one shot:
+ *   - Merchant contact (first/last/phone/email) — frequently missing on
+ *     deals that came through the system as cold criteria + funder shop.
+ *   - Funded amount, fee%, factor, funding date, term type, # of payments —
+ *     the paydown engine needs all of these to compute balance/payoff.
+ *
+ * Cancel closes without committing the status change. Save persists every
+ * touched field PLUS sets status='funded' in one PATCH so the deal moves
+ * to /portfolio fully populated.
+ */
+function MarkFundedModal({
+  deal,
+  onClose,
+  onSaved,
+}: {
+  deal: Deal;
+  onClose: () => void;
+  onSaved: (patch: Partial<Deal>) => void;
+}) {
+  const toast = useToast();
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    merchantFirstName: deal.merchantFirstName ?? '',
+    merchantLastName: deal.merchantLastName ?? '',
+    merchantPhone: deal.merchantPhone ?? '',
+    merchantEmail: deal.merchantEmail ?? '',
+    fundedAmount: deal.fundedAmount ?? '',
+    feePct: deal.feePct ?? '',
+    factorRate: deal.factorRate ?? '',
+    termMode: deal.termMode ?? 'weekly',
+    termCount: deal.termCount ?? '',
+    fundingDate: deal.fundingDate ? String(deal.fundingDate).slice(0, 10) : '',
+  });
+
+  async function save() {
+    if (!form.fundedAmount || !form.fundingDate) {
+      toast.error('Funded amount and funding date are required.');
+      return;
+    }
+    setSaving(true);
+    const body: Record<string, unknown> = {
+      status: 'funded',
+      merchantFirstName: form.merchantFirstName.trim() || null,
+      merchantLastName: form.merchantLastName.trim() || null,
+      merchantPhone: form.merchantPhone.trim() || null,
+      merchantEmail: form.merchantEmail.trim() || null,
+      fundedAmount: form.fundedAmount || null,
+      feePct: form.feePct || null,
+      factorRate: form.factorRate || null,
+      termMode: form.termMode,
+      termCount: form.termCount || null,
+      fundingDate: form.fundingDate || null,
+    };
+    const res = await fetch(`/api/deals/${deal.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || 'Could not save.');
+      return;
+    }
+    onSaved(body as Partial<Deal>);
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex justify-end" onClick={onClose}>
+      <div
+        className="w-full max-w-xl bg-background border-l border-border h-full overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 bg-background border-b border-border px-6 py-4 flex items-center justify-between z-10">
+          <div>
+            <h2 className="text-lg font-semibold">Move to funded</h2>
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">{deal.name}</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
+            <Button size="sm" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Mark funded'}</Button>
+          </div>
+        </div>
+        <div className="p-6 space-y-5">
+          <section>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground/70 mb-2">Merchant contact</div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="First name">
+                <Input value={form.merchantFirstName} onChange={(e) => setForm({ ...form, merchantFirstName: e.target.value })} />
+              </Field>
+              <Field label="Last name">
+                <Input value={form.merchantLastName} onChange={(e) => setForm({ ...form, merchantLastName: e.target.value })} />
+              </Field>
+              <Field label="Phone">
+                <Input value={form.merchantPhone} onChange={(e) => setForm({ ...form, merchantPhone: e.target.value })} placeholder="(555) 555-5555" />
+              </Field>
+              <Field label="Email">
+                <Input type="email" value={form.merchantEmail} onChange={(e) => setForm({ ...form, merchantEmail: e.target.value })} placeholder="merchant@business.com" />
+              </Field>
+            </div>
+          </section>
+
+          <section>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground/70 mb-2">Funding details</div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Funded amount" required>
+                <CurrencyInput value={form.fundedAmount} onChange={(v) => setForm({ ...form, fundedAmount: v })} placeholder="50,000" />
+              </Field>
+              <Field label="Fee">
+                <PercentInput value={form.feePct} onChange={(v) => setForm({ ...form, feePct: v })} placeholder="5" />
+              </Field>
+              <Field label="Factor rate">
+                <Input inputMode="decimal" value={form.factorRate} onChange={(e) => setForm({ ...form, factorRate: e.target.value })} placeholder="1.40" />
+              </Field>
+              <Field label="Funding date" required>
+                <Input type="date" value={form.fundingDate} onChange={(e) => setForm({ ...form, fundingDate: e.target.value })} />
+              </Field>
+              <Field label="Term type">
+                <select
+                  value={form.termMode}
+                  onChange={(e) => setForm({ ...form, termMode: e.target.value })}
+                  className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+                >
+                  <option value="weekly">Weekly</option>
+                  <option value="daily">Daily</option>
+                </select>
+              </Field>
+              <Field label="# of payments">
+                <Input inputMode="numeric" value={form.termCount} onChange={(e) => setForm({ ...form, termCount: e.target.value })} placeholder="26" />
+              </Field>
+            </div>
+          </section>
+        </div>
+      </div>
     </div>
   );
 }

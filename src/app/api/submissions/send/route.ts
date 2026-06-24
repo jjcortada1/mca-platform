@@ -12,6 +12,14 @@ import { rateLimit } from '@/lib/api/rate-limit';
 import { triggerSync } from '@/lib/sheets/sync';
 
 export const runtime = 'nodejs';
+// Force dynamic + uncached so file uploads always hit fresh server logic.
+// Important when this route is behind a CDN / edge — we never want a stale
+// cached response confusing a multipart POST.
+export const dynamic = 'force-dynamic';
+// Big multipart payloads (attachments) can exceed Next's default 1MB body
+// limit on some hosting setups. Setting an explicit max keeps a 25MB single
+// PDF / image upload from being silently rejected as too large.
+export const maxDuration = 60;
 
 interface FunderSubmission {
   funderId?: string;

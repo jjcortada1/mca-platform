@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, Button, Input, Field, Badge, PageHeader } from '@/components/ui/primitives';
+import { Card, CardContent, Button, Input, Field, Badge, PageHeader, CurrencyInput } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { formatCurrency } from '@/lib/utils';
 import { Search, Download } from 'lucide-react';
@@ -25,6 +25,10 @@ interface Payment {
   repName: string | null;
   leadSourceName: string | null;
   dealName: string | null;
+  // Funding date of the linked deal — surfaced so admins can see when the
+  // deal that this payment was for actually funded, right next to the
+  // payment date. Sortable + searchable in the table view.
+  dealFundingDate: string | null;
   createdByName: string | null;
   payeeName: string;
   payeeType: 'rep' | 'lead_source' | 'unknown';
@@ -93,7 +97,8 @@ export default function PaymentsPage() {
           <Button
             variant="outline"
             onClick={() => exportCSV('payments', filtered, [
-              { key: 'paidDate', label: 'Date', format: (v) => (v ? new Date(v as string).toISOString().slice(0, 10) : '') },
+              { key: 'paidDate', label: 'Paid Date', format: (v) => (v ? new Date(v as string).toISOString().slice(0, 10) : '') },
+              { key: 'dealFundingDate', label: 'Date Funded', format: (v) => (v ? new Date(v as string).toISOString().slice(0, 10) : '') },
               { key: 'payeeName', label: 'Payee' },
               { key: 'payeeType', label: 'Type' },
               { key: 'amount', label: 'Amount', format: (v) => (v ? Number(v) : 0) },
@@ -141,7 +146,8 @@ export default function PaymentsPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[900px]">
               <thead><tr className="bg-muted/40 border-b border-border text-left">
-                <th className="px-4 py-2 th">Date</th>
+                <th className="px-4 py-2 th">Paid date</th>
+                <th className="px-3 py-2 th">Date funded</th>
                 <th className="px-3 py-2 th">Payee</th>
                 <th className="px-3 py-2 th">Type</th>
                 <th className="px-3 py-2 th text-right">Amount</th>
@@ -155,6 +161,12 @@ export default function PaymentsPage() {
                 {filtered.map((p) => (
                   <tr key={p.id} className="hover:bg-muted/20">
                     <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{fmtDate(p.paidDate)}</td>
+                    {/* Date funded = the joined deal's fundingDate. Italic
+                        em-dash when there's no linked deal (rare, but
+                        possible for hand-entered draws). */}
+                    <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
+                      {p.dealFundingDate ? fmtDate(p.dealFundingDate) : <span className="italic text-muted-foreground/60">—</span>}
+                    </td>
                     <td className="px-3 py-2.5 font-medium">{p.payeeName}</td>
                     <td className="px-3 py-2.5">
                       <Badge variant={p.payeeType === 'lead_source' ? 'outline' : 'default'} className="text-[10px]">
@@ -234,7 +246,7 @@ function EditPaymentModal({ payment, onClose, onSaved }: { payment: Payment; onC
           <p className="text-xs text-muted-foreground mt-1">Payee: {payment.payeeName}{payment.dealName ? ` · ${payment.dealName}` : ''}</p>
         </div>
         <div className="p-6 space-y-3">
-          <Field label="Amount ($)"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+          <Field label="Amount"><CurrencyInput value={amount} onChange={(v) => setAmount(v)} placeholder="10,000" /></Field>
           <Field label="Date"><Input type="date" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} /></Field>
           <Field label="Method">
             <select value={method} onChange={(e) => setMethod(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">

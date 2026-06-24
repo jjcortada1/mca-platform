@@ -90,19 +90,25 @@ export const companies = pgTable('companies', {
   // section appear in an auto "Other" bucket at the bottom so future app
   // releases that add new nav items show up without an admin re-edit.
   sidebarCategories: jsonb('sidebar_categories').$type<{ id: string; label: string; items: string[] }[]>(),
-  // ---- Per-item sidebar overrides --------------------------------------
-  // Admin-edited label/icon overrides for individual nav items, keyed by
-  // the item's href. e.g. { '/portfolio': { label: 'My Book', icon: 'Books' } }.
-  // Optional shape per item — both label and icon can be omitted, in which
-  // case the default from the nav registry is used. Production data exists.
+  // Per-item overrides for sidebar nav items — lets the admin rename a tab
+  // ("Funded Deals" → "Portfolio") and swap its icon (e.g. from TrendingUp
+  // to BarChart) without touching the master ALL_NAV_ITEMS list. Keyed by
+  // the item's href ('/portfolio'). Empty/null fields fall back to the
+  // built-in defaults. Additive — null = no overrides, every tab uses its
+  // default label/icon.
   sidebarItemOverrides: jsonb('sidebar_item_overrides').$type<Record<string, { label?: string; icon?: string }>>(),
-  // ---- Funded-deal celebration settings --------------------------------
-  // Read by the global <FundingCelebration/> overlay. Production has data
-  // in all four — do NOT let drizzle drop them. UI for editing these may
-  // live elsewhere in the deploy.
+  // ---- Funded-deal celebration settings ----------------------------------
+  // Triggered when a deal status flips to 'funded' (from /active-deals,
+  // /portfolio, or the deal API). Admin can edit, preview, and disable
+  // independently in Settings. Defaults: confetti on, message on, message
+  // = "Fundeddddd!!!!".
   celebrationEnabled: boolean('celebration_enabled').notNull().default(true),
   confettiEnabled: boolean('confetti_enabled').notNull().default(true),
+  // Optional funded sound — disabled by default since some users will work
+  // in shared offices. When enabled, a brief "ka-ching" plays alongside the
+  // confetti / message overlay.
   celebrationSoundEnabled: boolean('celebration_sound_enabled').notNull().default(false),
+  // Free text — shown as a banner overlay when a deal is funded.
   celebrationMessage: varchar('celebration_message', { length: 200 }).notNull().default('Fundeddddd!!!!'),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -331,39 +337,30 @@ export const deals = pgTable(
     fundingDate: timestamp('funding_date', { withTimezone: true }),
     // Total collected so far (drives the paydown tracker). Defaults handled in app.
     amountCollected: numeric('amount_collected', { precision: 14, scale: 2 }),
-    // ---- Funded-deal sub-status (added in earlier turn) ------------------
-    // Only meaningful when status='funded'. Tracks whether a funded deal
-    // is 'active' (paying normally), 'refi_eligible' (ready to renew),
-    // 'payment_issues' (struggling), or 'default' (stopped paying). Null
-    // is treated as 'active' in the UI. Kept here even though the UI that
-    // sets it may not be in this branch — production has user data in
-    // this column from prior versions.
-    fundedSubStatus: varchar('funded_sub_status', { length: 24 }),
-    // ---- Funded-with funder linkage (added in earlier turn) --------------
-    // FK to whichever funder ultimately funded the deal. ON DELETE SET NULL
-    // so deleting a funder doesn't cascade-delete the funded-deal history.
-    // Nullable for legacy + off-directory funders (use fundedWithName then).
-    fundedWithFunderId: uuid('funded_with_funder_id').references(() => funders.id, { onDelete: 'set null' }),
-    // Free-text fallback for off-directory funders. Production has data.
-    fundedWithName: varchar('funded_with_name', { length: 200 }),
-    // ---- Funded notes (added in earlier turn) ----------------------------
-    // General-purpose notes attached to a funded deal. Surfaced in funded
-    // deal cards AND in the rep commission view. Production has data.
-    fundedNotes: text('funded_notes'),
-    // ---- Paid-off tracking (NEW this turn) -------------------------------
-    // True once the deal has been fully closed out. Separate from
-    // status='funded' because a deal can stay 'funded' until it's actually
-    // paid off — and we want to keep the funded status so the deal stays
-    // visible on the portfolio with its history.
-    paidOff: boolean('paid_off').notNull().default(false),
-    // Actual payoff amount captured by the admin when marking paid off.
-    // Often DIFFERENT from `totalPayback` because lenders give a discount
-    // on early payoff. We store the actual amount the merchant paid so
-    // commission math reflects reality, not the contractual maximum.
-    paidOffAmount: numeric('paid_off_amount', { precision: 14, scale: 2 }),
-    // When it was marked paid off — used for sorting + reporting.
-    paidOffDate: timestamp('paid_off_date', { withTimezone: true }),
     renewalNotes: text('renewal_notes'),
+    // Funded-deal sub-status — only meaningful when status='funded'. Lets the
+    // user mark a funded deal as 'active' (paying normally), 'refi_eligible'
+    // (ready to renew), 'payment_issues' (struggling), or 'default' (stopped
+    // paying). On the Funded Deals page this replaces the broad "Funded"
+    // status badge with the more useful sub-state. Default 'active' so
+    // legacy funded deals don't need a migration. Additive — null treated
+    // as 'active' in the UI.
+    fundedSubStatus: varchar('funded_sub_status', { length: 24 }),
+    // Which funder ultimately funded this deal. Set when the user marks a
+    // deal as funded — we ask "Funded With ___" and store the FK here.
+    // Nullable for legacy rows + for the rare case where the funder isn't
+    // in the directory (then `fundedWithName` carries a free-text label).
+    // ON DELETE SET NULL so deleting a funder doesn't cascade-delete the
+    // history of every deal they funded.
+    fundedWithFunderId: uuid('funded_with_funder_id').references(() => funders.id, { onDelete: 'set null' }),
+    // Free-text fallback for off-directory funders, or to overlay a custom
+    // label when the directory name isn't quite right. Optional.
+    fundedWithName: varchar('funded_with_name', { length: 200 }),
+    // General-purpose notes attached to a funded deal — anything the user
+    // wants to remember (special terms, contact-of-record, "watch this one",
+    // etc). Surfaced in the funded-deal expand view AND in the rep
+    // commissions view so reps see the deal context next to their pay.
+    fundedNotes: text('funded_notes'),
     // Soft-delete flag. When true, the deal is treated as gone everywhere —
     // hidden from dropdowns, lists, commission views, accounting, etc. We
     // soft-delete instead of hard-delete so historical audit data is
@@ -376,40 +373,6 @@ export const deals = pgTable(
   (t) => ({
     companyIdx: index('deals_company_idx').on(t.companyId),
     companyCreatedIdx: index('deals_company_created_idx').on(t.companyId, t.createdAt),
-  })
-);
-
-/* ---------- Deal offers (multi-offer tracking) ----------
-   One row per offer a funder has put on a deal. A deal can have many
-   offers; at most one is marked accepted at any time. Production has data
-   in this table — DO NOT let drizzle drop it. */
-
-export const dealOffers = pgTable(
-  'deal_offers',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    dealId: uuid('deal_id').notNull().references(() => deals.id, { onDelete: 'cascade' }),
-    // Optional funder reference — null when the offer is logged before the
-    // funder is selected from the directory. Production rows include both.
-    funderId: uuid('funder_id').references(() => funders.id, { onDelete: 'set null' }),
-    // Numeric offer fields. Empty/unknown stored as null.
-    fundingAmount: numeric('funding_amount', { precision: 14, scale: 2 }),
-    factorRate: numeric('factor_rate', { precision: 6, scale: 4 }),
-    termCount: integer('term_count'),
-    // 'days' | 'weeks' | 'months' — kept loose since each funder phrases
-    // their term differently.
-    termMode: varchar('term_mode', { length: 16 }),
-    fees: numeric('fees', { precision: 14, scale: 2 }),
-    paymentAmount: numeric('payment_amount', { precision: 14, scale: 2 }),
-    notes: text('notes'),
-    // Exactly one offer per deal can be accepted; the offers POST handler
-    // enforces this by clearing the flag on siblings when one is accepted.
-    isAccepted: boolean('is_accepted').notNull().default(false),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => ({
-    dealIdx: index('deal_offers_deal_idx').on(t.dealId),
   })
 );
 
@@ -426,6 +389,45 @@ export const submissions = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({ companyIdx: index('submissions_company_idx').on(t.companyId) })
+);
+
+/**
+ * Multi-offer tracking per deal. One deal can collect many offers from
+ * different funders / iterations; the rep can mark one as "accepted" which
+ * makes it the canonical offer for funding-detail display elsewhere.
+ *
+ * Backward-compatible with the legacy single-offer columns on `deals`
+ * (offerAmount, offerNotes) — those stay; new code prefers this table when
+ * any rows exist, and falls back to the legacy columns otherwise.
+ */
+export const dealOffers = pgTable(
+  'deal_offers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    dealId: uuid('deal_id').notNull().references(() => deals.id, { onDelete: 'cascade' }),
+    // All money/numeric fields nullable so partial offers can be saved as
+    // they come in (some funders send factor + term first, then payment).
+    fundingAmount: numeric('funding_amount', { precision: 14, scale: 2 }),
+    factorRate: numeric('factor_rate', { precision: 6, scale: 4 }),
+    // Term — independent count + mode so a 90-day daily deal vs 12-week deal
+    // both store cleanly. termMode: 'days' | 'weeks' | 'months'.
+    termCount: integer('term_count'),
+    termMode: varchar('term_mode', { length: 16 }),
+    fees: numeric('fees', { precision: 14, scale: 2 }),
+    paymentAmount: numeric('payment_amount', { precision: 14, scale: 2 }),
+    // Free-text per-offer notes (e.g. "Yellowstone, $5k commission, 2nd position OK")
+    notes: text('notes'),
+    // Which funder sent this offer (optional — may be entered before tagging)
+    funderId: uuid('funder_id').references(() => funders.id, { onDelete: 'set null' }),
+    // The rep can mark one offer as accepted. The deal's legacy offer fields
+    // get auto-updated from this row so existing dashboards keep working.
+    isAccepted: boolean('is_accepted').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    dealIdx: index('deal_offers_deal_idx').on(t.dealId),
+  })
 );
 
 export const submissionFunders = pgTable(

@@ -9,9 +9,10 @@ import { useToast } from '@/components/toast';
 import {
   Palette, Mail, Send, FileText, DollarSign, Layers, ListChecks,
   Users as UsersIcon, GitBranch, Database, ShieldCheck, Menu as MenuIcon,
+  Trash2, Sparkles,
 } from 'lucide-react';
 
-type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar';
+type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar' | 'celebration';
 
 // Flatter, friendlier settings nav. Each entry has an icon + one-line
 // description so the user can scan and find what they want without reading
@@ -25,6 +26,11 @@ const TAB_GROUPS: {
     tabs: [
       { key: 'branding', label: 'Branding', icon: Palette, description: 'Logo, colors, company name' },
       { key: 'sidebar', label: 'Sidebar order', icon: MenuIcon, description: 'Rearrange the left navigation menu' },
+      // Funded celebration is admin-customizable — confetti + message text.
+      // Lives in General because it's a company-wide personality knob, like
+      // branding. Hidden behind admin gating (settings page itself is admin
+      // only via permissions.manage).
+      { key: 'celebration', label: 'Funded celebration', icon: Sparkles, description: 'Confetti + message when a deal funds' },
       { key: 'security', label: 'Security', icon: ShieldCheck, description: 'Your password and audit log' },
     ],
   },
@@ -121,6 +127,7 @@ export default function SettingsPage() {
 
           {tab === 'branding' && <BrandingSection />}
           {tab === 'sidebar' && <SidebarOrderSection />}
+          {tab === 'celebration' && <CelebrationSection />}
           {tab === 'email' && <EmailModeSection />}
           {tab === 'smtp' && <SmtpSection />}
           {tab === 'commission' && <CommissionRulesSection />}
@@ -775,6 +782,10 @@ function UsersSection() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<(AppUser & { password?: string }) | null>(null);
   const [leadSourceList, setLeadSourceList] = useState<{ id: string; name: string }[]>([]);
+  // Delete confirmation state. When non-null the modal is open. Standard
+  // confirm-before-destroy pattern used everywhere in the app.
+  const [deleting, setDeleting] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -843,6 +854,40 @@ function UsersSection() {
     load();
   }
 
+  /**
+   * Delete a user (rep / admin / lead source login) from the company.
+   *
+   * Server-side guards already enforce:
+   *   • Cannot delete yourself.
+   *   • Cannot delete the last active admin.
+   *   • Company admins cannot delete master_admins.
+   * On any of those, the server returns an error message we surface to the
+   * user via toast. The optimistic local update removes the row only when
+   * the API call succeeds.
+   *
+   * Note on deal ownership: deleting a rep cascades `assignedRepId → NULL`
+   * on every deal they owned (via the FK's `onDelete: 'set null'` in the
+   * schema). Those deals show up in /submissions as "Unassigned · assign"
+   * so the admin can pick a new owner.
+   */
+  async function performDelete() {
+    if (!deleting) return;
+    setDeleteLoading(true);
+    const res = await fetch(`/api/users/${deleting.id}`, { method: 'DELETE' });
+    setDeleteLoading(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || 'Could not delete user.');
+      return;
+    }
+    toast.success('User deleted.');
+    // Optimistic local update so the row disappears immediately. Also
+    // close the edit drawer if the deleted user was being edited.
+    setUsers((arr) => arr.filter((u) => u.id !== deleting.id));
+    if (editing?.id === deleting.id) setEditing(null);
+    setDeleting(null);
+  }
+
   function newUser() {
     setEditing({ id: '', email: '', name: '', role: 'rep', isActive: true, permissions: [], password: '' });
   }
@@ -871,6 +916,7 @@ function UsersSection() {
                 <th className="px-4 py-2 font-medium">Email</th>
                 <th className="px-4 py-2 font-medium">Role</th>
                 <th className="px-4 py-2 font-medium">Status</th>
+                <th className="w-10"></th>
               </tr>
             </thead>
             <tbody>
@@ -880,6 +926,18 @@ function UsersSection() {
                   <td className="px-4 py-3 text-muted-foreground">{u.email}</td>
                   <td className="px-4 py-3"><Badge variant="outline">{u.role}</Badge></td>
                   <td className="px-4 py-3">{u.isActive ? <Badge variant="success">active</Badge> : <Badge variant="outline">inactive</Badge>}</td>
+                  {/* Inline delete — single click opens the confirm modal.
+                      Stop propagation so the row's own onClick (which opens
+                      the edit drawer) doesn't fire at the same time. */}
+                  <td className="px-2 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => setDeleting({ id: u.id, name: u.name, email: u.email })}
+                      title="Delete this user"
+                      className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -887,12 +945,41 @@ function UsersSection() {
         </CardContent>
       </Card>
 
+      {/* Confirmation modal — uses the shared component so the destruction
+          flow looks the same as deletes in /portfolio, etc. */}
+      <ConfirmDialog
+        open={!!deleting}
+        title={`Delete "${deleting?.name ?? ''}"?`}
+        description={
+          deleting
+            ? `This permanently removes ${deleting.email}'s login. Any deals they own will become Unassigned (you can reassign them from Submissions or Active Deals).`
+            : ''
+        }
+        confirmLabel="Delete user"
+        destructive
+        loading={deleteLoading}
+        onConfirm={performDelete}
+        onCancel={() => !deleteLoading && setDeleting(null)}
+      />
+
       {editing && (
         <div className="fixed inset-0 bg-black/40 z-40 flex justify-end" onClick={() => setEditing(null)}>
           <div className="w-full max-w-xl bg-background border-l border-border h-full overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 bg-background border-b border-border px-6 py-4 flex items-center justify-between z-10">
               <h2 className="text-lg font-semibold">{editing.id ? 'Edit user' : 'New user'}</h2>
               <div className="flex gap-2">
+                {/* Delete is only available for existing users (not for the
+                    new-user form, which has nothing to delete yet). */}
+                {editing.id && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setDeleting({ id: editing.id, name: editing.name, email: editing.email })}
+                    className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    Delete
+                  </Button>
+                )}
                 <Button variant="outline" size="sm" onClick={() => setEditing(null)}>Cancel</Button>
                 <Button size="sm" onClick={save}>Save</Button>
               </div>
@@ -2341,8 +2428,153 @@ function FundedTemplateSection() {
    in future releases auto-bucket into "Other" until placed.
    ============================================================ */
 import { ALL_NAV_ITEMS, DEFAULT_CATEGORIES } from '@/components/sidebar';
+import { SIDEBAR_ICON_NAMES, resolveIcon } from '@/lib/sidebar-icons';
+import { cn } from '@/lib/utils';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { triggerFundingCelebration } from '@/components/funding-celebration';
 
 interface EditCategory { id: string; label: string; items: string[] }
+
+/**
+ * CelebrationSection — admin-only knobs that drive the funded-deal
+ * celebration overlay shown app-wide when a deal status flips to 'funded'.
+ *
+ * Three controls + a live preview button:
+ *   • celebrationEnabled — master switch
+ *   • confettiEnabled    — toggle particles independently of the message
+ *   • celebrationMessage — free text (default: "Fundeddddd!!!!")
+ *
+ * The preview button dispatches the same event the real funded flow uses,
+ * but with `previewOverride` so the in-progress draft renders without
+ * saving. Settings persist to /api/settings/company.
+ */
+function CelebrationSection() {
+  const toast = useToast();
+  const [celebrationEnabled, setCelebrationEnabled] = useState(true);
+  const [confettiEnabled, setConfettiEnabled] = useState(true);
+  const [celebrationSoundEnabled, setCelebrationSoundEnabled] = useState(false);
+  const [celebrationMessage, setCelebrationMessage] = useState('Fundeddddd!!!!');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/settings/company')
+      .then((r) => r.json())
+      .then((j) => {
+        const d = j.data ?? {};
+        if (typeof d.celebrationEnabled === 'boolean') setCelebrationEnabled(d.celebrationEnabled);
+        if (typeof d.confettiEnabled === 'boolean') setConfettiEnabled(d.confettiEnabled);
+        if (typeof d.celebrationSoundEnabled === 'boolean') setCelebrationSoundEnabled(d.celebrationSoundEnabled);
+        if (typeof d.celebrationMessage === 'string') setCelebrationMessage(d.celebrationMessage);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    const res = await fetch('/api/settings/company', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        celebrationEnabled,
+        confettiEnabled,
+        celebrationSoundEnabled,
+        celebrationMessage: celebrationMessage.trim() || 'Fundeddddd!!!!',
+      }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || 'Save failed.');
+      return;
+    }
+    toast.success('Celebration settings saved.');
+  }
+
+  function preview() {
+    triggerFundingCelebration({
+      dealName: 'Acme Pizza (preview)',
+      previewOverride: {
+        celebrationEnabled: true,
+        confettiEnabled,
+        celebrationSoundEnabled,
+        celebrationMessage: celebrationMessage.trim() || 'Fundeddddd!!!!',
+      },
+    });
+  }
+
+  if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Funded celebration</CardTitle>
+          <CardDescription>
+            Show a confetti animation + custom message when any deal in your
+            company is marked Funded. Every user sees the same celebration.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={celebrationEnabled}
+              onChange={(e) => setCelebrationEnabled(e.target.checked)}
+              className="h-4 w-4"
+            />
+            <span className="text-sm font-medium">Show a celebration when a deal funds</span>
+          </label>
+
+          <label className={cn('flex items-center gap-2 cursor-pointer', !celebrationEnabled && 'opacity-50')}>
+            <input
+              type="checkbox"
+              checked={confettiEnabled}
+              onChange={(e) => setConfettiEnabled(e.target.checked)}
+              disabled={!celebrationEnabled}
+              className="h-4 w-4"
+            />
+            <span className="text-sm">Include confetti animation</span>
+          </label>
+
+          {/* Optional sound — off by default. The chime is synthesized inline
+              (no audio asset to ship) and is short (~600ms). Use sparingly
+              in shared workspaces. */}
+          <label className={cn('flex items-center gap-2 cursor-pointer', !celebrationEnabled && 'opacity-50')}>
+            <input
+              type="checkbox"
+              checked={celebrationSoundEnabled}
+              onChange={(e) => setCelebrationSoundEnabled(e.target.checked)}
+              disabled={!celebrationEnabled}
+              className="h-4 w-4"
+            />
+            <span className="text-sm">Play funded sound (brief chime)</span>
+          </label>
+
+          <Field label="Celebration message">
+            <Input
+              value={celebrationMessage}
+              onChange={(e) => setCelebrationMessage(e.target.value)}
+              disabled={!celebrationEnabled}
+              placeholder="Fundeddddd!!!!"
+              maxLength={200}
+            />
+          </Field>
+          <div className="text-[11px] text-muted-foreground -mt-2">
+            Shown as a big colorful banner. Max 200 characters. Empty falls
+            back to "Fundeddddd!!!!".
+          </div>
+
+          <div className="flex items-center gap-2 pt-2 border-t border-border">
+            <Button variant="outline" onClick={preview}>Preview</Button>
+            <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
 function SidebarOrderSection() {
   const toast = useToast();
@@ -2360,6 +2592,11 @@ function SidebarOrderSection() {
   // For the per-category "Add item" picker — which category is open + which
   // item is currently selected in its dropdown.
   const [pickerOpen, setPickerOpen] = useState<string | null>(null);
+  // Per-item label/icon overrides (admin-controlled, sync globally). Keyed
+  // by href. Null fields = use the item's hardcoded default.
+  const [overrides, setOverrides] = useState<Record<string, { label?: string; icon?: string }>>({});
+  // Which item's inline editor is open. Stores the href. Null = closed.
+  const [editingItem, setEditingItem] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/settings/sidebar-order', { cache: 'no-store' })
@@ -2368,6 +2605,7 @@ function SidebarOrderSection() {
         // Priority: saved categories → saved flat order → default categories.
         const savedCats = j?.data?.categories as EditCategory[] | null;
         const savedOrder = j?.data?.order as string[] | null;
+        const savedOv = j?.data?.itemOverrides as Record<string, { label?: string; icon?: string }> | null;
         if (Array.isArray(savedCats) && savedCats.length) {
           setCats(savedCats.map((c) => ({
             id: c.id, label: c.label, items: [...(c.items ?? [])],
@@ -2377,9 +2615,27 @@ function SidebarOrderSection() {
           // editable section the admin can split apart.
           setCats([{ id: 'menu', label: 'Menu', items: [...savedOrder] }]);
         }
+        if (savedOv && typeof savedOv === 'object') setOverrides(savedOv);
       })
       .finally(() => setLoaded(true));
   }, []);
+
+  // Helper: update one item's override. Empty values clear that field; if
+  // both label and icon end up empty, the entire override entry is removed
+  // so we don't persist no-op rows.
+  function setItemOverride(href: string, patch: { label?: string; icon?: string }) {
+    setOverrides((prev) => {
+      const next = { ...prev };
+      const current = next[href] ?? {};
+      const merged = { ...current, ...patch };
+      if (!merged.label && !merged.icon) {
+        delete next[href];
+      } else {
+        next[href] = merged;
+      }
+      return next;
+    });
+  }
 
   // Set of hrefs already placed in some category. Used to figure out which
   // items are still available to add to a category.
@@ -2456,10 +2712,24 @@ function SidebarOrderSection() {
       label: c.label.trim() || 'Section',
       items: c.items,
     }));
+    // Strip empty/no-op overrides before sending.
+    const trimmedOverrides: Record<string, { label?: string; icon?: string }> = {};
+    for (const [href, ov] of Object.entries(overrides)) {
+      const label = ov.label?.trim();
+      const icon = ov.icon?.trim();
+      if (!label && !icon) continue;
+      trimmedOverrides[href] = {};
+      if (label) trimmedOverrides[href].label = label;
+      if (icon) trimmedOverrides[href].icon = icon;
+    }
     const res = await fetch('/api/settings/sidebar-order', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ categories: payload, order: null }),
+      body: JSON.stringify({
+        categories: payload,
+        order: null,
+        itemOverrides: Object.keys(trimmedOverrides).length > 0 ? trimmedOverrides : null,
+      }),
     });
     setSaving(false);
     if (!res.ok) {
@@ -2470,12 +2740,12 @@ function SidebarOrderSection() {
     toast.success('Saved. Refresh to see the new sidebar.');
   }
   async function resetToDefault() {
-    if (!confirm('Reset the sidebar to the default sections for everyone in your company?')) return;
+    if (!confirm('Reset the sidebar to the default sections + names for everyone in your company?')) return;
     setResetting(true);
     const res = await fetch('/api/settings/sidebar-order', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ categories: null, order: null }),
+      body: JSON.stringify({ categories: null, order: null, itemOverrides: null }),
     });
     setResetting(false);
     if (!res.ok) {
@@ -2484,6 +2754,7 @@ function SidebarOrderSection() {
       return;
     }
     setCats(DEFAULT_CATEGORIES.map((c) => ({ ...c, items: [...c.items] })));
+    setOverrides({});
     toast.success('Reset to default. Refresh to see the change.');
   }
 
@@ -2547,44 +2818,145 @@ function SidebarOrderSection() {
                       </div>
                     );
                   }
-                  const Icon = item.icon;
+                  // Apply any saved override so the editor shows the actual
+                  // sidebar label/icon (matching what users will see).
+                  const ov = overrides[href] ?? {};
+                  const displayLabel = ov.label || item.label;
+                  const DisplayIcon = resolveIcon(ov.icon, item.icon as Parameters<typeof resolveIcon>[1]);
+                  const isEditing = editingItem === href;
+                  const isCustomized = !!(ov.label || ov.icon);
                   return (
-                    <div key={href} className="flex items-center gap-2 p-1.5 rounded border border-border">
-                      <div className="flex flex-col">
+                    <div key={href} className="rounded border border-border">
+                      <div className="flex items-center gap-2 p-1.5">
+                        <div className="flex flex-col">
+                          <button
+                            onClick={() => moveItem(catIdx, itemIdx, -1)}
+                            disabled={itemIdx === 0}
+                            className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
+                            title="Move up"
+                          >▲</button>
+                          <button
+                            onClick={() => moveItem(catIdx, itemIdx, 1)}
+                            disabled={itemIdx === cat.items.length - 1}
+                            className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
+                            title="Move down"
+                          >▼</button>
+                        </div>
+                        <DisplayIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <div className="text-sm font-medium flex-1 min-w-0 truncate flex items-center gap-1.5">
+                          {displayLabel}
+                          {isCustomized && (
+                            <span className="text-[9px] uppercase font-semibold text-primary bg-primary/10 px-1 rounded">
+                              custom
+                            </span>
+                          )}
+                        </div>
+                        {/* Edit (rename + change icon) — opens an inline editor */}
                         <button
-                          onClick={() => moveItem(catIdx, itemIdx, -1)}
-                          disabled={itemIdx === 0}
-                          className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
-                          title="Move up"
-                        >▲</button>
+                          onClick={() => setEditingItem(isEditing ? null : href)}
+                          title="Rename or change icon"
+                          className={cn(
+                            'h-6 px-1.5 rounded text-xs',
+                            isEditing ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                          )}
+                        >
+                          ✎
+                        </button>
+                        {/* Move to other section */}
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value) moveItemToCategory(catIdx, itemIdx, e.target.value);
+                          }}
+                          className="h-7 rounded border border-input bg-card px-1 text-xs text-muted-foreground"
+                          title="Move to another section"
+                        >
+                          <option value="">Move to…</option>
+                          {cats.filter((c) => c.id !== cat.id).map((c) => (
+                            <option key={c.id} value={c.id}>{c.label}</option>
+                          ))}
+                        </select>
                         <button
-                          onClick={() => moveItem(catIdx, itemIdx, 1)}
-                          disabled={itemIdx === cat.items.length - 1}
-                          className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
-                          title="Move down"
-                        >▼</button>
+                          onClick={() => removeItem(catIdx, itemIdx)}
+                          title="Remove from sidebar"
+                          className="text-muted-foreground hover:text-destructive px-1 text-sm"
+                        >✕</button>
                       </div>
-                      <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div className="text-sm font-medium flex-1 min-w-0 truncate">{item.label}</div>
-                      {/* Move to other section */}
-                      <select
-                        value=""
-                        onChange={(e) => {
-                          if (e.target.value) moveItemToCategory(catIdx, itemIdx, e.target.value);
-                        }}
-                        className="h-7 rounded border border-input bg-card px-1 text-xs text-muted-foreground"
-                        title="Move to another section"
-                      >
-                        <option value="">Move to…</option>
-                        {cats.filter((c) => c.id !== cat.id).map((c) => (
-                          <option key={c.id} value={c.id}>{c.label}</option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={() => removeItem(catIdx, itemIdx)}
-                        title="Remove from sidebar"
-                        className="text-muted-foreground hover:text-destructive px-1 text-sm"
-                      >✕</button>
+                      {/* Inline editor — label input + icon picker. Empty
+                          label = revert to the item's default name. Same
+                          for empty icon. */}
+                      {isEditing && (
+                        <div className="border-t border-border bg-muted/20 p-2 space-y-2">
+                          <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
+                            <div>
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                                Rename ({item.label} by default)
+                              </div>
+                              <input
+                                type="text"
+                                value={ov.label ?? ''}
+                                onChange={(e) => setItemOverride(href, { label: e.target.value })}
+                                placeholder={item.label}
+                                maxLength={40}
+                                className="h-8 w-full rounded-md border border-input bg-card px-2 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                                Icon
+                              </div>
+                              <select
+                                value={ov.icon ?? ''}
+                                onChange={(e) => setItemOverride(href, { icon: e.target.value })}
+                                className="h-8 rounded-md border border-input bg-card px-2 text-sm min-w-[140px]"
+                              >
+                                <option value="">— default —</option>
+                                {SIDEBAR_ICON_NAMES.map((n) => (
+                                  <option key={n} value={n}>{n}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          {/* Icon preview grid — visual confirmation. */}
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {SIDEBAR_ICON_NAMES.map((n) => {
+                              const I = resolveIcon(n, item.icon as Parameters<typeof resolveIcon>[1]);
+                              const isPicked = (ov.icon ?? '') === n;
+                              return (
+                                <button
+                                  key={n}
+                                  type="button"
+                                  onClick={() => setItemOverride(href, { icon: n })}
+                                  title={n}
+                                  className={cn(
+                                    'h-7 w-7 rounded flex items-center justify-center transition-colors',
+                                    isPicked
+                                      ? 'bg-primary text-primary-foreground'
+                                      : 'bg-card border border-border text-muted-foreground hover:bg-muted'
+                                  )}
+                                >
+                                  <I className="h-4 w-4" />
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {isCustomized && (
+                            <button
+                              onClick={() => {
+                                setItemOverride(href, { label: undefined, icon: undefined });
+                                setOverrides((prev) => {
+                                  const next = { ...prev };
+                                  delete next[href];
+                                  return next;
+                                });
+                              }}
+                              className="text-[11px] text-muted-foreground hover:text-destructive"
+                            >
+                              Reset this tab to defaults
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

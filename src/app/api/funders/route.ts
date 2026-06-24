@@ -18,6 +18,11 @@ export const revalidate = 0;
 export async function GET() {
   try {
     const ctx = await requireTenantContext();
+    // Lead-source accounts shouldn't see the funder directory at all —
+    // they only have access to their own commissions via the portal.
+    if (ctx.user.role === 'lead_source') {
+      return NextResponse.json({ error: 'Not available for this account' }, { status: 403 });
+    }
     const list = await db.select().from(funders).where(eq(funders.companyId, ctx.companyId));
     if (!list.length) return NextResponse.json({ data: [], funders: [] });
     const ids = list.map((f) => f.id);
