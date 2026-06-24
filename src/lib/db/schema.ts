@@ -90,6 +90,20 @@ export const companies = pgTable('companies', {
   // section appear in an auto "Other" bucket at the bottom so future app
   // releases that add new nav items show up without an admin re-edit.
   sidebarCategories: jsonb('sidebar_categories').$type<{ id: string; label: string; items: string[] }[]>(),
+  // ---- Per-item sidebar overrides --------------------------------------
+  // Admin-edited label/icon overrides for individual nav items, keyed by
+  // the item's href. e.g. { '/portfolio': { label: 'My Book', icon: 'Books' } }.
+  // Optional shape per item — both label and icon can be omitted, in which
+  // case the default from the nav registry is used. Production data exists.
+  sidebarItemOverrides: jsonb('sidebar_item_overrides').$type<Record<string, { label?: string; icon?: string }>>(),
+  // ---- Funded-deal celebration settings --------------------------------
+  // Read by the global <FundingCelebration/> overlay. Production has data
+  // in all four — do NOT let drizzle drop them. UI for editing these may
+  // live elsewhere in the deploy.
+  celebrationEnabled: boolean('celebration_enabled').notNull().default(true),
+  confettiEnabled: boolean('confetti_enabled').notNull().default(true),
+  celebrationSoundEnabled: boolean('celebration_sound_enabled').notNull().default(false),
+  celebrationMessage: varchar('celebration_message', { length: 200 }).notNull().default('Fundeddddd!!!!'),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -362,6 +376,40 @@ export const deals = pgTable(
   (t) => ({
     companyIdx: index('deals_company_idx').on(t.companyId),
     companyCreatedIdx: index('deals_company_created_idx').on(t.companyId, t.createdAt),
+  })
+);
+
+/* ---------- Deal offers (multi-offer tracking) ----------
+   One row per offer a funder has put on a deal. A deal can have many
+   offers; at most one is marked accepted at any time. Production has data
+   in this table — DO NOT let drizzle drop it. */
+
+export const dealOffers = pgTable(
+  'deal_offers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    dealId: uuid('deal_id').notNull().references(() => deals.id, { onDelete: 'cascade' }),
+    // Optional funder reference — null when the offer is logged before the
+    // funder is selected from the directory. Production rows include both.
+    funderId: uuid('funder_id').references(() => funders.id, { onDelete: 'set null' }),
+    // Numeric offer fields. Empty/unknown stored as null.
+    fundingAmount: numeric('funding_amount', { precision: 14, scale: 2 }),
+    factorRate: numeric('factor_rate', { precision: 6, scale: 4 }),
+    termCount: integer('term_count'),
+    // 'days' | 'weeks' | 'months' — kept loose since each funder phrases
+    // their term differently.
+    termMode: varchar('term_mode', { length: 16 }),
+    fees: numeric('fees', { precision: 14, scale: 2 }),
+    paymentAmount: numeric('payment_amount', { precision: 14, scale: 2 }),
+    notes: text('notes'),
+    // Exactly one offer per deal can be accepted; the offers POST handler
+    // enforces this by clearing the flag on siblings when one is accepted.
+    isAccepted: boolean('is_accepted').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    dealIdx: index('deal_offers_deal_idx').on(t.dealId),
   })
 );
 
