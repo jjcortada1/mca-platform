@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, Button, Input, Field, Badge, PageHeader, CurrencyInput } from '@/components/ui/primitives';
+import { Card, CardContent, Button, Input, Field, Badge, PageHeader } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { formatCurrency } from '@/lib/utils';
 import { Search, Download } from 'lucide-react';
@@ -248,7 +248,7 @@ function EntryModal({ entry, deals, onClose, onSaved }: { entry: Entry | null; d
               ))}
             </div>
           </Field>
-          <Field label="Amount *"><CurrencyInput value={amount} onChange={(v) => setAmount(v)} placeholder="10,000" /></Field>
+          <Field label="Amount ($) *"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="10000" /></Field>
           <Field label="Date"><Input type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} /></Field>
           <Field label="Related deal (optional)">
             <select value={dealId} onChange={(e) => setDealId(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">

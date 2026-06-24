@@ -18,35 +18,6 @@ interface SubmissionFunder {
   submittedAt: string;
 }
 
-/**
- * Status priority for sorting funders within a submission.
- *
- *   Approved (0)  →  always on top
- *   Declined (1)  →  middle
- *   Pending  (2)  →  bottom (no_response status)
- *
- * Used inside each expanded submission card so when a rep marks a funder as
- * approved, that funder jumps to the top of its submission without a page
- * reload. The optimistic local-update path also re-sorts because the
- * `row.funders` array is replaced on every status change.
- *
- * Within the same status bucket we order by submittedAt DESC (most recent
- * first) so two approvals show newest at the top.
- */
-const STATUS_PRIORITY: Record<SubmissionFunder['status'], number> = {
-  approved: 0,
-  declined: 1,
-  no_response: 2,
-};
-function sortFundersByStatus(funders: SubmissionFunder[]): SubmissionFunder[] {
-  return [...funders].sort((a, b) => {
-    const pa = STATUS_PRIORITY[a.status] ?? 99;
-    const pb = STATUS_PRIORITY[b.status] ?? 99;
-    if (pa !== pb) return pa - pb;
-    return new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime();
-  });
-}
-
 interface SubmissionRow {
   submissionId: string;
   dealId: string;
@@ -67,15 +38,6 @@ export default function SubmissionsPage() {
   const [editing, setEditing] = useState<Record<string, { status: string; notes: string }>>({});
   const [showManualAdd, setShowManualAdd] = useState(false);
   const [funderList, setFunderList] = useState<{ id: string; name: string }[]>([]);
-  // Full company rep roster — loaded once for the inline "assign to rep"
-  // dropdown that surfaces next to unassigned deals on the submissions list.
-  // We can't reuse the existing repOptions memo because that only contains
-  // reps that already have submissions; for assignment we need EVERY rep.
-  const [allReps, setAllReps] = useState<{ id: string; name: string }[]>([]);
-  // Track which row's "Assign to…" dropdown is open. null = none. Storing
-  // by submission row deal id so two different rows can have independent
-  // open/close state.
-  const [assignPickerOpen, setAssignPickerOpen] = useState<string | null>(null);
   const [manualForm, setManualForm] = useState({
     dealName: '',
     dealId: '',         // when set, attach to this existing deal instead of name-matching
@@ -89,7 +51,7 @@ export default function SubmissionsPage() {
   // only one rep's submissions, or just the ones with no assignee.
   const [repFilter, setRepFilter] = useState<string>('all');
   // Sort: 'recent' (default), 'rep' alphabetical by rep name.
-  const [sortBy, setSortBy] = useState<'recent' | 'rep' | 'status'>('recent');
+  const [sortBy, setSortBy] = useState<'recent' | 'rep'>('recent');
   // Search across deal name / merchant name / funder names.
   const [search, setSearch] = useState('');
 
@@ -122,61 +84,6 @@ export default function SubmissionsPage() {
       setFunderList(list);
     } catch {
       // ignore — manual name field still works
-    }
-  }
-
-  /**
-   * Load every user in the company so the inline "Assign to rep" dropdown
-   * on unassigned submissions can show the full roster (not just reps that
-   * already have a submission). Lead-source users are excluded — they own
-   * deals via leadSourceId, not assignedRepId.
-   */
-  async function loadReps() {
-    try {
-      const res = await fetch('/api/users');
-      const json = await res.json();
-      const list = (json.data ?? json.users ?? []) as { id: string; name: string | null; email: string; role: string }[];
-      const reps = list
-        .filter((u) => u.role !== 'lead_source')
-        .map((u) => ({ id: u.id, name: u.name || u.email }))
-        .sort((a, b) => a.name.localeCompare(b.name));
-      setAllReps(reps);
-    } catch {
-      // ignore — pill stays read-only as "Unassigned"
-    }
-  }
-
-  /**
-   * Assign a rep to the deal behind a submission row.
-   *
-   * PATCHes the deal directly (not the submission) because rep ownership is
-   * a property of the deal. After a successful save, optimistically updates
-   * the local row's assignedRepId/assignedRepName so the pill swaps to the
-   * rep's name without a full /api/submissions refetch.
-   *
-   * If the user picked "Unassign" (repId === ''), we send null so the
-   * server clears the column.
-   */
-  async function assignRep(dealId: string, repId: string) {
-    const repName = repId
-      ? (allReps.find((r) => r.id === repId)?.name ?? null)
-      : null;
-    // Optimistic local update — close the picker immediately so the UI
-    // doesn't feel laggy.
-    setRows((prev) => prev.map((row) =>
-      row.dealId === dealId
-        ? { ...row, assignedRepId: repId || null, assignedRepName: repName }
-        : row
-    ));
-    setAssignPickerOpen(null);
-    const res = await fetch(`/api/deals/${dealId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assignedRepId: repId || null }),
-    });
-    if (!res.ok) {
-      // Roll back by reloading the truth from the server.
-      load();
     }
   }
 
@@ -224,7 +131,7 @@ export default function SubmissionsPage() {
     }
   }
 
-  useEffect(() => { load(); loadFunders(); loadReps(); }, []);
+  useEffect(() => { load(); loadFunders(); }, []);
 
   // Track per-row notes locally (controlled inputs) — autosaved on blur.
   const [localNotes, setLocalNotes] = useState<Record<string, string>>({});
@@ -336,22 +243,6 @@ export default function SubmissionsPage() {
         if (an !== bn) return an.localeCompare(bn);
         return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
       });
-    } else if (sortBy === 'status') {
-      // Rank each submission card by its BEST funder status:
-      //   0 = has at least one Approved   (rises to top)
-      //   1 = has at least one Declined but no Approved
-      //   2 = only Pending
-      // Within the same bucket, sort by most recent activity.
-      const rank = (r: SubmissionRow): number => {
-        if (r.funders.some((f) => f.status === 'approved')) return 0;
-        if (r.funders.some((f) => f.status === 'declined')) return 1;
-        return 2;
-      };
-      out = [...out].sort((a, b) => {
-        const ra = rank(a), rb = rank(b);
-        if (ra !== rb) return ra - rb;
-        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-      });
     }
     return out;
   }, [rows, repFilter, sortBy, search]);
@@ -461,12 +352,11 @@ export default function SubmissionsPage() {
             />
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as 'recent' | 'rep' | 'status')}
+              onChange={(e) => setSortBy(e.target.value as 'recent' | 'rep')}
               className="h-9 rounded-md border border-input bg-card px-2 text-sm"
               title="Sort"
             >
               <option value="recent">Most recent</option>
-              <option value="status">By status (approved first)</option>
               <option value="rep">By rep</option>
             </select>
           </div>
@@ -503,48 +393,12 @@ export default function SubmissionsPage() {
                     <div>
                       <div className="font-medium flex items-center gap-2">
                         {row.dealName}
-                        {/* Assigned rep pill — quickly answers "whose deal is
-                            this?" without expanding the row. When NO rep is
-                            assigned, clicking the pill opens an inline picker
-                            so the user can assign one without leaving the
-                            page. When a rep IS assigned, the pill is purely
-                            informational (use the Active Deals editor to
-                            change an existing assignment). */}
-                        {row.assignedRepId ? (
-                          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                            {row.assignedRepName}
-                          </span>
-                        ) : (
-                          <span
-                            onClick={(e) => {
-                              e.stopPropagation(); // don't toggle row expand
-                              setAssignPickerOpen(assignPickerOpen === row.dealId ? null : row.dealId);
-                            }}
-                            className="text-[10px] font-medium uppercase tracking-wider text-amber-800 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded cursor-pointer hover:bg-amber-200 transition-colors"
-                            title="Click to assign a rep"
-                          >
-                            Unassigned · assign
-                          </span>
-                        )}
-                        {/* Inline rep picker — renders right next to the pill
-                            so the assignment flow is one click + one select. */}
-                        {assignPickerOpen === row.dealId && (
-                          <select
-                            autoFocus
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => {
-                              if (e.target.value) assignRep(row.dealId, e.target.value);
-                            }}
-                            onBlur={() => setAssignPickerOpen(null)}
-                            defaultValue=""
-                            className="h-6 text-[11px] rounded border border-input bg-card px-1 max-w-[160px]"
-                          >
-                            <option value="">Pick a rep…</option>
-                            {allReps.map((r) => (
-                              <option key={r.id} value={r.id}>{r.name}</option>
-                            ))}
-                          </select>
-                        )}
+                        {/* Assigned rep pill — quickly answers "whose deal is this?"
+                            without expanding the row. Falls back to "Unassigned" so
+                            stray rows don't slip by unnoticed. */}
+                        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                          {row.assignedRepName ?? 'Unassigned'}
+                        </span>
                       </div>
                       <div className="text-xs text-muted-foreground mt-0.5">
                         {row.merchantName && <>{row.merchantName} • </>}
@@ -569,12 +423,7 @@ export default function SubmissionsPage() {
                 {isOpen && (
                   <CardContent className="border-t border-border">
                     <div className="space-y-1.5 mt-3">
-                      {/* Funders sorted Approved → Declined → Pending. Changing
-                          a funder's status via the dropdown does an optimistic
-                          local update, which re-runs this sort — so the row
-                          jumps to its new position immediately without a
-                          full reload. */}
-                      {sortFundersByStatus(row.funders).map((sf) => {
+                      {row.funders.map((sf) => {
                         const notesValue = localNotes[sf.id] ?? sf.notes ?? '';
                         return (
                           // Each funder is ONE compact row: funder name + status

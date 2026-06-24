@@ -46,10 +46,6 @@ export async function GET(req: NextRequest) {
       repName: rep.name,
       leadSourceName: leadSources.name,
       dealName: deals.name,
-      // Funding date from the joined deal, surfaced into the payments list
-      // so admins can see WHEN the underlying deal funded right next to
-      // the payment record. Sortable + searchable client-side.
-      dealFundingDate: deals.fundingDate,
       createdByName: creator.name,
     })
       .from(commissionPayments)
@@ -68,7 +64,6 @@ export async function GET(req: NextRequest) {
         repName: r.repName,
         leadSourceName: r.leadSourceName,
         dealName: r.dealName,
-        dealFundingDate: r.dealFundingDate,
         createdByName: r.createdByName,
         // Derived payee fields for the admin UI.
         payeeName: r.leadSourceName ?? r.repName ?? '(unassigned)',

@@ -9,7 +9,6 @@ import { useToast } from '@/components/toast';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import { Plus, X, Trash2, TrendingUp, Trophy, Download } from 'lucide-react';
 import { exportCSV } from '@/lib/csv-export';
-import { triggerFundingCelebration } from '@/components/funding-celebration';
 
 interface FundedEntry {
   id: string;
@@ -70,12 +69,6 @@ export default function FundedBoardPage() {
       return;
     }
     toast.success('Funded entry logged.');
-    // Celebration fires HERE — at the moment a deal is added to the funded
-    // board (this page's whole purpose). Per JJ's direction this replaces
-    // the previous trigger on mark-as-funded in active-deals, which was
-    // firing in the middle of a data-entry modal. The deal initials act as
-    // the dealName subtitle under the message.
-    triggerFundingCelebration({ dealName: newEntry.dealInitials });
     setShowForm(false);
     setNewEntry({
       repId: '', dealInitials: '', amountFunded: '',

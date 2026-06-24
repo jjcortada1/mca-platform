@@ -35,13 +35,7 @@ export async function GET() {
       for (const ls of lsRows) if (ls.userId) lsByUser.set(ls.userId, ls.id);
     }
 
-    const result = list
-      // Privacy: hide lead_source users from non-admin callers. Reps populate
-      // their UI dropdowns from this endpoint; surfacing lead-source emails
-      // would let a rep see who's referring deals (and indirectly who's
-      // getting lead-source pay). Admins still see everyone for management.
-      .filter((u) => isAdmin || u.role !== 'lead_source')
-      .map((u) => {
+    const result = list.map((u) => {
       const base = {
         id: u.id,
         email: u.email,

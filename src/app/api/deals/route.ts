@@ -12,42 +12,14 @@ import { triggerSync } from '@/lib/sheets/sync';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const ctx = await requireTenantContext();
-    const url = new URL(req.url);
-
-    // Optional rep filter:
-    //  - `?mine=1` → scope to the current user's deals (assignedRepId = me)
-    //  - `?repId=<uuid>` → admin can filter to a specific rep's deals
-    //  - default → all company deals (admin-style view)
-    //
-    // Privacy rule: when the calling user is role='rep', we force the scope
-    // to `mine` regardless of what the URL says. This is the server-side
-    // guard for the "reps should only see funded deals assigned to them"
-    // requirement. Admins (master_admin / company_admin) bypass the lock.
-    const isAdmin = ctx.user.role === 'master_admin' || ctx.user.role === 'company_admin';
-    const wantMine = url.searchParams.get('mine') === '1';
-    const wantRepId = url.searchParams.get('repId');
-
-    const conditions = [
-      eq(deals.companyId, ctx.companyId),
-      // Hard rule: deleted deals never appear in any list, dropdown, or
-      // downstream view. They stay in the DB (audit trail) but are filtered
-      // out at every read.
-      eq(deals.isDeleted, false),
-    ];
-    if (!isAdmin) {
-      // Force-scope reps and lead-source logins to their own deals.
-      conditions.push(eq(deals.assignedRepId, ctx.user.id));
-    } else if (wantMine) {
-      conditions.push(eq(deals.assignedRepId, ctx.user.id));
-    } else if (wantRepId) {
-      conditions.push(eq(deals.assignedRepId, wantRepId));
-    }
-
+    // Hard rule: deleted deals never appear in any list, dropdown, or
+    // downstream view. They stay in the DB (audit trail) but are filtered
+    // out at every read.
     const list = await db.select().from(deals)
-      .where(and(...conditions))
+      .where(and(eq(deals.companyId, ctx.companyId), eq(deals.isDeleted, false)))
       .orderBy(desc(deals.createdAt));
     return NextResponse.json({ deals: list, data: list });
   } catch (e) { return apiError(e); }

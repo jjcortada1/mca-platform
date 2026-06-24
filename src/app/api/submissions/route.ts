@@ -9,19 +9,6 @@ export async function GET() {
   try {
     const ctx = await requirePermission('submissions.view');
 
-    // Non-admin scoping: reps see only submissions for deals assigned to
-    // them. Admins see everything. Lead-source accounts shouldn't reach
-    // this page (they use the lead-source portal) but they'd see nothing
-    // anyway since they're never the assignedRepId.
-    const isAdmin = ctx.user.role === 'master_admin' || ctx.user.role === 'company_admin';
-    const baseConditions = [
-      eq(submissions.companyId, ctx.companyId),
-      eq(deals.isDeleted, false),
-    ];
-    if (!isAdmin) {
-      baseConditions.push(eq(deals.assignedRepId, ctx.user.id));
-    }
-
     // 1. All submissions for this company, joined to deal info
     const subs = await db
       .select({
@@ -37,7 +24,7 @@ export async function GET() {
       })
       .from(submissions)
       .innerJoin(deals, eq(deals.id, submissions.dealId))
-      .where(and(...baseConditions))
+      .where(and(eq(submissions.companyId, ctx.companyId), eq(deals.isDeleted, false)))
       .orderBy(desc(submissions.updatedAt));
 
     if (!subs.length) return NextResponse.json({ submissions: [] });

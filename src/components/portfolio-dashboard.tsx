@@ -44,7 +44,7 @@ export default function PortfolioDashboard() {
     <div className="space-y-10">
       {/* ---- PORTFOLIO OVERVIEW ---- */}
       <section>
-        <SectionLabel>Funded Deals overview</SectionLabel>
+        <SectionLabel>Portfolio overview</SectionLabel>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Tile label="Funded volume" value={formatCurrency(overview.fundedVolume, { compact: true })} accent="amber" />
           <Tile label="Funded deals" value={String(overview.statusCounts['funded'] ?? 0)} accent="emerald" />

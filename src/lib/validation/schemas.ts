@@ -142,10 +142,13 @@ export const upsertDealSchema = z.object({
   termCount: z.coerce.number().nonnegative().optional().nullable(),
   fundingDate: z.string().optional().nullable(),
   amountCollected: z.coerce.number().nonnegative().optional().nullable(),
+  // Paid-off tracking. Set together via the "Mark as paid off" modal on
+  // /portfolio. PaidOffAmount is the ACTUAL payoff (may include early-payoff
+  // discount). PaidOffDate defaults to today on the client.
+  paidOff: z.boolean().optional(),
+  paidOffAmount: z.coerce.number().nonnegative().optional().nullable(),
+  paidOffDate: z.string().optional().nullable(),
   renewalNotes: z.string().max(10000).optional().nullable(),
-  // Funded-deal sub-status — only meaningful when status='funded'. The
-  // Funded Deals page exposes this as a small select on each row.
-  fundedSubStatus: z.enum(['active', 'refi_eligible', 'payment_issues', 'default']).optional().nullable(),
 });
 
 /* ---------- Submissions ---------- */

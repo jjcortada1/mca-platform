@@ -377,36 +377,19 @@ export default function FundersPage() {
                 ) : (
                   <div className="space-y-2">
                     {quickView.contacts.map((c, i) => (
-                      <div key={c.id ?? i} className="rounded-lg border border-border p-3 space-y-1.5">
-                        {/* Name + primary badge — `flex-wrap` so a long name
-                            doesn't push the badge off the card. `min-w-0`
-                            on the name lets `break-words` actually wrap
-                            instead of refusing to shrink. */}
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <div className="font-medium text-sm min-w-0 break-words">
-                            {c.name || 'Unnamed'}
-                          </div>
-                          {c.isPrimary && <Badge variant="outline" className="text-[10px] shrink-0">primary</Badge>}
+                      <div key={c.id ?? i} className="rounded-lg border border-border p-2.5">
+                        <div className="font-medium text-sm flex items-center gap-2">
+                          {c.name || 'Unnamed'}
+                          {c.isPrimary && <Badge variant="outline" className="text-[10px]">primary</Badge>}
                         </div>
                         {c.email && (
-                          <a
-                            href={`mailto:${c.email}`}
-                            className="flex items-start gap-1.5 text-xs text-primary hover:underline"
-                          >
-                            <Mail className="h-3 w-3 mt-0.5 shrink-0" />
-                            {/* break-all (not break-words) because email
-                                addresses don't contain word breaks — without
-                                break-all, a long email overflows the card. */}
-                            <span className="break-all min-w-0">{c.email}</span>
+                          <a href={`mailto:${c.email}`} className="flex items-center gap-1.5 text-xs text-primary hover:underline mt-1">
+                            <Mail className="h-3 w-3" /> {c.email}
                           </a>
                         )}
                         {c.phone && (
-                          <a
-                            href={`tel:${c.phone}`}
-                            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-                          >
-                            <Phone className="h-3 w-3 shrink-0" />
-                            <span className="break-all min-w-0">{c.phone}</span>
+                          <a href={`tel:${c.phone}`} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground mt-0.5">
+                            <Phone className="h-3 w-3" /> {c.phone}
                           </a>
                         )}
                       </div>
@@ -743,37 +726,26 @@ function FunderDrawer({
             </div>
             {funder.contacts.map((c, i) => (
               <div key={i} className="rounded border border-border p-3 space-y-2">
-                {/* Stack contact fields vertically — when packed in a 2-col
-                    grid, long emails were visually colliding with the name
-                    field on narrower modal widths. The vertical layout
-                    guarantees breathing room and matches the labeled-field
-                    convention used elsewhere in the app. */}
-                <Field label="Name">
-                  <Input placeholder="Contact name" value={c.name} onChange={(e) => updateContact(i, 'name', e.target.value)} />
-                </Field>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <Field label="Email">
-                    <Input type="email" placeholder="contact@funder.com" value={c.email ?? ''} onChange={(e) => updateContact(i, 'email', e.target.value)} />
-                  </Field>
-                  <Field label="Phone">
-                    <Input placeholder="(555) 555-5555" value={c.phone ?? ''} onChange={(e) => updateContact(i, 'phone', e.target.value)} />
-                  </Field>
-                </div>
-                <div className="flex items-center justify-between pt-1 border-t border-border/40">
-                  <label className="flex items-center gap-2 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={c.isPrimary}
-                      onChange={(e) => updateContact(i, 'isPrimary', e.target.checked)}
-                    />
-                    Primary contact
-                  </label>
-                  <button
-                    onClick={() => removeContact(i)}
-                    className="text-xs text-muted-foreground hover:text-destructive"
-                  >
-                    Remove contact
-                  </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input placeholder="Name" value={c.name} onChange={(e) => updateContact(i, 'name', e.target.value)} />
+                  <Input placeholder="Email" value={c.email ?? ''} onChange={(e) => updateContact(i, 'email', e.target.value)} />
+                  <Input placeholder="Phone" value={c.phone ?? ''} onChange={(e) => updateContact(i, 'phone', e.target.value)} />
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={c.isPrimary}
+                        onChange={(e) => updateContact(i, 'isPrimary', e.target.checked)}
+                      />
+                      Primary
+                    </label>
+                    <button
+                      onClick={() => removeContact(i)}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}

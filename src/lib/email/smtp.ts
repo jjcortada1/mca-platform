@@ -285,11 +285,6 @@ function makeTransport(smtp: SmtpConfig): Transporter {
     port: smtp.port,
     secure: smtp.secure ?? smtp.port === 465,
     auth: { user: smtp.user, pass: password },
-    // Same timeouts as the batch transporter — prevents hung requests when
-    // SMTP is misconfigured / firewalled / down. Defaults are minutes-long.
-    connectionTimeout: 15_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 20_000,
   });
 }
 
@@ -460,18 +455,6 @@ export async function sendDealEmailBatch(
     pool: true,
     maxConnections: 1, // serialize — gentle on provider limits, predictable on Replit
     maxMessages: Infinity,
-    // EXPLICIT TIMEOUTS — nodemailer's defaults are minutes-long, which
-    // means a misconfigured / unreachable SMTP server hangs the entire
-    // request until the Next.js route also times out, leaving the user
-    // staring at a "loading" button. With these:
-    //   • TCP connect must complete in 15s
-    //   • Server greeting (EHLO/HELO) must arrive in 10s
-    //   • Each command + DATA round-trip must complete in 20s
-    // If any of those fire, we return the SMTP error to the user instead
-    // of letting the browser session quietly time out.
-    connectionTimeout: 15_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 20_000,
   });
 
   const out: BatchSendResult[] = [];

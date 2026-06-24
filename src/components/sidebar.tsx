@@ -8,7 +8,6 @@ import {
   Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { resolveIcon } from '@/lib/sidebar-icons';
 import type { SessionUser } from '@/lib/auth/context';
 import type { Branding } from '@/lib/branding';
 
@@ -32,16 +31,13 @@ interface NavItem {
  * user in the company.
  */
 export const ALL_NAV_ITEMS: NavItem[] = [
-  // /deal-shop is the unified shop+submit page. Criteria, matching, funder
-  // selection, AND the send form all live on the one page now — the
-  // separate /submit route was retired in favor of a single-screen flow.
-  // /submit redirects to /deal-shop so any old bookmarks still resolve.
-  { href: '/deal-shop',    label: 'Shop & Submit',  icon: ShoppingBag, perm: 'deals.shop' },
+  { href: '/deal-shop',    label: 'Shop Deals',     icon: ShoppingBag, perm: 'deals.shop' },
+  { href: '/submit',       label: 'Submit Deal',    icon: Send,        perm: 'deals.submit' },
   { href: '/funded-email', label: 'Funded Email',   icon: Send,        perm: 'deals.submit' },
   { href: '/submissions',  label: 'Submissions',    icon: Inbox,       perm: 'submissions.view' },
   { href: '/active-deals', label: 'Active Deals',   icon: Briefcase,   perm: 'active_deals.view' },
   { href: '/funded-board', label: 'Funded Board',   icon: TrendingUp,  perm: 'active_deals.view' },
-  { href: '/portfolio',    label: 'Funded Deals',   icon: TrendingUp,  perm: 'active_deals.view' },
+  { href: '/portfolio',    label: 'Portfolio',      icon: TrendingUp,  perm: 'active_deals.view' },
   { href: '/commissions',  label: 'Commissions',    icon: DollarSign,  perm: 'commissions.view' },
   { href: '/payments',     label: 'Payments',       icon: DollarSign,  perm: 'commissions.manage' },
   { href: '/accounting',   label: 'Accounting',     icon: DollarSign,  perm: 'commissions.manage' },
@@ -55,7 +51,7 @@ export const ALL_NAV_ITEMS: NavItem[] = [
 export const DEFAULT_CATEGORIES: { id: string; label: string; items: string[] }[] = [
   {
     id: 'workflow', label: 'Workflow',
-    items: ['/deal-shop', '/funded-email', '/submissions', '/active-deals', '/funded-board', '/portfolio'],
+    items: ['/deal-shop', '/submit', '/funded-email', '/submissions', '/active-deals', '/funded-board', '/portfolio'],
   },
   {
     id: 'commissions', label: 'Commissions',
@@ -302,8 +298,6 @@ function SidebarBody({
   // flat order. Both null = default categories (Workflow/Commissions/Resources).
   const [savedOrder, setSavedOrder] = useState<string[] | null>(null);
   const [savedCategories, setSavedCategories] = useState<{ id: string; label: string; items: string[] }[] | null>(null);
-  // Per-item overrides (label rename + icon swap). Map keyed by href.
-  const [itemOverrides, setItemOverrides] = useState<Record<string, { label?: string; icon?: string }> | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetch('/api/settings/sidebar-order', { cache: 'no-store' })
@@ -312,35 +306,17 @@ function SidebarBody({
         if (cancelled) return;
         const o = j?.data?.order;
         const c = j?.data?.categories;
-        const ov = j?.data?.itemOverrides;
         if (Array.isArray(o)) setSavedOrder(o);
         if (Array.isArray(c)) setSavedCategories(c);
-        if (ov && typeof ov === 'object') setItemOverrides(ov);
       })
       .catch(() => { /* fall through to default order */ });
     return () => { cancelled = true; };
   }, []);
 
-  // Apply per-item label/icon overrides to ALL_NAV_ITEMS so the rest of the
-  // pipeline (resolveCategories, permission checks) operates on the renamed
-  // items. We don't mutate ALL_NAV_ITEMS itself — overrides are local to
-  // each tenant.
-  const itemsWithOverrides: NavItem[] = ALL_NAV_ITEMS.map((item) => {
-    const ov = itemOverrides?.[item.href];
-    if (!ov) return item;
-    return {
-      ...item,
-      label: ov.label || item.label,
-      // Icon override: look up the named icon, falling back to the original
-      // component if the override name isn't in our registry.
-      icon: resolveIcon(ov.icon, item.icon as Parameters<typeof resolveIcon>[1]),
-    };
-  });
-
   // Build the resolved sections — each labeled section contains items the
   // current user can see. Empty sections are dropped.
   const visibleSections = resolveCategories(
-    itemsWithOverrides,
+    ALL_NAV_ITEMS,
     savedCategories,
     savedOrder,
     (item) => isAdmin || user.permissions.includes(item.perm),

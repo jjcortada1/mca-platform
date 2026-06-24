@@ -1,31 +1,11 @@
 'use client';
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button, Card, CardContent, Badge, PageHeader, Field, Input } from '@/components/ui/primitives';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { US_STATES } from '@/lib/constants';
-import { Send, ChevronDown, ChevronRight, Mail, Phone, MapPin, Ban, FileText, Zap, Search, X, Paperclip } from 'lucide-react';
+import { Send, ChevronDown, ChevronRight, Mail, Phone, MapPin, Ban, FileText, Zap, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { MatchResult } from '@/lib/matching/engine';
-
-/**
- * Human labels for short-form exclusion codes. Used by the deal-shop UI to
- * render compact red badges next to each excluded funder so the reason is
- * scannable at a glance — instead of long sentences.
- *
- * The full detailed reason text from the engine is kept on the tooltip
- * (title attribute) so a user can hover for specifics like the exact
- * revenue or credit threshold that failed.
- */
-const EXCLUSION_LABELS = {
-  restricted_state: 'Restricted State',
-  restricted_industry: 'Restricted Industry',
-  credit_too_low: 'Credit Too Low',
-  revenue_too_low: 'Revenue Too Low',
-  positions_too_high: 'Position Count Too High',
-  reverse_unsupported: 'No Reverse Consol.',
-  inactive: 'Inactive',
-} as const;
 
 interface MatchResponse { matched: MatchResult[]; excluded: MatchResult[]; }
 
@@ -50,12 +30,6 @@ interface MatchOption {
 
 export default function DealShopPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  // If the user came from /active-deals → "Shop this deal", we get a deal id
-  // in the URL. Used to pull existing submissions for the deal so we can
-  // surface them as an "Already Submitted" bucket and mark recommended
-  // funders that have already seen this file.
-  const dealId = searchParams?.get('dealId') ?? null;
 
   // Editable options loaded from server
   const [creditRanges, setCreditRanges] = useState<MatchOption[]>([]);
@@ -78,285 +52,13 @@ export default function DealShopPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTier, setActiveTier] = useState<string>('all');
-  // Same idea but for the no-match manual picker fallback. Tracks which
-  // tier chip is active so the broker can scope the manual list to just
-  // one tier when they already know they want to shop "A-Paper only."
-  const [activeManualTier, setActiveManualTier] = useState<string>('all');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedFunders, setSelectedFunders] = useState<Set<string>>(new Set());
-
-  // Already-submitted funders for the current deal (loaded only if dealId present).
-  // Map: funderId → { status, submittedAt } — keyed by funder so we can do O(1)
-  // lookups while rendering the recommended/excluded buckets.
-  const [alreadySubmitted, setAlreadySubmitted] = useState<Map<string, { funderName: string; status: string; submittedAt: string }>>(new Map());
-
-  // Pull this deal's existing submissions when dealId param is present.
-  // No-op (empty map) when the user navigates to /deal-shop directly without
-  // a deal context — the "Already Submitted" bucket simply doesn't render.
-  useEffect(() => {
-    if (!dealId) {
-      setAlreadySubmitted(new Map());
-      return;
-    }
-    fetch(`/api/deals/${dealId}/submissions`, { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((j) => {
-        const m = new Map<string, { funderName: string; status: string; submittedAt: string }>();
-        for (const s of (j.data ?? [])) {
-          m.set(s.funderId, { funderName: s.funderName, status: s.status, submittedAt: s.submittedAt });
-        }
-        setAlreadySubmitted(m);
-      })
-      .catch(() => setAlreadySubmitted(new Map()));
-  }, [dealId]);
-
-  /* ========================================================================
-     SEND FORM STATE (inline submit, replaces /submit page handoff)
-     The form lives at the bottom of the page and is the only way to ship
-     a deal to selected funders. We collect: deal name, notes, attachments,
-     rep selector (auto-CCs the rep's email), additional CC, and trigger
-     /api/submissions/send. SMTP banner shows the configured sender.
-     ======================================================================== */
-  const [dealName, setDealName] = useState('');
-  const [dealNameLocked, setDealNameLocked] = useState(false);
-  const [notes, setNotes] = useState('');
-  const [assignedRepId, setAssignedRepId] = useState('');
-  const [reps, setReps] = useState<{ id: string; name: string; email: string }[]>([]);
-  // Additional CC addresses entered manually. Rep CC auto-pulls from the
-  // selected rep's email and is rendered as a removable chip.
-  const [extraCc, setExtraCc] = useState<string[]>([]);
-  const [ccInput, setCcInput] = useState('');
-  const [attachments, setAttachments] = useState<File[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  // Drag-and-drop visual state. When true, the dropzone shows a highlighted
-  // border + tint so the user knows the dragover is being received and they
-  // can release the mouse to drop.
-  const [dragActive, setDragActive] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [sendResults, setSendResults] = useState<{ funderName: string; toEmails: string[]; success: boolean; message: string }[] | null>(null);
-  const [smtpConfigured, setSmtpConfigured] = useState<boolean | null>(null);
-  const [fromEmail, setFromEmail] = useState<string | null>(null);
-  // Post-send "view submissions?" confirmation. Replaces the native
-  // browser confirm() popup that used to fire at the top of the page.
-  const [showPostSendConfirm, setShowPostSendConfirm] = useState(false);
-
-  /**
-   * Manual / ad-hoc funders — typed-in names + emails for one-off sends to
-   * funders that aren't (yet) in the directory. These ride along with any
-   * directory funder selections on the same Send action. Each entry has a
-   * trash icon and isn't persisted anywhere; they live for this send only.
-   *
-   * The server already accepts entries without a `funderId` (uses
-   * `manualFunderName` + `toEmails`), so no API change is needed.
-   */
-  type ManualFunder = { id: string; name: string; email: string };
-  const [manualFunders, setManualFunders] = useState<ManualFunder[]>([]);
-  const [manualName, setManualName] = useState('');
-  const [manualEmail, setManualEmail] = useState('');
-
-  // Load company users for the rep dropdown + auto-fill rep email into CC.
-  useEffect(() => {
-    fetch('/api/users')
-      .then((r) => r.json())
-      .then((j) => {
-        const list = (j.data ?? j.users ?? []) as { id: string; name: string | null; email: string; role: string }[];
-        setReps(list
-          .filter((u) => u.role !== 'lead_source')
-          .map((u) => ({ id: u.id, name: u.name || u.email, email: u.email }))
-          .sort((a, b) => a.name.localeCompare(b.name)));
-      }).catch(() => {});
-    // SMTP status — informs the user where emails will send from.
-    fetch('/api/settings/smtp-status')
-      .then((r) => r.json())
-      .then((j) => {
-        const d = j?.data ?? j;
-        setSmtpConfigured(!!d?.hasConfig);
-        setFromEmail(d?.from ?? d?.user ?? null);
-      })
-      .catch(() => {});
-  }, []);
-
-  // Auto-fill from existing deal: name + rep
-  useEffect(() => {
-    if (!dealId) return;
-    fetch(`/api/deals/${dealId}`)
-      .then((r) => r.json())
-      .then((j) => {
-        const d = j?.data ?? j?.deal ?? j;
-        if (d?.name) {
-          setDealName(d.name);
-          setDealNameLocked(true);
-        }
-        if (d?.assignedRepId) setAssignedRepId(d.assignedRepId);
-      })
-      .catch(() => {});
-  }, [dealId]);
-
-  // When a rep is selected, the user can OPTIONALLY add the rep's email to CC.
-  // Default OFF so the rep isn't forced onto every send — keeps the prompt's
-  // "give option to cc them, don't force cc them" behavior.
-  const [ccAssignedRep, setCcAssignedRep] = useState(false);
-  // Computed CC list: rep's email (if rep selected AND ccAssignedRep is on)
-  // + manual entries, deduped.
-  const ccList = useMemo(() => {
-    const set = new Set<string>();
-    const repEmail = (ccAssignedRep && assignedRepId)
-      ? reps.find((r) => r.id === assignedRepId)?.email
-      : null;
-    if (repEmail) set.add(repEmail.toLowerCase());
-    for (const e of extraCc) if (e) set.add(e.toLowerCase());
-    return Array.from(set);
-  }, [ccAssignedRep, assignedRepId, reps, extraCc]);
-
-  function addCc() {
-    const v = ccInput.trim();
-    if (!v || !v.includes('@')) return;
-    if (extraCc.includes(v)) { setCcInput(''); return; }
-    setExtraCc([...extraCc, v]);
-    setCcInput('');
-  }
-  function removeCc(email: string) {
-    setExtraCc(extraCc.filter((e) => e !== email));
-  }
-  function onFilePick(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    // CRITICAL: snapshot the FileList into a real array RIGHT NOW.
-    //
-    // FileList is live — it's a reference to `input.files`. Below we'll
-    // clear `input.value = ''` (so the same file can be re-selected later
-    // after removal), which also EMPTIES input.files. The setAttachments
-    // callback runs async (React batches state updates), so by the time
-    // it executes, `files` would already be empty and `Array.from(files)`
-    // would return `[]` — the picked files would silently vanish.
-    //
-    // This was the real reason "click to upload" wasn't attaching anything.
-    const picked = Array.from(files);
-    setAttachments((prev) => {
-      const next = [...prev];
-      for (const f of picked) {
-        if (!next.find((x) => x.name === f.name && x.size === f.size)) next.push(f);
-      }
-      return next;
-    });
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  }
-
-  /**
-   * Send the deal to the currently selected funders.
-   *
-   * Builds the FunderSubmission array from selectedFunders + the loaded
-   * funder details (we need the email addresses per funder). Manual funders
-   * (no funderId) aren't supported in this inline flow — they live on the
-   * full /submit page if anyone needs to add one. Server is the authority
-   * on duplicate-detection + ASCII subject mode + plain-subject funders.
-   */
-  async function sendNow() {
-    // At least one funder selected (directory or manual) is required.
-    if (selectedFunders.size === 0 && manualFunders.length === 0) return;
-    if (smtpConfigured === false) {
-      alert('Email is not configured yet. Set up SMTP first.');
-      return;
-    }
-    if (!dealName.trim() && !dealId) {
-      alert('Enter a deal name first.');
-      return;
-    }
-    setSending(true);
-    setSendResults(null);
-
-    // Build the funder targets:
-    //   1. Directory funders → { funderId, toEmails }
-    //   2. Manual one-off funders → { manualFunderName, toEmails } (server
-    //      stores these on the submission row without persisting them to the
-    //      funder directory — purely for tracking this single send).
-    type Target =
-      | { funderId: string; toEmails: string[] }
-      | { manualFunderName: string; toEmails: string[] };
-    const targets: Target[] = [];
-    for (const fid of Array.from(selectedFunders)) {
-      const f = funderMap.get(fid);
-      if (!f) continue;
-      const addrs = (f.emails ?? []).filter((e) => e && e.includes('@'));
-      // Fallback to a primary contact if no shopping emails are set.
-      if (addrs.length === 0) {
-        const primary = f.contacts?.find((c) => c.email);
-        if (primary?.email) addrs.push(primary.email);
-      }
-      if (addrs.length > 0) targets.push({ funderId: fid, toEmails: addrs });
-    }
-    // Append manual funders. We trust the user's email on these (they typed
-    // it knowing it's a one-off); the server still validates with a hard
-    // regex + header-injection guard before sending.
-    for (const m of manualFunders) {
-      const trimmedEmail = m.email.trim();
-      if (!trimmedEmail.includes('@')) continue;
-      targets.push({ manualFunderName: m.name.trim() || trimmedEmail, toEmails: [trimmedEmail] });
-    }
-    if (targets.length === 0) {
-      alert('None of the selected funders have a submission email configured.');
-      setSending(false);
-      return;
-    }
-
-    const fd = new FormData();
-    if (dealId) fd.append('dealId', dealId);
-    fd.append('dealName', dealName.trim());
-    fd.append('bodyNotes', notes);
-    fd.append('funders', JSON.stringify(targets));
-    if (assignedRepId) fd.append('assignedRepId', assignedRepId);
-    fd.append('ccEmails', JSON.stringify(ccList));
-    for (let i = 0; i < attachments.length; i++) {
-      fd.append(`attachment_${i}`, attachments[i]);
-    }
-
-    try {
-      // 90-second client-side abort so the user isn't stuck staring at
-      // "Sending…" if the server hangs or the network drops. The route's
-      // own maxDuration is 60s; this gives a small buffer above that so
-      // server-level errors come through before we abort.
-      const controller = new AbortController();
-      const abortTimer = setTimeout(() => controller.abort(), 90_000);
-
-      let res: Response;
-      try {
-        res = await fetch('/api/submissions/send', {
-          method: 'POST',
-          body: fd,
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(abortTimer);
-      }
-
-      const json = await res.json().catch(() => ({ error: 'Server returned an invalid response.' }));
-      if (!res.ok) {
-        alert(json.error || `Send failed (HTTP ${res.status}).`);
-        setSending(false);
-        return;
-      }
-      const rs = (json.results ?? []).map((r: { funderName?: string; toEmails?: string[]; toEmail?: string; success: boolean; error?: string }) => ({
-        funderName: r.funderName ?? (Array.isArray(r.toEmails) ? r.toEmails.join(', ') : r.toEmail ?? ''),
-        toEmails: r.toEmails ?? (r.toEmail ? [r.toEmail] : []),
-        success: r.success,
-        message: r.error || (r.success ? 'Sent' : 'Failed'),
-      }));
-      setSendResults(rs);
-
-      const okCount = rs.filter((r: { success: boolean }) => r.success).length;
-      if (okCount > 0 && rs.every((r: { success: boolean }) => r.success)) {
-        // Replace the old `confirm()` browser popup with an in-page modal.
-        setShowPostSendConfirm(true);
-      }
-    } catch (err) {
-      // AbortError = our 90s timeout. Anything else = network / fetch issue.
-      const msg = (err as Error).name === 'AbortError'
-        ? 'Send timed out after 90 seconds. The SMTP server may be slow or unreachable. Check your SMTP settings and try again.'
-        : 'Network error: ' + (err as Error).message;
-      alert(msg);
-    } finally {
-      setSending(false);
-    }
-  }
+  // Text filter that narrows the funder list to those whose name contains
+  // the query (case-insensitive substring match). Empty string = show all.
+  // Applied AFTER tier grouping so the counts on the tier rail still reflect
+  // total matches, while the displayed list narrows.
+  const [funderSearch, setFunderSearch] = useState('');
 
   // Load match options + funder details once
   useEffect(() => {
@@ -400,20 +102,14 @@ export default function DealShopPage() {
     return v === undefined || v === null ? null : Number(v);
   }
 
-  async function runMatch(opts: { silent?: boolean } = {}) {
+  async function runMatch() {
     setError(null);
-    // In live/auto mode, missing fields just clear the result instead of
-    // raising an error toast. In explicit mode (user clicked the button),
-    // we keep the old strict validation so the user sees what's missing.
-    const minimumPresent = revenueOption && position;
-    if (!minimumPresent) {
-      if (!opts.silent) {
-        if (!revenueOption) { setError('Pick a revenue range.'); return; }
-        if (!position) { setError('Pick number of positions.'); return; }
-      }
-      // Silent mode: clear any prior results so the right panel falls back
-      // to the "all funders" picker. Don't show an error.
-      setResults(null);
+    if (!revenueOption) {
+      setError('Pick a revenue range.');
+      return;
+    }
+    if (!position) {
+      setError('Pick number of positions.');
       return;
     }
 
@@ -436,33 +132,32 @@ export default function DealShopPage() {
       });
       const json = await res.json();
       if (!res.ok) {
-        if (!opts.silent) setError(json.error || 'Match failed');
+        setError(json.error || 'Match failed');
         setResults(null);
         return;
       }
       setResults(json);
       setActiveTier('all');
-      // DON'T clear selections on a silent re-match — the user may have
-      // already picked funders and we don't want their checks to drop as
-      // the criteria refines. On explicit clicks we DO reset since that's
-      // typically "start over."
-      if (!opts.silent) {
-        setExpanded(new Set());
-        setSelectedFunders(new Set());
-      }
+      setExpanded(new Set());
+      setSelectedFunders(new Set());
     } finally {
       setLoading(false);
     }
   }
 
-  // Live matching — auto-trigger when criteria changes. 300ms debounce so
-  // dragging through select dropdowns doesn't spam the API. Silent mode so
-  // missing fields just blank the right panel instead of showing errors.
-  useEffect(() => {
-    const t = setTimeout(() => { runMatch({ silent: true }); }, 300);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revenueOption, creditOption, position, industry, state, dealType]);
+  function toSubmit() {
+    // Carry the selected funders to the submit page so they're pre-selected.
+    // If none are explicitly ticked, default to ALL matched funders.
+    const ids = selectedFunders.size > 0
+      ? Array.from(selectedFunders)
+      : (results?.matched.map((m) => m.funderId) ?? []);
+    try {
+      sessionStorage.setItem('shopSelectedFunderIds', JSON.stringify(ids));
+    } catch {
+      // ignore
+    }
+    router.push('/submit?shop=1');
+  }
 
   function toggleFunderSel(id: string) {
     setSelectedFunders((prev) => {
@@ -480,36 +175,6 @@ export default function DealShopPage() {
 
   function clearSelection() {
     setSelectedFunders(new Set());
-  }
-
-  /**
-   * Toggle every matched funder in a single tier on/off in one click.
-   *
-   * Behavior: if EVERY matched funder in this tier is already selected,
-   * deselect them all (toggle off). Otherwise add them all to the
-   * selection (without disturbing selections from other tiers). This lets
-   * the broker shop a whole tier in one click — "select all A-Paper" —
-   * instead of having to check every row individually.
-   *
-   * Source data:
-   *   • `tier` set to a tierGroup.tier value → uses the match engine's
-   *     matched list filtered to that tier.
-   *   • When no match has run, `manualFunderIds` is supplied (the no-match
-   *     fallback view computes its own tier groups from funderMap and
-   *     calls this with the funder ids it wants).
-   */
-  function toggleSelectTier(funderIds: string[]) {
-    if (funderIds.length === 0) return;
-    setSelectedFunders((prev) => {
-      const next = new Set(prev);
-      const allAlreadyIn = funderIds.every((id) => next.has(id));
-      if (allAlreadyIn) {
-        for (const id of funderIds) next.delete(id);
-      } else {
-        for (const id of funderIds) next.add(id);
-      }
-      return next;
-    });
   }
 
   // Group results by tier. Each result is already a (funder, tier) pair —
@@ -534,42 +199,22 @@ export default function DealShopPage() {
     return Array.from(map.entries()).map(([tier, v]) => ({ tier, ...v })).sort((a, b) => a.tier.localeCompare(b.tier));
   }, [results]);
 
-  const filteredGroups = activeTier === 'all' ? tierGroups : tierGroups.filter((g) => g.tier === activeTier);
+  // Compose two filters: the active tier, then the funder-name search.
+  // The search only affects the rows that render — the tier counts on the
+  // rail show the unfiltered totals so users don't lose orientation when
+  // they type a query.
+  const filteredGroups = useMemo(() => {
+    const q = funderSearch.trim().toLowerCase();
+    const tierFiltered = activeTier === 'all' ? tierGroups : tierGroups.filter((g) => g.tier === activeTier);
+    if (!q) return tierFiltered;
+    return tierFiltered.map((g) => ({
+      ...g,
+      matched: g.matched.filter((m) => (m.funderName ?? '').toLowerCase().includes(q)),
+      excluded: g.excluded.filter((m) => (m.funderName ?? '').toLowerCase().includes(q)),
+    })).filter((g) => g.matched.length > 0 || g.excluded.length > 0);
+  }, [tierGroups, activeTier, funderSearch]);
   const totalMatched = results?.matched.length ?? 0;
   const totalExcluded = results?.excluded.length ?? 0;
-
-  /**
-   * Group ALL active funders by tier for the no-match manual picker.
-   *
-   * Unlike the match-engine tier groups (which are scoped to the match
-   * results), this iterates the full funderMap so the broker can sort all
-   * known funders by tier even before running a match. A funder belonging
-   * to multiple tiers appears in each — same convention as the match view.
-   * An "Untiered" bucket captures funders with no tier assignment.
-   */
-  const manualTierGroups = useMemo(() => {
-    if (results) return [];
-    const map = new Map<string, FunderDetail[]>();
-    for (const f of funderMap.values()) {
-      const tiers = (f.tiers ?? []).filter((t) => t && t.name);
-      if (tiers.length === 0) {
-        if (!map.has('Untiered')) map.set('Untiered', []);
-        map.get('Untiered')!.push(f);
-      } else {
-        for (const t of tiers) {
-          if (!map.has(t.name)) map.set(t.name, []);
-          map.get(t.name)!.push(f);
-        }
-      }
-    }
-    return Array.from(map.entries())
-      .map(([tier, funders]) => ({ tier, funders: funders.sort((a, b) => a.name.localeCompare(b.name)) }))
-      .sort((a, b) => a.tier.localeCompare(b.tier));
-  }, [results, funderMap]);
-
-  const filteredManualGroups = activeManualTier === 'all'
-    ? manualTierGroups
-    : manualTierGroups.filter((g) => g.tier === activeManualTier);
 
   function toggleExpand(id: string) {
     const next = new Set(expanded);
@@ -590,39 +235,39 @@ export default function DealShopPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <PageHeader
-        title="Shop & Submit"
-        description="Enter deal criteria, see matching funders, select the ones you want, then send — all on one page."
+        title="Shop Deals"
+        description="Match a deal profile to qualifying funders, then submit."
+        actions={
+          results && totalMatched > 0 ? (
+            <Button onClick={toSubmit} className="gap-2">
+              <Send className="h-4 w-4" />
+              {selectedFunders.size > 0
+                ? `Shop ${selectedFunders.size} selected →`
+                : 'Submit deal →'}
+            </Button>
+          ) : undefined
+        }
       />
 
-      {/* ====================================================================
-          SPLIT LAYOUT
-          Left column (5/12 ≈ 42%): compact deal profile + send form.
-          Right column (7/12 ≈ 58%): match results, ALWAYS visible. When no
-          criteria have been entered the right panel shows the full active
-          funder list so the user can pick directly without doing intake.
-          On narrow screens we stack (single column), preserving order.
-          ==================================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-
-        {/* ============ LEFT COLUMN — DEAL PROFILE + SEND ============ */}
-        <div className="lg:col-span-5 space-y-3 min-w-0">
+      {/* Centered intake card */}
+      <div className="max-w-3xl mx-auto w-full">
         <Card>
-          <CardContent className="p-4 space-y-3">
-            <div className="flex items-center gap-2 pb-2 border-b border-border">
-              <Search className="h-4 w-4 text-primary" />
-              <h2 className="text-sm font-semibold">Deal Profile</h2>
-              <span className="text-[10px] text-muted-foreground ml-auto">Live matching — right panel updates as you type</span>
+          <CardContent className="p-6 space-y-5">
+            <div className="text-center pb-3 border-b border-border">
+              <div className="inline-flex items-center justify-center h-10 w-10 rounded-full bg-primary/10 mb-2">
+                <Search className="h-5 w-5 text-primary" />
+              </div>
+              <h2 className="text-base font-semibold">Deal Profile</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">All fields shape which funders qualify.</p>
             </div>
 
-            {/* Compact 2-col grid — Revenue/Credit/Position/Industry/State.
-                Drop the generous gap-4 + p-6 of the original centered card. */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Revenue */}
               <Field label="Monthly Revenue" required>
                 <Select value={revenueOption} onChange={setRevenueOption} options={[
-                  { value: '', label: '— Pick —' },
+                  { value: '', label: '— Pick a range —' },
                   ...revenueRanges.map((r) => ({ value: r.value, label: r.label })),
                 ]} />
               </Field>
@@ -635,7 +280,7 @@ export default function DealShopPage() {
               </Field>
 
               {/* Position */}
-              <Field label="Positions" required>
+              <Field label="Number of Positions" required>
                 <Select value={position} onChange={setPosition} options={[
                   { value: '', label: '— Pick —' },
                   ...positionOptions.map((p) => ({ value: p.value, label: p.label })),
@@ -643,14 +288,14 @@ export default function DealShopPage() {
               </Field>
 
               {/* Industry */}
-              <Field label="Industry">
+              <Field label="Industry" hint='Pick "Other" to skip industry filtering'>
                 <Select value={industry} onChange={setIndustry} options={[
                   ...industries.map((i) => ({ value: i.value, label: i.label })),
                 ]} />
               </Field>
 
               {/* State */}
-              <Field label="State" className="col-span-2">
+              <Field label="State" hint='Pick "Other" to skip state filtering'>
                 <Select value={state} onChange={setState} options={[
                   { value: 'other', label: 'Other / N/A' },
                   ...(stateOptions.length > 0
@@ -660,16 +305,16 @@ export default function DealShopPage() {
                 ]} />
               </Field>
 
-              {/* Deal type — compact chip row instead of large stacked buttons */}
-              <Field label="Deal Type" className="col-span-2">
-                <div className="grid grid-cols-2 gap-1.5">
+              {/* Deal type */}
+              <Field label="Deal Type" className="sm:col-span-2">
+                <div className="grid grid-cols-2 gap-2">
                   {dealTypes.map((d) => (
                     <button
                       key={d.value}
                       type="button"
                       onClick={() => setDealType(d.value)}
                       className={cn(
-                        'px-2.5 py-1.5 rounded border text-xs font-medium transition',
+                        'px-4 py-2.5 rounded border-2 text-sm font-medium transition',
                         dealType === d.value
                           ? 'bg-primary text-primary-foreground border-primary'
                           : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30',
@@ -688,325 +333,16 @@ export default function DealShopPage() {
               </div>
             )}
 
-            <div className="flex items-center justify-between pt-1">
-              <Button variant="ghost" size="sm" onClick={clearForm} type="button">Clear</Button>
-              {loading && <span className="text-[11px] text-muted-foreground italic">Matching…</span>}
+            <div className="flex items-center justify-between pt-3 border-t border-border">
+              <Button variant="ghost" onClick={clearForm} type="button">Clear</Button>
+              <Button onClick={runMatch} loading={loading} className="gap-1.5 px-6">
+                <Zap className="h-4 w-4" />
+                Find Funders
+              </Button>
             </div>
           </CardContent>
         </Card>
-
-        {/* ====================================================================
-            SEND TO SELECTED FUNDERS — left column, below intake.
-            Becomes interactive only when at least one funder is selected on
-            the right panel. The rep CC checkbox makes the rep email opt-in
-            rather than auto-CC'd (per spec).
-            ==================================================================== */}
-        <Card className="border-primary/30">
-          <CardContent className="p-4 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold">
-                Send to selected funders
-                {selectedFunders.size > 0 && (
-                  <span className="ml-2 text-xs font-normal text-muted-foreground">
-                    ({selectedFunders.size})
-                  </span>
-                )}
-              </h3>
-              {fromEmail && (
-                <span className="text-[10px] text-muted-foreground truncate">
-                  From: <strong className="text-foreground">{fromEmail}</strong>
-                </span>
-              )}
-            </div>
-
-            {smtpConfigured === false && (
-              <div className="text-[11px] bg-amber-50 border border-amber-200 text-amber-900 rounded px-2.5 py-1.5">
-                ⚠️ Email not configured. Set up SMTP in Settings.
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 gap-2">
-              <Field label="Deal name">
-                <Input
-                  value={dealName}
-                  onChange={(e) => setDealName(e.target.value)}
-                  disabled={dealNameLocked}
-                  placeholder="Acme Pizza – 2nd position"
-                />
-                {dealNameLocked && (
-                  <div className="text-[10px] text-muted-foreground mt-1">Locked to existing deal</div>
-                )}
-              </Field>
-              <Field label="Assigned rep (optional)">
-                <select
-                  value={assignedRepId}
-                  onChange={(e) => setAssignedRepId(e.target.value)}
-                  className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
-                >
-                  <option value="">— Unassigned —</option>
-                  {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                </select>
-                {/* Opt-in CC checkbox — replaces the previous auto-CC behavior
-                    so the rep isn't force-added to every send. Only renders
-                    when a rep is actually selected. */}
-                {assignedRepId && (
-                  <label className="flex items-center gap-1.5 mt-1.5 text-xs cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={ccAssignedRep}
-                      onChange={(e) => setCcAssignedRep(e.target.checked)}
-                      className="h-3.5 w-3.5 rounded border-border accent-[var(--primary,#2563eb)]"
-                    />
-                    <span className="text-muted-foreground">
-                      Also CC this rep ({reps.find((r) => r.id === assignedRepId)?.email})
-                    </span>
-                  </label>
-                )}
-              </Field>
-            </div>
-
-            <Field label="Notes (appears at top of email)">
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={3}
-                placeholder="$45k 1st position, 14 month tib, 660 fico…"
-                className="w-full rounded-md border border-input bg-card px-2.5 py-1.5 text-sm resize-y"
-              />
-            </Field>
-
-            <Field label="Additional CC">
-              <div className="space-y-1.5">
-                <Input
-                  value={ccInput}
-                  onChange={(e) => setCcInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCc(); } }}
-                  placeholder="someone@example.com — Enter to add"
-                  type="email"
-                />
-                {ccList.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {ccList.map((email) => {
-                      const isRep = !!(ccAssignedRep && assignedRepId && reps.find((r) => r.id === assignedRepId)?.email.toLowerCase() === email);
-                      return (
-                        <span key={email} className={cn(
-                          'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono',
-                          isRep ? 'bg-blue-100 text-blue-900' : 'bg-muted text-foreground'
-                        )}>
-                          {isRep && <span className="text-[8px] uppercase font-sans font-semibold">rep</span>}
-                          {email}
-                          {!isRep && (
-                            <button
-                              onClick={() => removeCc(email)}
-                              className="hover:text-destructive"
-                              title="Remove"
-                            >
-                              <X className="h-2.5 w-2.5" />
-                            </button>
-                          )}
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </Field>
-
-            <div className="flex flex-col gap-1.5">
-              <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Attachments (optional)
-              </div>
-              <div className="space-y-1.5">
-                {/*
-                  Bulletproof file upload pattern:
-                  An <input type="file"> positioned absolutely with opacity:0
-                  COVERS the entire dropzone visual. The user clicks the visual,
-                  which is actually the invisible input — so the native file
-                  picker opens and onChange fires on the SAME element they
-                  clicked. No label, no htmlFor, no ref.click() shim, no
-                  nested-label conflicts.
-
-                  Bonus: file inputs natively accept drag-drop. Dropping files
-                  onto an <input type="file"> populates input.files and fires
-                  onChange — no separate drop handler needed. We still call
-                  preventDefault on dragover at the container level so the
-                  browser doesn't open the file in a new tab if the user
-                  misses the input.
-                */}
-                <div
-                  className="relative"
-                  onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-                  onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }}
-                  onDrop={() => setDragActive(false)}
-                >
-                  <div
-                    className={cn(
-                      'flex flex-col items-center justify-center gap-1 px-3 py-4 rounded-md border-2 border-dashed pointer-events-none transition-colors',
-                      dragActive
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border bg-muted/20'
-                    )}
-                  >
-                    <Paperclip className="h-4 w-4 text-muted-foreground" />
-                    <div className="text-xs text-muted-foreground text-center">
-                      {dragActive
-                        ? 'Drop files here'
-                        : <><span className="font-medium text-foreground">Click to upload</span> or drag &amp; drop</>}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground/70">PDF, images, docs — up to 25MB each</div>
-                  </div>
-                  {/* Transparent input layered on top — receives the click
-                      directly so the browser's "user gesture" guarantee for
-                      file pickers always holds. */}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    onChange={(e) => onFilePick(e.target.files)}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    title="Click to attach files"
-                  />
-                </div>
-                {attachments.length > 0 && (
-                  <div className="space-y-1">
-                    {attachments.map((f, i) => (
-                      <div key={i} className="flex items-center justify-between gap-2 text-[11px] bg-muted/30 rounded px-2 py-1">
-                        <span className="truncate flex-1">{f.name}</span>
-                        <span className="text-muted-foreground tabular-nums">{(f.size / 1024).toFixed(0)} KB</span>
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setAttachments(attachments.filter((_, x) => x !== i));
-                          }}
-                          className="text-muted-foreground hover:text-destructive shrink-0"
-                          title="Remove"
-                          type="button"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/*
-              ───────── Manual / ad-hoc funders ─────────
-              For one-off sends to a funder that isn't in the directory.
-              The user types a name (optional — falls back to email) + an
-              email; we tack it onto the targets array at send time. Not
-              persisted — these don't get auto-added to /funders. If you
-              shop the same off-directory funder repeatedly, add them to
-              the directory the normal way.
-            */}
-            <div className="flex flex-col gap-1.5 pt-2 border-t border-border">
-              <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                One-off funder (not in directory)
-              </div>
-              {manualFunders.length > 0 && (
-                <div className="space-y-1">
-                  {manualFunders.map((m) => (
-                    <div key={m.id} className="flex items-center justify-between gap-2 py-0.5 px-2 rounded bg-amber-50 border border-amber-200 text-[11px]">
-                      <div className="min-w-0 flex-1">
-                        <div className="font-medium truncate">{m.name || '(no name)'}</div>
-                        <div className="text-muted-foreground truncate break-all">{m.email}</div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setManualFunders(manualFunders.filter((x) => x.id !== m.id))}
-                        className="text-muted-foreground hover:text-destructive shrink-0"
-                        title="Remove"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5">
-                <Input
-                  value={manualName}
-                  onChange={(e) => setManualName(e.target.value)}
-                  placeholder="Funder name"
-                  className="h-8 text-xs"
-                />
-                <Input
-                  value={manualEmail}
-                  onChange={(e) => setManualEmail(e.target.value)}
-                  placeholder="email@funder.com"
-                  type="email"
-                  className="h-8 text-xs"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      const email = manualEmail.trim();
-                      if (!email.includes('@')) return;
-                      setManualFunders([...manualFunders, { id: Math.random().toString(36).slice(2), name: manualName.trim(), email }]);
-                      setManualName('');
-                      setManualEmail('');
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const email = manualEmail.trim();
-                    if (!email.includes('@')) { alert('Enter a valid email.'); return; }
-                    setManualFunders([...manualFunders, { id: Math.random().toString(36).slice(2), name: manualName.trim(), email }]);
-                    setManualName('');
-                    setManualEmail('');
-                  }}
-                  className="h-8 px-2.5 rounded-md border border-input bg-card text-xs font-medium hover:bg-muted/40"
-                >
-                  + Add
-                </button>
-              </div>
-            </div>
-
-            <Button
-              onClick={sendNow}
-              disabled={sending || (selectedFunders.size === 0 && manualFunders.length === 0) || smtpConfigured === false}
-              className="w-full"
-            >
-              <Send className="h-4 w-4 mr-2" />
-              {sending
-                ? 'Sending…'
-                : (selectedFunders.size === 0 && manualFunders.length === 0)
-                  ? 'Pick funders →'
-                  : `Send to ${selectedFunders.size + manualFunders.length} funder${(selectedFunders.size + manualFunders.length) === 1 ? '' : 's'}`}
-            </Button>
-
-            {sendResults && (
-              <div className="space-y-1 pt-2 border-t border-border">
-                <div className="text-[11px] font-semibold">Send results</div>
-                {sendResults.map((r, i) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      'flex items-center justify-between gap-2 py-1 px-2 rounded border-l-2 text-[11px]',
-                      r.success ? 'border-emerald-500 bg-emerald-50' : 'border-rose-500 bg-rose-50'
-                    )}
-                  >
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">{r.funderName}</div>
-                      <div className="text-[9px] text-muted-foreground font-mono truncate">{r.toEmails.join(', ')}</div>
-                    </div>
-                    <div className={cn('shrink-0 text-[10px] font-medium', r.success ? 'text-emerald-700' : 'text-rose-700')}>
-                      {r.success ? '✓ Sent' : `✗ ${r.message}`}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        </div>
-        {/* ============ END LEFT COLUMN ============ */}
-
-        {/* ============ RIGHT COLUMN — FUNDER MATCHES, ALWAYS VISIBLE ============ */}
-        <div className="lg:col-span-7 space-y-3 lg:sticky lg:top-4 lg:self-start min-w-0">
+      </div>
 
       {/* Results section */}
       {results && (
@@ -1039,137 +375,57 @@ export default function DealShopPage() {
               )}
             </div>
 
-            {/* Tier filter + tier-select chips.
-                Each chip is a split control:
-                  • Left half (label + count badges) filters the view to
-                    only show that tier.
-                  • Right half (✓ button) selects/deselects every matched
-                    funder in that tier in one click. Lets the broker
-                    "shop everyone in A-Paper" without ticking each row.
-                The "All tiers" chip's right button selects every matched
-                funder across all tiers (same as the header "Select all"). */}
-            <div className="flex flex-wrap gap-1.5">
-              <div className={cn(
-                'inline-flex items-stretch rounded-full border overflow-hidden text-xs font-medium transition-colors',
-                activeTier === 'all'
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
-              )}>
-                <button
-                  onClick={() => setActiveTier('all')}
-                  className="flex items-center gap-1.5 pl-2.5 pr-2 py-1"
-                  title="Filter to show all tiers"
-                >
-                  All tiers
-                  <span className={cn('tabular-nums px-1 rounded text-[10px]',
-                    activeTier === 'all' ? 'bg-primary-foreground/20' : 'bg-muted')}>{totalMatched + totalExcluded}</span>
-                </button>
-                <button
-                  onClick={selectAllMatched}
-                  title={`Select all ${totalMatched} matched funders`}
-                  className={cn(
-                    'px-2 border-l flex items-center justify-center text-sm',
-                    activeTier === 'all'
-                      ? 'border-primary-foreground/30 hover:bg-primary-foreground/15'
-                      : 'border-border hover:bg-muted'
-                  )}
-                >
-                  ✓
-                </button>
-              </div>
-              {tierGroups.map((g) => {
-                const tierIds = g.matched.map((m) => m.funderId);
-                const allInTierSelected = tierIds.length > 0 && tierIds.every((id) => selectedFunders.has(id));
-                return (
-                  <div
-                    key={g.tier}
+            <div className="grid lg:grid-cols-[200px_1fr] gap-4">
+              {/* Tier rail */}
+              <Card className="self-start lg:sticky lg:top-4">
+                <CardContent className="p-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-3 py-2">
+                    Filter by tier
+                  </div>
+                  <button
+                    onClick={() => setActiveTier('all')}
                     className={cn(
-                      'inline-flex items-stretch rounded-full border overflow-hidden text-xs font-medium transition-colors max-w-[240px]',
-                      activeTier === g.tier
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
+                      'w-full flex items-center justify-between px-3 py-2 rounded text-sm transition-colors',
+                      activeTier === 'all' ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'
                     )}
                   >
+                    <span>All tiers</span>
+                    <Badge variant="outline" className="text-[10px]">{totalMatched + totalExcluded}</Badge>
+                  </button>
+                  {tierGroups.map((g) => (
                     <button
+                      key={g.tier}
                       onClick={() => setActiveTier(g.tier)}
-                      title={`Filter to ${g.tier} only`}
-                      className="flex items-center gap-1.5 pl-2.5 pr-2 py-1 min-w-0"
+                      className={cn(
+                        'w-full flex items-center justify-between px-3 py-2 rounded text-sm transition-colors',
+                        activeTier === g.tier ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'
+                      )}
                     >
                       <span className="truncate">{g.tier}</span>
-                      <span className="flex items-center gap-0.5 shrink-0">
-                        {g.matched.length > 0 && <Badge variant="success" className="text-[9px]">{g.matched.length}</Badge>}
-                        {g.excluded.length > 0 && <Badge variant="default" className="text-[9px]">{g.excluded.length}</Badge>}
+                      <span className="flex items-center gap-1 shrink-0">
+                        {g.matched.length > 0 && <Badge variant="success" className="text-[10px]">{g.matched.length}</Badge>}
+                        {g.excluded.length > 0 && <Badge variant="default" className="text-[10px]">{g.excluded.length}</Badge>}
                       </span>
                     </button>
-                    {tierIds.length > 0 && (
-                      <button
-                        onClick={() => toggleSelectTier(tierIds)}
-                        title={allInTierSelected
-                          ? `Deselect all ${tierIds.length} funders in ${g.tier}`
-                          : `Select all ${tierIds.length} matched funders in ${g.tier}`}
-                        className={cn(
-                          'px-2 border-l flex items-center justify-center text-sm',
-                          activeTier === g.tier
-                            ? 'border-primary-foreground/30 hover:bg-primary-foreground/15'
-                            : 'border-border hover:bg-muted',
-                          allInTierSelected && (activeTier === g.tier ? 'bg-primary-foreground/15' : 'bg-emerald-50 text-emerald-700')
-                        )}
-                      >
-                        {allInTierSelected ? '✓' : '+'}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                  ))}
+                </CardContent>
+              </Card>
 
-            <div>
               {/* Results table */}
               <div className="space-y-4 min-w-0">
-                {/* Already-submitted bucket — only when the user navigated
-                    here with a deal context (?dealId=). Shows EVERY funder
-                    this deal has already been sent to so the user doesn't
-                    accidentally re-shop the same funder. Server-side dedupe
-                    still applies as a backstop. */}
-                {dealId && alreadySubmitted.size > 0 && (
-                  <Card className="border-blue-200 bg-blue-50/30">
-                    <CardContent className="p-3">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Send className="h-3.5 w-3.5 text-blue-700" />
-                        <h3 className="text-xs font-semibold uppercase tracking-wider text-blue-900">
-                          Already submitted ({alreadySubmitted.size})
-                        </h3>
-                      </div>
-                      <div className="space-y-1">
-                        {Array.from(alreadySubmitted.values())
-                          .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime())
-                          .map((s) => {
-                            // Match the per-funder status look to the rest of the app.
-                            const statusLabel =
-                              s.status === 'approved' ? 'Approved' :
-                              s.status === 'declined' ? 'Declined' :
-                              'Pending';
-                            const statusTone =
-                              s.status === 'approved' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' :
-                              s.status === 'declined' ? 'bg-rose-100 text-rose-800 border-rose-200' :
-                              'bg-amber-100 text-amber-800 border-amber-200';
-                            return (
-                              <div key={s.funderName + s.submittedAt} className="flex items-center justify-between gap-2 text-xs py-1">
-                                <span className="font-medium text-foreground truncate flex-1">{s.funderName}</span>
-                                <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium border', statusTone)}>
-                                  {statusLabel}
-                                </span>
-                                <span className="text-muted-foreground tabular-nums text-[10px] w-20 text-right shrink-0">
-                                  {new Date(s.submittedAt).toLocaleDateString()}
-                                </span>
-                              </div>
-                            );
-                          })}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-
+                {/* Funder name search — narrows the visible rows. Always
+                    rendered (even when the search is empty) so the user
+                    knows they can search; clearing the field shows the
+                    full list. */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    value={funderSearch}
+                    onChange={(e) => setFunderSearch(e.target.value)}
+                    placeholder="Search funders by name…"
+                    className="pl-9"
+                  />
+                </div>
                 {filteredGroups.map((g) => (
                   <div key={g.tier}>
                     {activeTier === 'all' && (
@@ -1202,34 +458,22 @@ export default function DealShopPage() {
                               const extraCount = shoppingEmails.length > 1 ? shoppingEmails.length - 1 : 0;
                               const isExpanded = expanded.has(m.funderId);
                               const isSelected = selectedFunders.has(m.funderId);
-                              // Cross-reference against already-submitted list for THIS deal.
-                              // If found, render a small "Already submitted" pill and gray
-                              // the row so the user is much less likely to re-select it.
-                              const sub = alreadySubmitted.get(m.funderId);
                               return (
                                 <>
-                                  <tr key={m.funderId} className={cn('hover:bg-muted/30', isSelected && 'bg-primary/5', sub && 'opacity-60')}>
+                                  <tr key={m.funderId} className={cn('hover:bg-muted/30', isSelected && 'bg-primary/5')}>
                                     <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                                       <input
                                         type="checkbox"
                                         checked={isSelected}
                                         onChange={() => toggleFunderSel(m.funderId)}
                                         className="h-4 w-4 rounded border-border cursor-pointer accent-[var(--primary,#2563eb)]"
-                                        title={sub ? 'Already submitted to this funder — selecting will be blocked server-side' : 'Select to shop this funder'}
+                                        title="Select to shop this funder"
                                       />
                                     </td>
                                     <td className="px-2 py-2.5 cursor-pointer" onClick={() => toggleExpand(m.funderId)}>
                                       <div className="flex items-center gap-2">
                                         <div className="h-2 w-2 rounded-full bg-emerald-500" />
                                         <span className="font-medium">{m.funderName}</span>
-                                        {sub && (
-                                          <span
-                                            className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200"
-                                            title={`Submitted ${new Date(sub.submittedAt).toLocaleDateString()} — status: ${sub.status}`}
-                                          >
-                                            Already sent
-                                          </span>
-                                        )}
                                       </div>
                                     </td>
                                     <td className="px-3 py-2.5 cursor-pointer" onClick={() => toggleExpand(m.funderId)}>
@@ -1271,32 +515,11 @@ export default function DealShopPage() {
                         <Card className="mt-1">
                           <CardContent className="p-0 divide-y divide-border/60">
                             {g.excluded.map((e) => (
-                              <div key={e.funderId} className="px-4 py-2 flex items-center justify-between gap-2 text-xs">
-                                <span className="font-medium text-muted-foreground truncate">{e.funderName}</span>
-                                {/* Compact short-form reason badges. The full
-                                    sentence-form text from the engine is kept
-                                    in the title attribute so a user can hover
-                                    to see e.g. "Min revenue $50,000, deal has
-                                    $42,000" instead of just "Revenue Too Low". */}
-                                <div className="flex flex-wrap gap-1 justify-end shrink-0 max-w-[70%]">
-                                  {(e.reasonCodes && e.reasonCodes.length > 0
-                                    ? e.reasonCodes
-                                    : ['restricted_state'] // never empty for an excluded row
-                                  ).map((code) => {
-                                    const label = EXCLUSION_LABELS[code as keyof typeof EXCLUSION_LABELS] ?? 'Restricted';
-                                    // Pull the matching detailed reason for the tooltip
-                                    const detail = e.reasons.find((r) => !r.includes('OK')) ?? '';
-                                    return (
-                                      <span
-                                        key={code}
-                                        title={detail}
-                                        className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-50 text-rose-700 border border-rose-200"
-                                      >
-                                        {label}
-                                      </span>
-                                    );
-                                  })}
-                                </div>
+                              <div key={e.funderId} className="px-4 py-2 flex items-center justify-between text-xs">
+                                <span className="font-medium text-muted-foreground">{e.funderName}</span>
+                                <span className="text-muted-foreground/80 text-right ml-3 truncate max-w-[60%]">
+                                  {e.reasons.find((r) => !r.includes('OK')) ?? e.reasons[0]}
+                                </span>
                               </div>
                             ))}
                           </CardContent>
@@ -1310,185 +533,6 @@ export default function DealShopPage() {
           </div>
         )
       )}
-
-      {/* Manual funder picker — shown when no match has been run (criteria
-          incomplete). Lets the broker who already knows where to shop just
-          pick funders directly without entering deal info. The same
-          selectedFunders state drives the send form on the left.
-
-          Tier chips work exactly like the matched view: left half filters
-          to that tier, right half selects/deselects every funder in it. */}
-      {!results && (
-        <Card>
-          <CardContent className="p-3 space-y-3">
-            <div className="flex items-baseline justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/80">
-                Active funders ({funderMap.size})
-              </h3>
-              <span className="text-[10px] text-muted-foreground italic">
-                Enter criteria for matching · or pick directly
-              </span>
-            </div>
-
-            {funderMap.size === 0 ? (
-              <div className="text-xs text-muted-foreground py-6 text-center">
-                No funders configured yet. Add some in the <a href="/funders" className="text-primary hover:underline">Funders</a> tab.
-              </div>
-            ) : (
-              <>
-                {/* Tier chip row — same split-control UX as the matched
-                    view. Empty tier rosters get no chip. */}
-                {manualTierGroups.length > 1 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    <div className={cn(
-                      'inline-flex items-stretch rounded-full border overflow-hidden text-xs font-medium transition-colors',
-                      activeManualTier === 'all'
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
-                    )}>
-                      <button
-                        onClick={() => setActiveManualTier('all')}
-                        className="flex items-center gap-1.5 pl-2.5 pr-2 py-1"
-                        title="Show all funders, grouped by tier"
-                      >
-                        All tiers
-                        <span className={cn('tabular-nums px-1 rounded text-[10px]',
-                          activeManualTier === 'all' ? 'bg-primary-foreground/20' : 'bg-muted')}>{funderMap.size}</span>
-                      </button>
-                      <button
-                        onClick={() => toggleSelectTier(Array.from(funderMap.keys()))}
-                        title={`Select all ${funderMap.size} active funders`}
-                        className={cn(
-                          'px-2 border-l flex items-center justify-center text-sm',
-                          activeManualTier === 'all'
-                            ? 'border-primary-foreground/30 hover:bg-primary-foreground/15'
-                            : 'border-border hover:bg-muted'
-                        )}
-                      >
-                        ✓
-                      </button>
-                    </div>
-                    {manualTierGroups.map((g) => {
-                      const tierIds = g.funders.map((f) => f.id);
-                      const allInTierSelected = tierIds.length > 0 && tierIds.every((id) => selectedFunders.has(id));
-                      return (
-                        <div
-                          key={g.tier}
-                          className={cn(
-                            'inline-flex items-stretch rounded-full border overflow-hidden text-xs font-medium transition-colors max-w-[240px]',
-                            activeManualTier === g.tier
-                              ? 'bg-primary text-primary-foreground border-primary'
-                              : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
-                          )}
-                        >
-                          <button
-                            onClick={() => setActiveManualTier(g.tier)}
-                            title={`Filter to ${g.tier} only`}
-                            className="flex items-center gap-1.5 pl-2.5 pr-2 py-1 min-w-0"
-                          >
-                            <span className="truncate">{g.tier}</span>
-                            <span className={cn('tabular-nums px-1 rounded text-[9px]',
-                              activeManualTier === g.tier ? 'bg-primary-foreground/20' : 'bg-muted')}>
-                              {g.funders.length}
-                            </span>
-                          </button>
-                          <button
-                            onClick={() => toggleSelectTier(tierIds)}
-                            title={allInTierSelected
-                              ? `Deselect all ${tierIds.length} funders in ${g.tier}`
-                              : `Select all ${tierIds.length} funders in ${g.tier}`}
-                            className={cn(
-                              'px-2 border-l flex items-center justify-center text-sm',
-                              activeManualTier === g.tier
-                                ? 'border-primary-foreground/30 hover:bg-primary-foreground/15'
-                                : 'border-border hover:bg-muted',
-                              allInTierSelected && (activeManualTier === g.tier ? 'bg-primary-foreground/15' : 'bg-emerald-50 text-emerald-700')
-                            )}
-                          >
-                            {allInTierSelected ? '✓' : '+'}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <div className="max-h-[calc(100vh-260px)] overflow-y-auto space-y-3">
-                  {filteredManualGroups.map((g) => (
-                    <div key={g.tier}>
-                      {/* Only render the tier header when "all tiers" is
-                          active. When the user has filtered to a single
-                          tier the header is redundant with the chip. */}
-                      {activeManualTier === 'all' && (
-                        <div className="flex items-baseline gap-2 mb-1 px-1">
-                          <h4 className="text-[10px] font-semibold uppercase tracking-wider text-foreground/70">{g.tier}</h4>
-                          <span className="text-[10px] text-muted-foreground">{g.funders.length}</span>
-                        </div>
-                      )}
-                      <div className="divide-y divide-border/60 rounded border border-border/60 overflow-hidden">
-                        {g.funders.map((f) => {
-                          const shoppingEmails: string[] = (f.emails ?? []).filter(Boolean);
-                          const primary = f.contacts?.find((c) => c.email);
-                          const displayEmail = shoppingEmails[0] ?? primary?.email ?? null;
-                          const isSelected = selectedFunders.has(f.id);
-                          const sub = alreadySubmitted.get(f.id);
-                          return (
-                            <label
-                              key={`${g.tier}-${f.id}`}
-                              className={cn(
-                                'flex items-center gap-2 py-1.5 px-2 cursor-pointer hover:bg-muted/30',
-                                isSelected && 'bg-primary/5',
-                                sub && 'opacity-60'
-                              )}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => toggleFunderSel(f.id)}
-                                className="h-4 w-4 rounded border-border accent-[var(--primary,#2563eb)]"
-                              />
-                              <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium truncate flex items-center gap-1.5">
-                                  {f.name}
-                                  {sub && (
-                                    <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-blue-100 text-blue-800">
-                                      Already sent
-                                    </span>
-                                  )}
-                                </div>
-                                {displayEmail && (
-                                  <div className="text-[10px] text-muted-foreground font-mono truncate">{displayEmail}</div>
-                                )}
-                              </div>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-        </div>
-        {/* ============ END RIGHT COLUMN ============ */}
-
-      </div>
-      {/* ============ END SPLIT LAYOUT ============ */}
-
-      {/* Post-send confirmation — replaces the old browser-top confirm popup */}
-      <ConfirmDialog
-        open={showPostSendConfirm}
-        title="All emails sent successfully"
-        description="Want to head over to the Submissions page to track responses?"
-        confirmLabel="View Submissions"
-        cancelLabel="Stay here"
-        onConfirm={() => router.push('/submissions')}
-        onCancel={() => setShowPostSendConfirm(false)}
-      />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, Button, Input, Field, PageHeader, Badge, PercentInput, CurrencyInput } from '@/components/ui/primitives';
+import { Card, CardContent, Button, Input, Field, PageHeader, Badge } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { cn } from '@/lib/utils';
@@ -9,7 +9,6 @@ import { computePaydown } from '@/lib/deals/paydown';
 import { exportCSV } from '@/lib/csv-export';
 import { Download } from 'lucide-react';
 import { formatCalendarDate, toDateInput } from '@/lib/dates';
-import { SearchableDealSelect } from '@/components/ui/searchable-deal-select';
 
 /* ---------- comma formatting helpers ---------- */
 // Display a numeric string with thousands separators while typing (keeps a
@@ -72,24 +71,13 @@ interface Commission {
   owedAmount: number;
   status: 'pending' | 'cleared' | 'clawed_back';
   fundingDate: string | null;
-  // Funding date + notes from the underlying deal record. Surfaced for
-  // both admin and rep views so the rep sees deal context next to pay.
-  dealFundingDate?: string | null;
-  dealFundedNotes?: string | null;
   clearedDate: string | null;
   earlyPayoffDiscount: string | null;
   notes: string | null;
   syncState: 'pending' | 'synced' | 'failed';
   updatedAt: string;
 }
-interface Deal {
-  id: string;
-  name: string;
-  assignedRepId: string | null;
-  merchantFirstName?: string | null;
-  merchantLastName?: string | null;
-  status?: string | null;
-}
+interface Deal { id: string; name: string; assignedRepId: string | null; }
 interface Rep { id: string; name: string; role: string; }
 interface LeadSource { id: string; name: string; contactEmail: string | null; contactPhone: string | null; isActive: boolean; }
 interface LSCommission {
@@ -173,13 +161,13 @@ export default function CommissionsPage() {
   useEffect(() => { load(); }, []);
 
   const stats = useMemo(() => {
-    let total = 0, paid = 0, pending = 0, owed = 0, clawed = 0;
+    let total = 0, paid = 0, pending = 0, owed = 0, available = 0, clawed = 0;
     let fundedVolume = 0, grossTotal = 0;
     let countPending = 0, countCleared = 0, countClawed = 0;
     const now = new Date();
     const thisMonth = now.getMonth(), thisYear = now.getFullYear();
     let mtdFunded = 0, mtdCommission = 0;
-    const byRep = new Map<string, { name: string; commission: number; funded: number; count: number }>();
+    const byRep = new Map<string, { name: string; commission: number; funded: number; count: number; available: number }>();
 
     for (const r of rows) {
       const amt = Number(r.repCommissionAmount);
@@ -190,7 +178,13 @@ export default function CommissionsPage() {
       if (r.status === 'clawed_back') { clawed += amt; countClawed++; }
       else {
         total += amt; paid += Number(r.paidAmount); owed += r.owedAmount; pending += r.pendingAmount;
-        if (r.status === 'pending') countPending++; else countCleared++;
+        if (r.status === 'pending') countPending++;
+        else {
+          countCleared++;
+          // Available balance = cleared but not yet paid out. This is what
+          // the rep can draw against on the next payment cycle.
+          available += r.owedAmount;
+        }
       }
 
       if (r.fundingDate) {
@@ -201,14 +195,16 @@ export default function CommissionsPage() {
       }
 
       if (r.repId && r.status !== 'clawed_back') {
-        const e = byRep.get(r.repId) ?? { name: r.repName ?? 'Unknown', commission: 0, funded: 0, count: 0 };
+        const e = byRep.get(r.repId) ?? { name: r.repName ?? 'Unknown', commission: 0, funded: 0, count: 0, available: 0 };
         e.commission += amt; e.funded += funded; e.count++;
+        // Per-rep available balance for the admin's by-rep breakdown.
+        if (r.status === 'cleared') e.available += r.owedAmount;
         byRep.set(r.repId, e);
       }
     }
     const topReps = Array.from(byRep.values()).sort((a, b) => b.commission - a.commission).slice(0, 5);
     const paidPct = total > 0 ? Math.round((paid / total) * 100) : 0;
-    return { total, paid, pending, owed, clawed, fundedVolume, grossTotal, countPending, countCleared, countClawed, mtdFunded, mtdCommission, topReps, paidPct, dealCount: rows.length };
+    return { total, paid, pending, owed, available, clawed, fundedVolume, grossTotal, countPending, countCleared, countClawed, mtdFunded, mtdCommission, topReps, paidPct, dealCount: rows.length };
   }, [rows]);
 
   // Filtered view for the rep/admin commission list. "Refi" = funded deal that
@@ -240,13 +236,33 @@ export default function CommissionsPage() {
 
   // Lead source commission totals (mirrors rep stats).
   const lsStats = useMemo(() => {
-    let total = 0, paid = 0, pending = 0, owed = 0, clawed = 0;
+    let total = 0, paid = 0, pending = 0, owed = 0, available = 0, clawed = 0;
+    // Per-lead-source breakdown so admins can see who's owed what without
+    // scanning the full table. Keyed by lead source name (the row already
+    // has it joined). Same shape as `byRep` in the rep stats.
+    const byLs = new Map<string, { name: string; total: number; paid: number; available: number; owed: number }>();
+
     for (const r of lsRows) {
       const amt = Number(r.commissionAmount);
       if (r.status === 'clawed_back') { clawed += amt; continue; }
-      total += amt; paid += Number(r.paidAmount); owed += r.owedAmount; pending += r.pendingAmount;
+      total += amt;
+      paid += Number(r.paidAmount);
+      owed += r.owedAmount;
+      pending += r.pendingAmount;
+      // Available = cleared remaining. Pending money is still in the
+      // clearing window; only cleared money is actually drawable.
+      if (r.status === 'cleared') available += r.owedAmount;
+
+      const lsName = r.leadSourceName ?? 'Unknown';
+      const e = byLs.get(lsName) ?? { name: lsName, total: 0, paid: 0, available: 0, owed: 0 };
+      e.total += amt;
+      e.paid += Number(r.paidAmount);
+      e.owed += r.owedAmount;
+      if (r.status === 'cleared') e.available += r.owedAmount;
+      byLs.set(lsName, e);
     }
-    return { total, paid, pending, owed, clawed };
+    const byLeadSource = Array.from(byLs.values()).sort((a, b) => b.available - a.available);
+    return { total, paid, pending, owed, available, clawed, byLeadSource };
   }, [lsRows]);
 
   async function patch(id: string, body: Record<string, unknown>) {
@@ -379,9 +395,15 @@ export default function CommissionsPage() {
                     <div className="h-full bg-emerald-500" style={{ width: `${stats.paidPct}%` }} />
                     <div className="h-full bg-amber-400" style={{ width: `${stats.total > 0 ? Math.round((stats.pending / stats.total) * 100) : 0}%` }} />
                   </div>
-                  <div className="flex gap-4 mt-2 text-[11px] text-muted-foreground">
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[11px] text-muted-foreground">
                     <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Paid {formatCurrency(stats.paid)}</span>
                     <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-400" /> Pending {formatCurrency(stats.pending)}</span>
+                    {/* Available = cleared but not yet paid out. Highlighted
+                        in primary tone because this is the actionable number
+                        — what's ready to draw against. */}
+                    <span className="flex items-center gap-1 font-medium text-primary">
+                      <span className="h-2 w-2 rounded-full bg-primary" /> Available {formatCurrency(stats.available)}
+                    </span>
                     <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-muted-foreground/40" /> Owed {formatCurrency(stats.owed)}</span>
                   </div>
                 </div>
@@ -424,6 +446,14 @@ export default function CommissionsPage() {
                           <div className="h-1.5 bg-muted rounded-full overflow-hidden mt-1">
                             <div className="h-full bg-primary rounded-full" style={{ width: `${Math.round((rep.commission / maxC) * 100)}%` }} />
                           </div>
+                          {/* Per-rep available balance — surfaced inline so
+                              admins can see who's ready to be paid out
+                              without leaving this card. */}
+                          {rep.available > 0 && (
+                            <div className="text-[10px] text-emerald-700 tabular-nums mt-0.5">
+                              {formatCurrency(rep.available)} available
+                            </div>
+                          )}
                         </div>
                         <div className="text-[11px] text-muted-foreground tabular-nums w-16 text-right">{rep.count} deal{rep.count === 1 ? '' : 's'}</div>
                       </div>
@@ -471,15 +501,8 @@ export default function CommissionsPage() {
                   <thead><tr className="bg-muted/40 border-b border-border text-left">
                     <th className="px-4 py-2 th">Deal</th>
                     {isAdmin && <th className="px-3 py-2 th">Rep</th>}
-                    {/* Date Funded — visible to BOTH reps and admins so the
-                        rep can see when their deal funded without expanding
-                        the row. Pulled from the joined deal record. */}
-                    <th className="px-3 py-2 th">Date funded</th>
-                    {/* Gross + Split % columns are admin-only — reps shouldn't
-                        be able to infer lead-source pay from the gross / split
-                        relationship. They still see Rep comm. (their take). */}
-                    {isAdmin && <th className="px-3 py-2 th text-right">Gross</th>}
-                    {isAdmin && <th className="px-3 py-2 th text-right">Split %</th>}
+                    <th className="px-3 py-2 th text-right">Gross</th>
+                    <th className="px-3 py-2 th text-right">Split %</th>
                     <th className="px-3 py-2 th text-right">Rep comm.</th>
                     <th className="px-3 py-2 th text-right">Paid</th>
                     <th className="px-3 py-2 th text-right">Owed</th>
@@ -489,38 +512,26 @@ export default function CommissionsPage() {
                   <tbody className="divide-y divide-border/60">
                     {filteredRows.map((r) => (
                       <>
-                        <tr
-                          key={r.id}
-                          className="hover:bg-muted/20 cursor-pointer"
-                          onClick={() => setExpanded(expanded === r.id ? null : r.id)}
-                        >
+                        <tr key={r.id} className="hover:bg-muted/20">
                           <td className="px-4 py-2.5 font-medium">{r.dealName}</td>
                           {isAdmin && <td className="px-3 py-2.5 text-muted-foreground">{r.repName ?? '—'}</td>}
-                          <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
-                            {r.dealFundingDate ? formatDate(r.dealFundingDate) : (r.fundingDate ? formatDate(r.fundingDate) : '—')}
-                          </td>
-                          {isAdmin && <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(r.grossCommission))}</td>}
-                          {isAdmin && <td className="px-3 py-2.5 text-right tabular-nums">{Number(r.repSplitPct)}%</td>}
+                          <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(r.grossCommission))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{Number(r.repSplitPct)}%</td>
                           <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatCurrency(Number(r.repCommissionAmount))}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">{formatCurrency(Number(r.paidAmount))}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(r.owedAmount)}</td>
                           <td className="px-3 py-2.5"><Badge variant={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge></td>
                           <td className="px-3 py-2.5 text-right">
-                            {/* Click the row OR this chevron to expand into
-                                the read-only Details view. Edit mode is
-                                entered from inside that panel — view and
-                                edit are now separate actions. */}
                             <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); setExpanded(expanded === r.id ? null : r.id); }}
+                              onClick={() => setExpanded(expanded === r.id ? null : r.id)}
                               className="text-xs font-medium text-primary hover:underline"
                             >
-                              {expanded === r.id ? 'Close' : 'Details'}
+                              {expanded === r.id ? 'Close' : (isAdmin ? 'Edit' : 'Details')}
                             </button>
                           </td>
                         </tr>
                         {expanded === r.id && (
-                          <tr className="bg-muted/10"><td colSpan={isAdmin ? 10 : 7} className="px-4 py-3">
+                          <tr className="bg-muted/10"><td colSpan={isAdmin ? 9 : 8} className="px-4 py-3">
                             <CommissionDetail r={r} isAdmin={isAdmin} reps={reps} onPatch={patch} onDelete={softDelete} onDealPatch={dealPatch} />
                           </td></tr>
                         )}
@@ -538,13 +549,50 @@ export default function CommissionsPage() {
       {tab === 'lead' && isAdmin && (
         <>
           {/* Lead source commission dashboard */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
             <Tile label="Total" value={formatCurrency(lsStats.total)} />
             <Tile label="Paid" value={formatCurrency(lsStats.paid)} tone="emerald" />
             <Tile label="Pending" value={formatCurrency(lsStats.pending)} tone="amber" />
+            {/* Available = cleared but unpaid. The headline number for
+                deciding who to cut a check to next. */}
+            <Tile label="Available" value={formatCurrency(lsStats.available)} tone="emerald" />
             <Tile label="Owed" value={formatCurrency(lsStats.owed)} />
             <Tile label="Clawed back" value={formatCurrency(lsStats.clawed)} tone="rose" />
           </div>
+
+          {/* Per-lead-source breakdown — admin sees who's owed what, sorted
+              by available (ready-to-pay) descending. Hidden when there's
+              nothing to show. */}
+          {lsStats.byLeadSource.length > 0 && (
+            <Card className="overflow-hidden">
+              <CardContent className="p-0">
+                <div className="px-4 py-3 border-b border-border">
+                  <div className="text-sm font-semibold">Available balance by lead source</div>
+                  <div className="text-xs text-muted-foreground">Cleared but not yet paid out — ready to disburse.</div>
+                </div>
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/30 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Lead source</th>
+                      <th className="px-3 py-2 text-right">Available</th>
+                      <th className="px-3 py-2 text-right">Total owed</th>
+                      <th className="px-3 py-2 text-right">Paid to date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {lsStats.byLeadSource.map((e) => (
+                      <tr key={e.name} className="hover:bg-muted/20">
+                        <td className="px-4 py-2 font-medium">{e.name}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-emerald-700 font-medium">{formatCurrency(e.available)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(e.owed)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatCurrency(e.paid)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="overflow-hidden">
             {lsRows.length === 0 ? (
@@ -749,16 +797,10 @@ function AddCommissionModal({ deals, reps, onClose, onSaved }: { deals: Deal[]; 
           <Input inputMode="decimal" value={f.termCount} onChange={(e) => setF({ ...f, termCount: e.target.value })} placeholder={f.termMode === 'daily' ? '120' : '24'} />
         </Field>
 
-        {/* Fees is a PERCENTAGE field, not a dollar amount — represents the
-            origination / funding fee on the deal. Switched from MoneyField
-            ($ prefix) to a percent-suffixed input to match how it's quoted
-            in the industry and how the calculator treats fees too. */}
-        <Field label="Funding fee">
-          <PercentInput value={f.fees ?? ''} onChange={(v) => setF({ ...f, fees: v })} placeholder="5" />
-        </Field>
+        <MoneyField label="Fees ($)" value={f.fees} onChange={(v) => setF({ ...f, fees: v })} placeholder="0" />
         <MoneyField label="Gross commission ($)" value={f.grossCommission} onChange={(v) => setF({ ...f, grossCommission: v })} placeholder="10,000" />
         <MoneyField label="Broker fee ($)" value={f.brokerFee} onChange={(v) => setF({ ...f, brokerFee: v })} placeholder="0" />
-        <Field label="Rep split"><PercentInput value={f.repSplitPct} onChange={(v) => setF({ ...f, repSplitPct: v })} placeholder="30" /></Field>
+        <Field label="Rep split %"><Input inputMode="decimal" value={f.repSplitPct} onChange={(e) => setF({ ...f, repSplitPct: e.target.value })} placeholder="30" /></Field>
 
         {/* Lead source (optional) */}
         <Field label="Lead source commission">
@@ -768,7 +810,7 @@ function AddCommissionModal({ deals, reps, onClose, onSaved }: { deals: Deal[]; 
             <option value="flat">Flat amount</option>
           </select>
         </Field>
-        {f.leadSourceMode === 'split' && <Field label="Lead source split"><PercentInput value={f.leadSourceSplitPct} onChange={(v) => setF({ ...f, leadSourceSplitPct: v })} placeholder="10" /></Field>}
+        {f.leadSourceMode === 'split' && <Field label="Lead source split %"><Input inputMode="decimal" value={f.leadSourceSplitPct} onChange={(e) => setF({ ...f, leadSourceSplitPct: e.target.value })} placeholder="10" /></Field>}
         {f.leadSourceMode === 'flat' && <MoneyField label="Lead source flat ($)" value={f.leadSourceFlatAmount} onChange={(v) => setF({ ...f, leadSourceFlatAmount: v })} placeholder="500" />}
 
         <Field label="Early payoff discount"><Input value={f.earlyPayoffDiscount} onChange={(e) => setF({ ...f, earlyPayoffDiscount: e.target.value })} placeholder="optional" /></Field>
@@ -1047,12 +1089,6 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
   onDelete: (id: string) => void;
   onDealPatch: (dealId: string, body: Record<string, unknown>) => Promise<boolean>;
 }) {
-  // Edit mode is OFF by default — clicking the row expands into the
-  // read-only Details view. Admins click "Edit" inside the panel to
-  // switch into the editable form. Viewing and editing are now distinct
-  // actions, never combined.
-  const [editing, setEditing] = useState(false);
-
   const [paid, setPaid] = useState(r.paidAmount);
   const [status, setStatus] = useState(r.status);
   const [notes, setNotes] = useState(r.notes ?? '');
@@ -1088,12 +1124,30 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
     await onDealPatch(r.dealId, body);
   }
 
-  function saveCommission() {
+  async function saveCommission() {
+    // Build the commission-row patch.
     const body: Record<string, unknown> = { paidAmount: Number(paid), status, notes, earlyPayoffDiscount: earlyPayoffDiscount || null };
     if (gross !== (r.grossCommission ?? '')) body.grossCommission = Number(gross) || 0;
     if (brokerFee !== (r.brokerFee ?? '')) body.brokerFee = Number(brokerFee) || 0;
     if (splitPct !== (r.repSplitPct ?? '')) body.repSplitPct = Number(splitPct) || 0;
-    if (fundingDate && fundingDate !== (r.fundingDate ?? '').slice(0, 10)) body.fundingDate = fundingDate;
+    const fundingDateChanged = !!fundingDate && fundingDate !== (r.fundingDate ?? '').slice(0, 10);
+    if (fundingDateChanged) body.fundingDate = fundingDate;
+
+    // ALSO patch the underlying deal record when the funding date changes.
+    //
+    // Previously, editing "Funded date" here only updated the
+    // dealCommissions.fundingDate column. The DEAL'S fundingDate (which is
+    // the source of truth for the date funded on every surface — funded
+    // board, portfolio, payments, dashboard) stayed at the old value. So
+    // users saw the new date in the expand panel (which reads from the
+    // commission row's own copy) but nowhere else.
+    //
+    // We fire the deal patch FIRST (it's async, returns a promise), then
+    // the commission patch. onPatch itself reloads the whole list when it
+    // finishes, so by the time we return both writes have hit the API.
+    if (fundingDateChanged && r.dealId) {
+      await onDealPatch(r.dealId, { fundingDate });
+    }
     onPatch(r.id, body);
   }
 
@@ -1103,42 +1157,13 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
         <Detail label="Funded amount" value={r.fundedAmount ? formatCurrency(Number(r.fundedAmount)) : '—'} />
         <Detail label="Rate" value={r.rate ?? '—'} />
         <Detail label="Term" value={r.termMode && r.termCount ? `${Number(r.termCount)} ${r.termMode === 'daily' ? 'days' : 'weeks'}` : (r.termMonths ? `${r.termMonths} mo` : '—')} />
-        <Detail label="Funding fee" value={r.fees ? `${Number(r.fees)}%` : '—'} />
-        {/* Date funded — comes from the deal record, not the commission row.
-            The commission's own fundingDate is admin-editable; this is the
-            source-of-truth date for the underlying funded deal. */}
-        <Detail label="Date funded" value={r.dealFundingDate ? formatDate(r.dealFundingDate) : (r.fundingDate ? formatDate(r.fundingDate) : '—')} />
+        <Detail label="Fees" value={r.fees ? formatCurrency(Number(r.fees)) : '—'} />
         <Detail label="Pending" value={formatCurrency(r.pendingAmount)} />
         <Detail label="Cleared date" value={r.clearedDate ? formatDate(r.clearedDate) : '—'} />
       </div>
 
-      {/* Funded-deal notes — surfaced from the deal record so the rep sees
-          deal-level context (special terms, watch-list flags, etc.) right
-          alongside their commission detail. Read-only here; edited from
-          the Funded Deals page. */}
-      {r.dealFundedNotes && (
-        <div className="text-xs">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-0.5">Deal notes</div>
-          <div className="whitespace-pre-wrap text-foreground bg-muted/30 border border-border rounded-md px-3 py-2">{r.dealFundedNotes}</div>
-        </div>
-      )}
-
-      {/* Admin-only Edit toggle. Default is read-only details; admin clicks
-          to expose the editable forms below. Keeps view ≠ edit. */}
-      {isAdmin && !editing && (
-        <div className="flex justify-end">
-          <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-            Edit details
-          </Button>
-        </div>
-      )}
-
-      {isAdmin && editing && (
+      {isAdmin && (
         <>
-          <div className="flex items-center justify-between pt-3 border-t border-border">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Editing — changes save with the buttons below each section</div>
-            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Done editing</Button>
-          </div>
           {/* Editable deal details — patches the underlying deal record */}
           <div className="space-y-3 pt-3 border-t border-border">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Deal details (editable)</div>
@@ -1162,9 +1187,9 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
           <div className="space-y-3 pt-3 border-t border-border">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Commission math (editable)</div>
             <div className="flex flex-wrap items-end gap-3">
-              <Field label="Total commission" className="w-40"><CurrencyInput value={gross} onChange={(v) => setGross(v)} placeholder="10,000" /></Field>
-              <Field label="Broker fee" className="w-32"><CurrencyInput value={brokerFee} onChange={(v) => setBrokerFee(v)} placeholder="2,000" /></Field>
-              <Field label="Rep split" className="w-28"><PercentInput value={splitPct} onChange={(v) => setSplitPct(v)} placeholder="50" /></Field>
+              <Field label="Total commission ($)" className="w-40"><Input inputMode="decimal" value={gross} onChange={(e) => setGross(e.target.value)} placeholder="10000" /></Field>
+              <Field label="Broker fee ($)" className="w-32"><Input inputMode="decimal" value={brokerFee} onChange={(e) => setBrokerFee(e.target.value)} placeholder="2000" /></Field>
+              <Field label="Rep split %" className="w-28"><Input inputMode="decimal" value={splitPct} onChange={(e) => setSplitPct(e.target.value)} placeholder="50" /></Field>
               <Field label="Funded date" className="w-40"><Input type="date" value={fundingDate} onChange={(e) => setFundingDate(e.target.value)} /></Field>
               <div className="px-3 py-2 rounded bg-muted/40 text-xs">
                 <span className="text-muted-foreground">Rep gets: </span>
@@ -1174,7 +1199,7 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
 
             {/* Status / paid / notes / early payoff */}
             <div className="flex flex-wrap items-end gap-3">
-              <Field label="Paid amount" className="w-36"><CurrencyInput value={paid} onChange={(v) => setPaid(v)} placeholder="0" /></Field>
+              <Field label="Paid amount" className="w-36"><Input inputMode="decimal" value={paid} onChange={(e) => setPaid(e.target.value)} /></Field>
               <Field label="Status" className="w-40">
                 <select value={status} onChange={(e) => setStatus(e.target.value as Commission['status'])} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
                   <option value="pending">Pending</option><option value="cleared">Cleared</option><option value="clawed_back">Clawed Back</option>
@@ -1264,7 +1289,7 @@ function LogPaymentInline({ commissionId, repId, onLogged }: { commissionId: str
         <button onClick={() => setOpen(true)} className="text-xs text-primary hover:underline">+ Log a payment</button>
       ) : (
         <div className="flex flex-wrap items-end gap-2">
-          <Field label="Amount" className="w-32"><CurrencyInput value={amount} onChange={(v) => setAmount(v)} placeholder="1,000" /></Field>
+          <Field label="Amount" className="w-28"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000" /></Field>
           <Field label="Method" className="w-28">
             <select value={method} onChange={(e) => setMethod(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
               {['ach', 'wire', 'check', 'cash', 'zelle', 'other'].map((m) => <option key={m} value={m}>{m.toUpperCase()}</option>)}
@@ -1349,7 +1374,7 @@ function LSCommissionDetail({
     return Math.round((g + b) * (s / 100) * 100) / 100;
   }, [mode, gross, brokerFee, splitPct, flatAmount]);
 
-  function saveAll() {
+  async function saveAll() {
     const body: Record<string, unknown> = {
       paidAmount: Number(paid), status,
       earlyPayoffDiscount: earlyPayoffDiscount || null, notes,
@@ -1358,7 +1383,15 @@ function LSCommissionDetail({
     if (brokerFee !== (r.brokerFee ?? '')) body.brokerFee = Number(brokerFee) || 0;
     if (mode === 'split' && splitPct !== (r.splitPct ?? '')) { body.splitPct = Number(splitPct) || 0; body.flatAmount = null; }
     if (mode === 'flat' && flatAmount !== (r.flatAmount ?? '')) { body.flatAmount = Number(flatAmount) || 0; body.splitPct = null; }
-    if (fundingDate && fundingDate !== (r.fundingDate ?? '').slice(0, 10)) body.fundingDate = fundingDate;
+    const fundingDateChanged = !!fundingDate && fundingDate !== (r.fundingDate ?? '').slice(0, 10);
+    if (fundingDateChanged) body.fundingDate = fundingDate;
+
+    // Patch the underlying deal first if the funding date changed, then
+    // the lead-source-commission row. Same reasoning as in
+    // CommissionDetail — keep the deal as the source of truth.
+    if (fundingDateChanged && r.dealId) {
+      await onDealPatch(r.dealId, { fundingDate });
+    }
     onPatch(r.id, body);
   }
 
@@ -1394,8 +1427,8 @@ function LSCommissionDetail({
       <div className="pt-2 border-t border-dashed border-border">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Commission math (editable)</div>
         <div className="flex flex-wrap items-end gap-2">
-          <Field label="Total commission" className="w-40"><CurrencyInput value={gross} onChange={(v) => setGross(v)} placeholder="10,000" /></Field>
-          <Field label="Broker fee" className="w-32"><CurrencyInput value={brokerFee} onChange={(v) => setBrokerFee(v)} placeholder="2,000" /></Field>
+          <Field label="Total commission ($)" className="w-40"><Input inputMode="decimal" value={gross} onChange={(e) => setGross(e.target.value)} placeholder="10000" /></Field>
+          <Field label="Broker fee ($)" className="w-32"><Input inputMode="decimal" value={brokerFee} onChange={(e) => setBrokerFee(e.target.value)} placeholder="2000" /></Field>
           <Field label="Funded date" className="w-40"><Input type="date" value={fundingDate} onChange={(e) => setFundingDate(e.target.value)} /></Field>
         </div>
         <div className="flex flex-wrap items-end gap-2 mt-2">
@@ -1506,7 +1539,7 @@ function LogLSPaymentInline({ lsCommissionId, onLogged }: { lsCommissionId: stri
         <button onClick={() => setOpen(true)} className="text-xs text-primary hover:underline">+ Log a payment</button>
       ) : (
         <div className="flex flex-wrap items-end gap-2">
-          <Field label="Amount" className="w-32"><CurrencyInput value={amount} onChange={(v) => setAmount(v)} placeholder="1,000" /></Field>
+          <Field label="Amount" className="w-28"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000" /></Field>
           <Field label="Method" className="w-28">
             <select value={method} onChange={(e) => setMethod(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
               {['ach', 'wire', 'check', 'cash', 'zelle', 'other'].map((m) => <option key={m} value={m}>{m.toUpperCase()}</option>)}
