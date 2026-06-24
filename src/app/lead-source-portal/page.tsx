@@ -79,14 +79,25 @@ export default function LeadSourcePortalPage() {
               <p className="text-sm text-muted-foreground mt-1">A summary of what you&apos;re owed and what&apos;s been paid.</p>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
+            {/* Hero stat — Available balance. The number the LS user most
+                cares about: what's cleared and ready to be paid out RIGHT
+                NOW. Much larger than the other stats so it can't be
+                missed. Pending shown beneath for context — that's money
+                still inside the clearing window. */}
+            <div className="bg-card border border-border rounded-xl p-5">
+              <div className="text-[11px] uppercase tracking-wider text-emerald-700 font-semibold">Available to withdraw</div>
+              <div className="text-4xl font-semibold tabular-nums mt-1 text-emerald-700">
+                {fmt(data.totals.available)}
+              </div>
+              <div className="text-xs text-muted-foreground mt-2">
+                Cleared commissions that have not yet been paid out. {fmt(data.totals.pending)} more is still in the clearing window.
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
               <Stat label="Total earned" value={fmt(data.totals.total)} />
               <Stat label="Paid to you" value={fmt(data.totals.paid)} tone="success" />
               <Stat label="Pending" value={fmt(data.totals.pending)} tone="warning" />
-              {/* Available — cleared but not yet paid out. Highlighted as
-                  success since this is the actionable balance the lead
-                  source can expect on the next disbursement cycle. */}
-              <Stat label="Available" value={fmt(data.totals.available)} tone="success" />
               <Stat label="Still owed" value={fmt(data.totals.owed)} />
               <Stat label="Clawed back" value={fmt(data.totals.clawedBack)} tone="danger" />
             </div>

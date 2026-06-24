@@ -29,6 +29,7 @@ export async function GET() {
       .select({
         lsc: leadSourceCommissions,
         dealName: deals.name,
+        dealFundingDate: deals.fundingDate,
         merchantFirstName: deals.merchantFirstName,
         merchantLastName: deals.merchantLastName,
         merchantPhone: deals.merchantPhone,
@@ -50,11 +51,18 @@ export async function GET() {
     const data = rows.map((r) => {
       const amt = Number(r.lsc.commissionAmount);
       const paid = Number(r.lsc.paidAmount);
-      const status = resolveAutoStatus(r.lsc.status, null, now);
+      // Resolve auto-status — pending rows auto-promote to cleared after
+      // the clearing window so available-balance math reflects what the
+      // lead source can actually be paid out right now (not what's in
+      // stored DB state, which may lag behind the auto-clearance window).
+      const status = resolveAutoStatus(r.lsc.status, r.lsc.fundingDate, now);
       return {
         id: r.lsc.id,
         dealId: r.lsc.dealId,
         dealName: r.dealName,
+        // Joined deal funding date — source of truth across surfaces; the
+        // LS commission row's own fundingDate is a secondary copy.
+        dealFundingDate: r.dealFundingDate,
         merchantFirstName: r.merchantFirstName,
         merchantLastName: r.merchantLastName,
         merchantName: [r.merchantFirstName, r.merchantLastName].filter(Boolean).join(' ') || null,
@@ -71,9 +79,12 @@ export async function GET() {
         flatAmount: r.lsc.flatAmount,
         commissionAmount: r.lsc.commissionAmount,
         paidAmount: r.lsc.paidAmount,
-        owedAmount: r.lsc.status === 'clawed_back' ? 0 : Math.max(0, amt - paid),
-        pendingAmount: r.lsc.status === 'pending' ? Math.max(0, amt - paid) : 0,
-        status: r.lsc.status,
+        // Use the RESOLVED status (not raw DB status) so an auto-cleared
+        // row stops counting as pending the moment it clears, even if the
+        // DB hasn't been re-written yet. Same convention as /api/commissions.
+        owedAmount: status === 'clawed_back' ? 0 : Math.max(0, amt - paid),
+        pendingAmount: status === 'pending' ? Math.max(0, amt - paid) : 0,
+        status,
         earlyPayoffDiscount: r.lsc.earlyPayoffDiscount,
         notes: r.lsc.notes,
         syncState: r.lsc.syncState,

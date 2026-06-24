@@ -209,6 +209,9 @@ export default function PortfolioPage() {
       p: computePaydown({
         fundedAmount: d.fundedAmount, factorRate: d.factorRate, termMode: d.termMode,
         termCount: d.termCount, fundingDate: d.fundingDate, amountCollected: d.amountCollected,
+        // Refinanced deals are terminal — short-circuit renewalEligible so
+        // they stop appearing in the refi-ready filter on /portfolio.
+        fundedSubStatus: d.fundedSubStatus,
       }),
     })), [deals]);
 
@@ -272,6 +275,74 @@ export default function PortfolioPage() {
     return { funded, payback, collected, remaining, refi, count: enriched.filter((e) => e.p.hasStructure).length };
   }, [enriched]);
 
+  /**
+   * Sub-status breakdown for the dashboard pie chart.
+   *
+   * Categories:
+   *   • Active        — paying normally (default state, fundedSubStatus
+   *                     null/'active' AND not refi-eligible)
+   *   • Refi ready    — 50%+ paid in, eligible for renewal
+   *   • Payment issues
+   *   • Default
+   *   • Paid off      — closed via direct payoff (paidOff=true and NOT
+   *                     refinanced)
+   *   • Refinanced    — rolled into a new deal
+   *
+   * Counts only deals with enough structure to compute paydown (skips
+   * back-fill rows that haven't had funding details entered yet).
+   */
+  const breakdown = useMemo(() => {
+    const buckets = {
+      active: 0,
+      refi_eligible: 0,
+      payment_issues: 0,
+      default: 0,
+      paid_off: 0,
+      refinanced: 0,
+    };
+    for (const e of enriched) {
+      if (!e.p.hasStructure) continue;
+      const ss = e.deal.fundedSubStatus ?? 'active';
+      if (ss === 'refinanced') buckets.refinanced++;
+      else if (e.deal.paidOff) buckets.paid_off++;
+      else if (ss === 'payment_issues') buckets.payment_issues++;
+      else if (ss === 'default') buckets.default++;
+      else if (e.p.renewalEligible) buckets.refi_eligible++;
+      else buckets.active++;
+    }
+    return buckets;
+  }, [enriched]);
+
+  /**
+   * Month-over-month funded volume for the bar chart.
+   *
+   * Returns the last 12 months including the current one — even months
+   * with zero funded volume are present so the bar chart shows a
+   * continuous timeline. Months keyed by YYYY-MM so they sort lexically.
+   */
+  const monthly = useMemo(() => {
+    const now = new Date();
+    const months: { key: string; label: string; volume: number; count: number }[] = [];
+    // Build the 12-slot window first; we fill the volumes in afterward.
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label = d.toLocaleString('en-US', { month: 'short' });
+      months.push({ key, label, volume: 0, count: 0 });
+    }
+    const byKey = new Map(months.map((m) => [m.key, m]));
+    for (const e of enriched) {
+      if (!e.p.hasStructure || !e.p.fundingDate) continue;
+      const fd = e.p.fundingDate;
+      const key = `${fd.getFullYear()}-${String(fd.getMonth() + 1).padStart(2, '0')}`;
+      const bucket = byKey.get(key);
+      if (!bucket) continue;
+      bucket.volume += e.p.fundedAmount;
+      bucket.count++;
+    }
+    return months;
+  }, [enriched]);
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -293,6 +364,15 @@ export default function PortfolioPage() {
         <Stat label="Outstanding" value={formatCurrency(totals.remaining, { compact: true })} tone="amber" />
         <Stat label="Refi ready" value={String(totals.refi)} tone="teal" />
       </div>
+
+      {/* Funded Deals dashboard — visualizes the deal-status breakdown and
+          month-over-month funding volume so admins can see at a glance
+          what the portfolio looks like + how funding is trending.
+          Hidden when there are no funded deals (the empty state below
+          covers that case more usefully). */}
+      {totals.count > 0 && (
+        <PortfolioDashboard breakdown={breakdown} monthly={monthly} totals={totals} />
+      )}
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-2">
@@ -1609,5 +1689,319 @@ function FundedDealCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Funded Deals dashboard
+ * ─────────────────────────────────────────────────────────────────────
+ * Sits at the top of /portfolio. Two charts + a quick-stat strip:
+ *   1. Donut chart — deal sub-status breakdown (Active, Refi ready,
+ *      Payment issues, Default, Paid off, Refinanced)
+ *   2. Bar chart — funded volume + deal count for the last 12 months
+ *   3. Finance KPIs strip — average deal size, average factor, refi-ready
+ *      %, collected-vs-outstanding ratio. Numbers a portfolio manager
+ *      checks first when assessing book health.
+ *
+ * All inline SVG — no chart library dependency. Animations are pure CSS;
+ * keeps the bundle tight and renders instantly with no waterfall.
+ * ───────────────────────────────────────────────────────────────────── */
+
+interface BreakdownCounts {
+  active: number;
+  refi_eligible: number;
+  payment_issues: number;
+  default: number;
+  paid_off: number;
+  refinanced: number;
+}
+
+interface MonthlyVolume {
+  key: string;
+  label: string;
+  volume: number;
+  count: number;
+}
+
+interface PortfolioTotals {
+  funded: number;
+  payback: number;
+  collected: number;
+  remaining: number;
+  refi: number;
+  count: number;
+}
+
+function PortfolioDashboard({
+  breakdown,
+  monthly,
+  totals,
+}: {
+  breakdown: BreakdownCounts;
+  monthly: MonthlyVolume[];
+  totals: PortfolioTotals;
+}) {
+  // Derived finance KPIs.
+  // Average deal size = funded volume / # deals (with structure).
+  // Collection ratio = collected / total payback expected — how much of
+  // the book has come in. Doesn't include refinanced deals' refi proceeds.
+  const avgDealSize = totals.count > 0 ? totals.funded / totals.count : 0;
+  const collectionPct = totals.payback > 0 ? Math.round((totals.collected / totals.payback) * 100) : 0;
+  const refiReadyPct = totals.count > 0 ? Math.round((totals.refi / totals.count) * 100) : 0;
+  // Average factor = total payback / funded amount across the book.
+  // Useful sanity check — should be in the 1.25-1.50 range; outside
+  // that and something's off with the data.
+  const avgFactor = totals.funded > 0 ? totals.payback / totals.funded : 0;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+      {/* Pie chart — 1/3 width on large screens */}
+      <Card className="lg:col-span-1">
+        <CardContent className="p-4 space-y-3">
+          <div>
+            <div className="text-sm font-semibold">Deal mix</div>
+            <div className="text-xs text-muted-foreground">By status, current book</div>
+          </div>
+          <BreakdownPie breakdown={breakdown} />
+        </CardContent>
+      </Card>
+
+      {/* Bar chart — 2/3 width */}
+      <Card className="lg:col-span-2">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-start justify-between gap-2 flex-wrap">
+            <div>
+              <div className="text-sm font-semibold">Monthly funding volume</div>
+              <div className="text-xs text-muted-foreground">Last 12 months</div>
+            </div>
+            {/* Quick-glance: total volume over the window, so the chart
+                is anchored to a number rather than just shapes. */}
+            <div className="text-right">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">12 mo total</div>
+              <div className="text-base font-semibold tabular-nums">
+                {formatCurrency(monthly.reduce((s, m) => s + m.volume, 0), { compact: true })}
+              </div>
+            </div>
+          </div>
+          <MonthlyVolumeBars monthly={monthly} />
+        </CardContent>
+      </Card>
+
+      {/* Finance KPIs strip — full width below the two charts */}
+      <Card className="lg:col-span-3">
+        <CardContent className="p-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KPI
+              label="Avg deal size"
+              value={formatCurrency(avgDealSize, { compact: true })}
+              sublabel="across active book"
+            />
+            <KPI
+              label="Avg factor"
+              value={avgFactor > 0 ? avgFactor.toFixed(2) : '—'}
+              sublabel={
+                avgFactor > 0 && (avgFactor < 1.2 || avgFactor > 1.55)
+                  ? 'unusual range'
+                  : 'within normal range'
+              }
+            />
+            <KPI
+              label="Collection rate"
+              value={`${collectionPct}%`}
+              sublabel={`${formatCurrency(totals.collected, { compact: true })} of ${formatCurrency(totals.payback, { compact: true })}`}
+              tone={collectionPct >= 70 ? 'emerald' : collectionPct >= 40 ? 'amber' : undefined}
+            />
+            <KPI
+              label="Refi-ready share"
+              value={`${refiReadyPct}%`}
+              sublabel={`${totals.refi} deal${totals.refi === 1 ? '' : 's'} ready to renew`}
+              tone={refiReadyPct >= 20 ? 'teal' : undefined}
+            />
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * Donut pie chart — pure SVG, no library.
+ *
+ * The slice path math:
+ *   For each slice, advance an accumulator angle and emit an arc path
+ *   (M cx cy → L on outer radius → A arc → Z close). Donut effect is a
+ *   second center circle in card background color. The whole thing is
+ *   scaled to a 200x200 viewBox so it shrinks/grows cleanly with the
+ *   container.
+ *
+ * Color palette matches the FUNDED_SUB_STATUS tones used elsewhere so
+ * the legend, table badges, and pie all use the same vocabulary.
+ */
+function BreakdownPie({ breakdown }: { breakdown: BreakdownCounts }) {
+  // Ordered so the most common categories appear first in the legend.
+  // Active stays first because it's the default state of a healthy book.
+  const slices: { key: keyof BreakdownCounts; label: string; color: string }[] = [
+    { key: 'active',         label: 'Active',         color: '#10b981' }, // emerald-500
+    { key: 'refi_eligible',  label: 'Refi ready',     color: '#14b8a6' }, // teal-500
+    { key: 'payment_issues', label: 'Payment issues', color: '#f59e0b' }, // amber-500
+    { key: 'default',        label: 'Default',        color: '#ef4444' }, // red-500
+    { key: 'paid_off',       label: 'Paid off',       color: '#6b7280' }, // gray-500
+    { key: 'refinanced',     label: 'Refinanced',     color: '#8b5cf6' }, // violet-500
+  ];
+  const total = slices.reduce((s, x) => s + breakdown[x.key], 0);
+
+  // Empty book — show a placeholder ring so the layout doesn't collapse.
+  if (total === 0) {
+    return (
+      <div className="flex items-center gap-3">
+        <svg viewBox="0 0 200 200" className="w-32 h-32 shrink-0">
+          <circle cx="100" cy="100" r="85" fill="none" stroke="#e5e7eb" strokeWidth="30" />
+        </svg>
+        <div className="text-xs text-muted-foreground">No funded deals yet.</div>
+      </div>
+    );
+  }
+
+  // Build slice paths. We use a stroke instead of a true wedge fill so
+  // the donut "thickness" stays uniform and we don't have to draw the
+  // inner cutout — a 30-unit stroke on an r=85 circle is the donut.
+  const cx = 100, cy = 100, r = 85;
+  const circumference = 2 * Math.PI * r;
+  let offset = 0;
+  const paths = slices.map((s) => {
+    const v = breakdown[s.key];
+    const pct = v / total;
+    const len = circumference * pct;
+    const dasharray = `${len} ${circumference - len}`;
+    const dashoffset = -offset;
+    offset += len;
+    return { ...s, value: v, pct, dasharray, dashoffset };
+  });
+
+  return (
+    <div className="flex items-center gap-4">
+      <div className="relative shrink-0">
+        <svg viewBox="0 0 200 200" className="w-32 h-32" style={{ transform: 'rotate(-90deg)' }}>
+          {/* Underlying base ring so zero-slice statuses still show the
+              donut shape rather than an arc cut. */}
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke="#f3f4f6" strokeWidth="30" />
+          {paths.filter((p) => p.value > 0).map((p) => (
+            <circle
+              key={p.key}
+              cx={cx} cy={cy} r={r}
+              fill="none"
+              stroke={p.color}
+              strokeWidth="30"
+              strokeDasharray={p.dasharray}
+              strokeDashoffset={p.dashoffset}
+            />
+          ))}
+        </svg>
+        {/* Center label — total count of deals in the breakdown */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+          <div className="text-2xl font-semibold tabular-nums leading-none">{total}</div>
+          <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-semibold mt-0.5">Deals</div>
+        </div>
+      </div>
+
+      {/* Legend — only categories with non-zero counts, percentage + count
+          so the user can read both proportions and absolute numbers. */}
+      <div className="flex-1 grid grid-cols-1 gap-1 min-w-0">
+        {paths.filter((p) => p.value > 0).map((p) => (
+          <div key={p.key} className="flex items-center gap-2 text-xs">
+            <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ backgroundColor: p.color }} />
+            <span className="truncate flex-1">{p.label}</span>
+            <span className="tabular-nums text-muted-foreground shrink-0">{p.value}</span>
+            <span className="tabular-nums text-muted-foreground/70 shrink-0 w-9 text-right">{Math.round(p.pct * 100)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Monthly funded-volume bar chart — pure SVG.
+ *
+ * Each month is a bar; height proportional to that month's funded
+ * volume against the max month in the window. Hover-state is the
+ * built-in <title> tooltip — no library overhead.
+ */
+function MonthlyVolumeBars({ monthly }: { monthly: MonthlyVolume[] }) {
+  const maxVolume = Math.max(...monthly.map((m) => m.volume), 1);
+  // Show a "year change" tick label whenever the month is January. Helps
+  // the user orient when the window spans across Dec → Jan.
+  const now = new Date();
+
+  return (
+    <div>
+      <div className="flex items-end gap-1.5 h-32">
+        {monthly.map((m) => {
+          const heightPct = (m.volume / maxVolume) * 100;
+          const tooltip = m.volume > 0
+            ? `${m.label}: ${m.count} deal${m.count === 1 ? '' : 's'}, ${formatCurrency(m.volume)}`
+            : `${m.label}: no funded deals`;
+          // Current month gets a darker shade so the eye lands on it.
+          const isCurrent =
+            now.getMonth() === parseInt(m.key.slice(5), 10) - 1 &&
+            now.getFullYear() === parseInt(m.key.slice(0, 4), 10);
+          return (
+            <div
+              key={m.key}
+              className="flex-1 flex flex-col items-stretch justify-end h-full group"
+              title={tooltip}
+            >
+              <div
+                className={cn(
+                  'w-full rounded-t-sm transition-colors',
+                  isCurrent ? 'bg-primary' : 'bg-primary/40 group-hover:bg-primary/60',
+                  m.volume === 0 && 'min-h-[2px] opacity-30',
+                )}
+                style={{ height: `${Math.max(heightPct, m.volume > 0 ? 4 : 1)}%` }}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex gap-1.5 mt-1.5">
+        {monthly.map((m) => {
+          const isJan = m.key.slice(5) === '01';
+          return (
+            <div key={m.key} className="flex-1 text-[10px] text-center text-muted-foreground tabular-nums">
+              {isJan ? `${m.label} ${m.key.slice(2, 4)}` : m.label}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Small KPI cell for the finance strip below the charts. Slim variant
+ * of <Stat> with an optional sublabel showing context.
+ */
+function KPI({
+  label,
+  value,
+  sublabel,
+  tone,
+}: {
+  label: string;
+  value: string;
+  sublabel?: string;
+  tone?: 'emerald' | 'amber' | 'teal';
+}) {
+  const valueColor =
+    tone === 'emerald' ? 'text-emerald-700' :
+    tone === 'amber'   ? 'text-amber-700'   :
+    tone === 'teal'    ? 'text-teal-700'    :
+    'text-foreground';
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</div>
+      <div className={cn('text-xl font-semibold tabular-nums mt-0.5', valueColor)}>{value}</div>
+      {sublabel && <div className="text-[10px] text-muted-foreground mt-0.5 truncate">{sublabel}</div>}
+    </div>
   );
 }

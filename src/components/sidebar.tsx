@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import {
-  ShoppingBag, Send, Inbox, Briefcase, Users, TrendingUp, Calculator, BookOpen,
+  ShoppingBag, Send, Inbox, Briefcase, Users, TrendingUp, Calculator, BookOpen, FileText,
   Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -48,6 +48,10 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { href: '/preview',      label: 'View as…',       icon: Users,       perm: 'commissions.manage' },
   { href: '/funders',      label: 'Funders',        icon: Users,       perm: 'funders.view' },
   { href: '/calculator',   label: 'Calculator',     icon: Calculator,  perm: 'calculator.use' },
+  // Doc Request — generates a clean copy-paste message for requesting
+  // contracts from a funder. Lives under the same "General / Resources"
+  // bucket as Calculator + Info. No persistence; pure formatter UI.
+  { href: '/doc-request',  label: 'Doc Request',    icon: FileText,    perm: 'calculator.use' },
   { href: '/info',         label: 'Info',           icon: BookOpen,    perm: 'info.view' },
 ];
 
@@ -63,7 +67,7 @@ export const DEFAULT_CATEGORIES: { id: string; label: string; items: string[] }[
   },
   {
     id: 'resources', label: 'Resources',
-    items: ['/funders', '/calculator', '/info'],
+    items: ['/funders', '/calculator', '/doc-request', '/info'],
   },
 ];
 

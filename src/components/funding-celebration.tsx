@@ -82,13 +82,16 @@ export function FundingCelebration() {
         ...(detail.previewOverride ?? {}),
       };
       if (!effective.celebrationEnabled) return;
+      // Intentionally ignore detail.dealName + any rep name — per spec the
+      // celebration should NOT show the deal or rep name. The "Funded!"
+      // moment is the same for every deal, every time.
       const msg = effective.celebrationMessage || DEFAULT_SETTINGS.celebrationMessage;
-      setMessage(detail.dealName ? `${msg}\n${detail.dealName}` : msg);
+      setMessage(msg);
       setShowConfetti(effective.confettiEnabled);
       setVisible(true);
-      // Optional sound — synthesized inline using Web Audio so there's no
-      // asset to ship. Two-tone bright chord, ~600ms. Skip entirely if the
-      // user hasn't opted in (audio in shared offices is a faux pas).
+      // Optional gong sound — synthesized inline using Web Audio so there's
+      // no asset to ship. ~2s decay with detuned partials for the
+      // characteristic shimmer. Skip entirely if the user hasn't opted in.
       if (effective.celebrationSoundEnabled) {
         playFundedChime();
       }
@@ -109,13 +112,58 @@ export function FundingCelebration() {
       aria-hidden
     >
       {showConfetti && <Confetti />}
-      <div className="absolute inset-0 flex items-center justify-center px-6">
+      <div className="absolute inset-0 flex flex-col items-center justify-center px-6 gap-4">
+        {/* Gong animation — hammer swings in from the side, strikes the
+            disc, the disc shakes / ripples, then both settle. Pure
+            inline SVG + CSS keyframes so there are no asset shipments
+            and the animation stays at a stable 60fps. */}
+        <div className="relative h-56 w-56 sm:h-72 sm:w-72 animate-gong-fade-in">
+          <svg viewBox="0 0 200 200" className="absolute inset-0 w-full h-full">
+            {/* Gong disc — concentric circles with a brushed-metal radial
+                gradient so it reads as bronze without needing an image. */}
+            <defs>
+              <radialGradient id="gongMetal" cx="50%" cy="40%" r="60%">
+                <stop offset="0%" stopColor="#fcd34d" />
+                <stop offset="45%" stopColor="#d97706" />
+                <stop offset="85%" stopColor="#92400e" />
+                <stop offset="100%" stopColor="#451a03" />
+              </radialGradient>
+              <radialGradient id="gongInner" cx="50%" cy="50%" r="35%">
+                <stop offset="0%" stopColor="#fde68a" />
+                <stop offset="100%" stopColor="#b45309" />
+              </radialGradient>
+            </defs>
+            {/* Hanging rope */}
+            <line x1="100" y1="0" x2="100" y2="20" stroke="#78350f" strokeWidth="2" />
+            <line x1="70" y1="20" x2="130" y2="20" stroke="#78350f" strokeWidth="2" />
+            {/* The disc — wrapped in a group so we can shake it on impact */}
+            <g className="gong-disc">
+              <circle cx="100" cy="105" r="85" fill="url(#gongMetal)" stroke="#451a03" strokeWidth="3" />
+              <circle cx="100" cy="105" r="65" fill="none" stroke="#78350f" strokeWidth="1.5" opacity="0.6" />
+              <circle cx="100" cy="105" r="45" fill="none" stroke="#78350f" strokeWidth="1.5" opacity="0.5" />
+              <circle cx="100" cy="105" r="25" fill="url(#gongInner)" stroke="#451a03" strokeWidth="2" />
+            </g>
+            {/* Hammer — swings in from the right, strikes the disc center,
+                bounces back. Pivots around its handle end. */}
+            <g className="gong-hammer">
+              <line x1="0" y1="0" x2="60" y2="0" stroke="#451a03" strokeWidth="5" strokeLinecap="round" />
+              <ellipse cx="62" cy="0" rx="14" ry="10" fill="#451a03" stroke="#1c1917" strokeWidth="1.5" />
+              <ellipse cx="62" cy="-3" rx="11" ry="6" fill="#78716c" opacity="0.4" />
+            </g>
+            {/* Impact ripples — three expanding rings that fade out as
+                they grow, suggesting the gong's resonance. */}
+            <g className="gong-ripples">
+              <circle cx="100" cy="105" r="85" fill="none" stroke="#fbbf24" strokeWidth="2" className="gong-ripple gong-ripple-1" />
+              <circle cx="100" cy="105" r="85" fill="none" stroke="#fbbf24" strokeWidth="2" className="gong-ripple gong-ripple-2" />
+              <circle cx="100" cy="105" r="85" fill="none" stroke="#fbbf24" strokeWidth="2" className="gong-ripple gong-ripple-3" />
+            </g>
+          </svg>
+        </div>
         <div className="text-center animate-celebration-message">
           <div
             // Big, bold, with a subtle gradient + drop shadow so it pops on
-            // any background. Pre-line preserves the optional "Acme Pizza"
-            // second line when a deal name is included.
-            className="font-extrabold tracking-tight text-5xl sm:text-6xl md:text-7xl bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 bg-clip-text text-transparent whitespace-pre-line"
+            // any background. NO names — message is the only text.
+            className="font-extrabold tracking-tight text-5xl sm:text-6xl md:text-7xl bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 bg-clip-text text-transparent"
             style={{ textShadow: '0 4px 32px rgba(16, 185, 129, 0.25)' }}
           >
             {message}
@@ -133,6 +181,66 @@ export function FundingCelebration() {
         .animate-celebration-message {
           animation: celebrationMessage 3.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
         }
+        /* Whole gong fades in from a slight drop. */
+        @keyframes gongFadeIn {
+          0%   { opacity: 0; transform: translateY(-20px); }
+          15%  { opacity: 1; transform: translateY(0); }
+          85%  { opacity: 1; transform: translateY(0); }
+          100% { opacity: 0; transform: translateY(0); }
+        }
+        :global(.animate-gong-fade-in) {
+          animation: gongFadeIn 3.2s ease-out forwards;
+        }
+        /* Hammer swing — comes from the right at a high arc, strikes the
+            center of the disc, bounces back. Pivot is the handle end at
+            the right edge. */
+        @keyframes gongHammerSwing {
+          0%   { transform: translate(165px, 50px) rotate(60deg); }
+          22%  { transform: translate(165px, 50px) rotate(60deg); }
+          32%  { transform: translate(165px, 50px) rotate(-30deg); }  /* impact */
+          40%  { transform: translate(165px, 50px) rotate(-10deg); }  /* bounce */
+          48%  { transform: translate(165px, 50px) rotate(-20deg); }
+          100% { transform: translate(165px, 50px) rotate(-15deg); }
+        }
+        :global(.gong-hammer) {
+          transform-origin: 0 0;
+          transform-box: fill-box;
+          animation: gongHammerSwing 3.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        }
+        /* Disc shake on impact — only the disc, not the rope. Sharp
+            initial jolt, dampens quickly. Timed to coincide with the
+            hammer's strike at 32% of the timeline. */
+        @keyframes gongShake {
+          0%, 32% { transform: translate(0, 0); }
+          34%     { transform: translate(-4px, 0); }
+          36%     { transform: translate(4px, 0); }
+          38%     { transform: translate(-3px, 0); }
+          40%     { transform: translate(3px, 0); }
+          42%     { transform: translate(-2px, 0); }
+          44%     { transform: translate(2px, 0); }
+          46%     { transform: translate(-1px, 0); }
+          48%     { transform: translate(1px, 0); }
+          50%, 100% { transform: translate(0, 0); }
+        }
+        :global(.gong-disc) {
+          transform-origin: 100px 105px;
+          transform-box: fill-box;
+          animation: gongShake 3.2s ease-out forwards;
+        }
+        /* Resonance ripples — three rings expanding outward at staggered
+            delays, fading as they grow. Hidden until the strike at 32%. */
+        @keyframes gongRipple {
+          0%, 32% { opacity: 0; transform: scale(1); }
+          34%     { opacity: 0.7; transform: scale(1); }
+          100%    { opacity: 0; transform: scale(1.6); }
+        }
+        :global(.gong-ripple) {
+          transform-origin: 100px 105px;
+          transform-box: fill-box;
+          animation: gongRipple 3.2s ease-out forwards;
+        }
+        :global(.gong-ripple-2) { animation-delay: 0.1s; }
+        :global(.gong-ripple-3) { animation-delay: 0.2s; }
       `}</style>
     </div>
   );
@@ -255,27 +363,43 @@ function playFundedChime() {
     const ctx = new AC();
     const now = ctx.currentTime;
 
-    // Two oscillators tuned a perfect fifth apart — a bright, optimistic
-    // interval that reads as "good news" without being jingle-y.
-    const freqs = [523.25 /* C5 */, 783.99 /* G5 */];
-    for (const f of freqs) {
+    // Gong: low fundamental + several inharmonic partials with slight
+    // detuning to produce the characteristic shimmering, slowly-decaying
+    // bronze resonance. Pure-sine sums avoid the harshness of square or
+    // sawtooth waves at this kind of volume. Total runtime ~2s with a
+    // gentle exponential fade.
+    //
+    // Why these ratios? Real gongs have a strong fundamental and many
+    // non-harmonic overtones (true harmonics give bell tones; gongs are
+    // intentionally "noisy" between partials). 1, 2.4, 4.1, 5.9 is a
+    // reasonable simulation that reads as gong-like to most ears.
+    const fundamental = 110; // A2 — low and resonant
+    const partials = [
+      { mult: 1.0,  gain: 0.30 },
+      { mult: 2.41, gain: 0.18 },
+      { mult: 4.12, gain: 0.12 },
+      { mult: 5.93, gain: 0.08 },
+      { mult: 7.65, gain: 0.05 },
+    ];
+    for (const p of partials) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
-      osc.frequency.value = f;
-      // Quick attack → exponential decay. The 0.0001 floor avoids the
-      // dreaded Web Audio click on cutoff.
+      osc.frequency.value = fundamental * p.mult;
+      // Very fast attack (sharp strike), slow exponential decay (~2.4s
+      // for the lowest partials). Higher partials decay faster, which is
+      // physically what happens in a real gong.
+      const decayTime = 2.4 / Math.sqrt(p.mult);
       gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.6);
+      gain.gain.exponentialRampToValueAtTime(p.gain, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + decayTime);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(now);
-      osc.stop(now + 0.65);
+      osc.stop(now + decayTime + 0.05);
     }
-    // Auto-close the context once playback finishes so we don't accumulate
-    // dangling contexts across many funded events.
-    setTimeout(() => { ctx.close().catch(() => {}); }, 800);
+    // Auto-close once the loudest partial has fully decayed.
+    setTimeout(() => { ctx.close().catch(() => {}); }, 3000);
   } catch {
     // Audio is purely decorative — never let an audio failure block the
     // celebration overlay from rendering.

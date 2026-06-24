@@ -4,7 +4,7 @@ import { leadSourceCommissions, leadSources, commissionPayments, deals } from '@
 import { and, eq, desc } from 'drizzle-orm';
 import { requireUser } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
-import { rollupTotals } from '@/lib/commissions/calc';
+import { rollupTotals, resolveAutoStatus } from '@/lib/commissions/calc';
 
 export const runtime = 'nodejs';
 
@@ -49,10 +49,16 @@ export async function GET() {
         eq(leadSourceCommissions.isDeleted, false),
       ));
 
+    const now = new Date();
+    // Critical: pass the RESOLVED status (not raw DB status) into rollupTotals
+    // so commissions that have aged past the 30-day clearing window are
+    // counted as available even if the DB row still says 'pending'. Without
+    // this, available balance stays at $0 even when the lead source has
+    // money waiting to be paid out.
     const totals = rollupTotals(rows.map((r) => ({
       amount: Number(r.commissionAmount),
       paid: Number(r.paidAmount),
-      status: r.status,
+      status: resolveAutoStatus(r.status, r.fundingDate, now),
     })));
 
     // Payment history per LS commission row — amounts + status + funded date

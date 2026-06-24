@@ -24,6 +24,30 @@ interface Entry {
 
 interface DealOpt { id: string; name: string }
 
+/**
+ * Commission payment as surfaced on Accounting. Mirrors the response
+ * shape from /api/commission-payments — we keep the field names so a
+ * future merger of accounting + commission_payments into one table
+ * would be a straight rename rather than a remapping.
+ *
+ * NOTE: commission payments are MONEY GOING OUT (paid to reps + lead
+ * sources). They're modeled separately from `accounting` because they
+ * have their own lifecycle (linked to commission rows, settlement state,
+ * etc), but the broker thinks of them as "another row in accounting".
+ * So we surface them here without merging the DB tables.
+ */
+interface CommissionPayment {
+  id: string;
+  amount: string;
+  paidDate: string | null;
+  method: string | null;
+  notes: string | null;
+  payeeName: string;
+  payeeType: 'rep' | 'lead_source' | 'unknown';
+  dealName: string | null;
+  createdByName: string | null;
+}
+
 const METHODS = ['ach', 'wire', 'check', 'cash', 'zelle', 'other'] as const;
 const fmtDate = (d: string | null) => formatCalendarDate(d);
 
@@ -33,9 +57,17 @@ export default function AccountingPage() {
   const [deals, setDeals] = useState<DealOpt[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<'all' | 'received' | 'sent_back'>('all');
+  // Filter now includes 'commission_pay' — when selected the table
+  // shows commission payments (from /api/commission-payments) instead of
+  // the standard accounting entries. The two record types live in
+  // different DB tables so we never accidentally double-count totals.
+  const [filter, setFilter] = useState<'all' | 'received' | 'sent_back' | 'commission_pay'>('all');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Entry | null>(null);
+  // Commission payments — only loaded when the user selects the
+  // Commission pay filter (avoids the network hit on first paint).
+  const [commissionPays, setCommissionPays] = useState<CommissionPayment[]>([]);
+  const [loadingCp, setLoadingCp] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -48,11 +80,37 @@ export default function AccountingPage() {
       setDeals((d.data ?? d.deals ?? []).map((x: DealOpt) => ({ id: x.id, name: x.name })));
     } finally { setLoading(false); }
   }
+
+  /**
+   * Load commission payments for the Commission Pay view. Pulled
+   * lazily on first switch to that filter; subsequent switches reuse
+   * the cached list. The "+ Log commission payment" button routes the
+   * user to /payments where the existing form lives, then they come
+   * back here and refresh to see the new entry.
+   */
+  async function loadCommissionPays() {
+    setLoadingCp(true);
+    try {
+      const j = await fetch('/api/commission-payments', { cache: 'no-store' }).then((r) => r.json());
+      setCommissionPays(j.payments ?? []);
+    } finally { setLoadingCp(false); }
+  }
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (filter === 'commission_pay' && commissionPays.length === 0 && !loadingCp) {
+      loadCommissionPays();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter]);
 
   const filtered = useMemo(() => {
+    // Commission_pay is rendered from a separate dataset below — not
+    // part of the entries table — so this memo only handles received
+    // and sent_back filters.
     let arr = entries;
-    if (filter !== 'all') arr = arr.filter((e) => e.entryType === filter);
+    if (filter === 'received' || filter === 'sent_back') {
+      arr = arr.filter((e) => e.entryType === filter);
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       arr = arr.filter((e) =>
@@ -63,6 +121,18 @@ export default function AccountingPage() {
     return arr;
   }, [entries, filter, search]);
 
+  // Commission-pay rows post-search-filter — same fuzzy search across
+  // payee, deal, and notes so the user can quickly scan a long list.
+  const filteredCp = useMemo(() => {
+    if (!search.trim()) return commissionPays;
+    const q = search.toLowerCase();
+    return commissionPays.filter((p) =>
+      (p.payeeName ?? '').toLowerCase().includes(q) ||
+      (p.dealName ?? '').toLowerCase().includes(q) ||
+      (p.notes ?? '').toLowerCase().includes(q)
+    );
+  }, [commissionPays, search]);
+
   const totals = useMemo(() => {
     let received = 0, sent = 0;
     for (const e of entries) {
@@ -70,8 +140,13 @@ export default function AccountingPage() {
       if (e.entryType === 'received') received += a;
       else sent += a;
     }
-    return { received, sent, net: received - sent, count: entries.length };
-  }, [entries]);
+    // Commission paid out — counted independently of the
+    // received/sent_back totals so the user can see at a glance how
+    // much money has been disbursed as commissions. Net excludes
+    // commission pay (it's already accounted for separately).
+    const commissionPaid = commissionPays.reduce((s, p) => s + Number(p.amount), 0);
+    return { received, sent, net: received - sent, commissionPaid, count: entries.length };
+  }, [entries, commissionPays]);
 
   async function remove(e: Entry) {
     if (!confirm(`Delete ${e.entryType === 'received' ? 'received' : 'sent back'} entry of ${formatCurrency(Number(e.amount))}?`)) return;
@@ -110,28 +185,99 @@ export default function AccountingPage() {
         }
       />
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <Tile label="Entries" value={String(totals.count)} />
         <Tile label="Money received" value={formatCurrency(totals.received)} tone="success" />
         <Tile label="Money sent back" value={formatCurrency(totals.sent)} tone="danger" />
         <Tile label="Net" value={formatCurrency(totals.net)} />
+        {/* Commission paid out — separate column because this isn't
+            money flowing in or out of the company in the same sense
+            as received/sent_back; it's payroll for the broker team. */}
+        <Tile label="Commission paid" value={formatCurrency(totals.commissionPaid)} tone="success" />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {([['all', 'All'], ['received', 'Received'], ['sent_back', 'Sent back']] as const).map(([k, label]) => (
+        {([
+          ['all', 'All'],
+          ['received', 'Received'],
+          ['sent_back', 'Sent back'],
+          ['commission_pay', 'Commission pay'],
+        ] as const).map(([k, label]) => (
           <button key={k} onClick={() => setFilter(k)}
             className={`px-3 py-1.5 rounded-full border text-xs font-medium transition ${filter === k ? 'bg-primary text-primary-foreground border-primary' : 'bg-card border-border text-muted-foreground hover:text-foreground'}`}>
             {label}
           </button>
         ))}
+        {/* When viewing commission pay, surface a quick link to the
+            existing /payments page (which has the full logging form).
+            We don't duplicate that form here — single source of truth
+            for the commission-payment editor. */}
+        {filter === 'commission_pay' && (
+          <a
+            href="/payments"
+            className="px-3 py-1.5 rounded-full border border-primary bg-primary/5 text-primary text-xs font-medium hover:bg-primary/10"
+            title="Open the payments page to log a new commission payment"
+          >
+            + Log commission payment
+          </a>
+        )}
         <div className="ml-auto relative w-full sm:w-auto sm:min-w-[240px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search deal, reference, notes…" className="pl-9" />
         </div>
       </div>
 
+      {/* Table — branched on filter. Commission Pay shows its own
+          read-only table (sourced from /api/commission-payments); the
+          other filters share the accounting-entries table. */}
       {loading ? (
         <div className="text-sm text-muted-foreground">Loading…</div>
+      ) : filter === 'commission_pay' ? (
+        loadingCp ? (
+          <div className="text-sm text-muted-foreground">Loading commission payments…</div>
+        ) : filteredCp.length === 0 ? (
+          <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">
+            No commission payments logged yet. Use the <a href="/payments" className="text-primary hover:underline">Payments page</a> to log one.
+          </CardContent></Card>
+        ) : (
+          <Card className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[800px]">
+                <thead><tr className="bg-muted/40 border-b border-border text-left">
+                  <th className="px-4 py-2 th">Date paid</th>
+                  <th className="px-3 py-2 th">Payee</th>
+                  <th className="px-3 py-2 th text-right">Amount</th>
+                  <th className="px-3 py-2 th">Deal</th>
+                  <th className="px-3 py-2 th">Method</th>
+                  <th className="px-3 py-2 th">Notes</th>
+                  <th className="px-3 py-2 th">Logged by</th>
+                </tr></thead>
+                <tbody className="divide-y divide-border/60">
+                  {filteredCp.map((p) => (
+                    <tr key={p.id} className="hover:bg-muted/20">
+                      <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{fmtDate(p.paidDate)}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="font-medium">{p.payeeName}</div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{p.payeeType.replace('_', ' ')}</div>
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-medium text-emerald-700">
+                        −{formatCurrency(Number(p.amount))}
+                      </td>
+                      <td className="px-3 py-2.5">{p.dealName ?? <span className="italic text-muted-foreground/60">—</span>}</td>
+                      <td className="px-3 py-2.5 uppercase text-xs text-muted-foreground">{p.method ?? '—'}</td>
+                      <td className="px-3 py-2.5 text-muted-foreground max-w-[240px] truncate">{p.notes ?? ''}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{p.createdByName ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-4 py-2 border-t border-border text-[11px] text-muted-foreground">
+              To edit or delete a commission payment, open the{' '}
+              <a href="/payments" className="text-primary hover:underline">Payments page</a>.
+            </div>
+          </Card>
+        )
       ) : filtered.length === 0 ? (
         <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">No accounting entries yet.</CardContent></Card>
       ) : (

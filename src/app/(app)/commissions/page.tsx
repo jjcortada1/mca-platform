@@ -103,6 +103,9 @@ interface LSCommission {
   commissionAmount: string; paidAmount: string; owedAmount: number; pendingAmount: number;
   status: 'pending' | 'cleared' | 'clawed_back';
   fundingDate: string | null;
+  // Joined from deals.fundingDate — source of truth for the date funded.
+  // Falls back to the LS commission row's own fundingDate when null.
+  dealFundingDate: string | null;
   earlyPayoffDiscount: string | null;
   notes: string | null;
 }
@@ -384,6 +387,22 @@ export default function CommissionsPage() {
 
       {tab === 'rep' && (
         <>
+          {/* Available balance band — ALWAYS rendered, prominent, and the
+              first thing on the page so reps + admins can't miss the
+              "what's ready to be paid out" number. Cleared = ready to
+              draw. Pending = still in clearing window. Total paid = how
+              much has actually been disbursed. Owed = remaining unpaid. */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Tile
+              label="Available to withdraw"
+              value={formatCurrency(stats.available)}
+              tone="emerald"
+            />
+            <Tile label="Pending (clearing)" value={formatCurrency(stats.pending)} tone="amber" />
+            <Tile label="Paid out" value={formatCurrency(stats.paid)} />
+            <Tile label="Total owed" value={formatCurrency(stats.owed)} />
+          </div>
+
           {/* Top-tier dashboard */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Hero: payout progress */}
@@ -634,6 +653,11 @@ export default function CommissionsPage() {
                   <thead><tr className="bg-muted/40 border-b border-border text-left">
                     <th className="px-4 py-2 th">Lead source</th>
                     <th className="px-3 py-2 th">Deal</th>
+                    {/* Date funded — visible at row level so admins don't
+                        need to expand to see when a deal funded. Sourced
+                        from the joined deal.fundingDate, falling back to
+                        the commission row's own copy. */}
+                    <th className="px-3 py-2 th">Date funded</th>
                     <th className="px-3 py-2 th text-right">Split / Flat</th>
                     <th className="px-3 py-2 th text-right">Commission</th>
                     <th className="px-3 py-2 th text-right">Paid</th>
@@ -644,9 +668,16 @@ export default function CommissionsPage() {
                   <tbody className="divide-y divide-border/60">
                     {lsRows.map((r) => (
                       <>
-                        <tr key={r.id} className="hover:bg-muted/20">
+                        <tr
+                          key={r.id}
+                          className="hover:bg-muted/20 cursor-pointer"
+                          onClick={() => setLsExpanded(lsExpanded === r.id ? null : r.id)}
+                        >
                           <td className="px-4 py-2.5 font-medium">{r.leadSourceName}</td>
                           <td className="px-3 py-2.5 text-muted-foreground">{r.dealName}</td>
+                          <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
+                            {r.dealFundingDate ? formatDate(r.dealFundingDate) : (r.fundingDate ? formatDate(r.fundingDate) : '—')}
+                          </td>
                           <td className="px-3 py-2.5 text-right tabular-nums">{r.flatAmount ? formatCurrency(Number(r.flatAmount)) : r.splitPct ? `${Number(r.splitPct)}%` : '—'}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatCurrency(Number(r.commissionAmount))}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">{formatCurrency(Number(r.paidAmount))}</td>
@@ -654,16 +685,17 @@ export default function CommissionsPage() {
                           <td className="px-3 py-2.5"><Badge variant={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge></td>
                           <td className="px-3 py-2.5 text-right">
                             <button
-                              onClick={() => setLsExpanded(lsExpanded === r.id ? null : r.id)}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setLsExpanded(lsExpanded === r.id ? null : r.id); }}
                               className="text-xs font-medium text-primary hover:underline"
                             >
-                              {lsExpanded === r.id ? 'Close' : 'Edit'}
+                              {lsExpanded === r.id ? 'Close' : 'Details'}
                             </button>
                           </td>
                         </tr>
                         {lsExpanded === r.id && (
                           <tr className="bg-muted/10">
-                            <td colSpan={8} className="px-4 py-3">
+                            <td colSpan={9} className="px-4 py-3">
                               <LSCommissionDetail r={r} reps={reps} onPatch={lsPatch} onDelete={lsSoftDelete} onDealPatch={dealPatch} />
                             </td>
                           </tr>

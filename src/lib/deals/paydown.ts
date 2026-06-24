@@ -19,6 +19,14 @@ export interface PaydownInputs {
   termCount?: number | string | null;
   fundingDate?: Date | string | null;
   amountCollected?: number | string | null; // total paid so far (optional)
+  /**
+   * Funded sub-status. When 'refinanced' (the deal was rolled into a new
+   * refi) the deal is conceptually closed: renewalEligible must be false
+   * regardless of pctPaidIn so it stops appearing in the refi-ready
+   * filter on /portfolio. Default ignores this field (legacy callers
+   * keep working unchanged).
+   */
+  fundedSubStatus?: string | null;
 }
 
 export interface Paydown {
@@ -210,8 +218,12 @@ export function computePaydown(inputs: PaydownInputs, now: Date = new Date()): P
   const remainingBalance = round2(Math.max(0, totalPayback - amountCollected));
   const pctPaidIn = totalPayback > 0 ? Math.min(100, round2((amountCollected / totalPayback) * 100)) : 0;
 
-  // Renewal eligibility: 50% paid in.
-  const renewalEligible = pctPaidIn >= RENEWAL_THRESHOLD * 100;
+  // Renewal eligibility: 50% paid in AND not already refinanced. A
+  // refinanced deal is terminal — by definition it's been rolled into a
+  // new deal, so showing it as "refi ready" again would be misleading
+  // (and produce double-counting on the refi-ready filter).
+  const isRefinanced = inputs.fundedSubStatus === 'refinanced';
+  const renewalEligible = !isRefinanced && pctPaidIn >= RENEWAL_THRESHOLD * 100;
   let renewalDate: Date | null = null;
   if (fdValid && termMode && termCount > 0) {
     const paymentsToRenewal = paymentsTotal * RENEWAL_THRESHOLD;
