@@ -22,7 +22,13 @@ interface PaymentRow {
 }
 interface PortalData {
   leadSourceName: string;
-  totals: { total: number; paid: number; pending: number; owed: number; clawedBack: number };
+  /**
+   * Per-status rollup for this lead source.
+   *  • available = cleared but not yet paid out (i.e. what's drawable
+   *    right now). Highlighted on the dashboard because it's the
+   *    headline number the lead source actually cares about.
+   */
+  totals: { total: number; paid: number; pending: number; owed: number; available: number; clawedBack: number };
   history: CommissionRow[];
   payments: PaymentRow[];
 }
@@ -73,10 +79,14 @@ export default function LeadSourcePortalPage() {
               <p className="text-sm text-muted-foreground mt-1">A summary of what you&apos;re owed and what&apos;s been paid.</p>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
               <Stat label="Total earned" value={fmt(data.totals.total)} />
               <Stat label="Paid to you" value={fmt(data.totals.paid)} tone="success" />
               <Stat label="Pending" value={fmt(data.totals.pending)} tone="warning" />
+              {/* Available — cleared but not yet paid out. Highlighted as
+                  success since this is the actionable balance the lead
+                  source can expect on the next disbursement cycle. */}
+              <Stat label="Available" value={fmt(data.totals.available)} tone="success" />
               <Stat label="Still owed" value={fmt(data.totals.owed)} />
               <Stat label="Clawed back" value={fmt(data.totals.clawedBack)} tone="danger" />
             </div>

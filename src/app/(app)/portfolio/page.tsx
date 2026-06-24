@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, PageHeader, Input, Button, CurrencyInput, PercentInput } from '@/components/ui/primitives';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { formatCurrency } from '@/lib/utils';
 import { cn } from '@/lib/utils';
-import { Search, Trash2, Plus } from 'lucide-react';
+import { Search, Trash2, Plus, LayoutGrid, List as ListIcon } from 'lucide-react';
 import { computePaydown } from '@/lib/deals/paydown';
 import { formatCalendarDate, toDateInput } from '@/lib/dates';
 
@@ -35,7 +36,7 @@ interface Deal {
   assignedRepId: string | null;
   assignedRepName?: string | null;
   // Funded-deal sub-status. Null/missing → treated as 'active' in UI.
-  fundedSubStatus?: 'active' | 'refi_eligible' | 'payment_issues' | 'default' | null;
+  fundedSubStatus?: 'active' | 'refi_eligible' | 'payment_issues' | 'default' | 'refinanced' | null;
   // Which funder ultimately funded this deal. Either an FK to a directory
   // funder OR a free-text label (the funder isn't in the directory).
   fundedWithFunderId?: string | null;
@@ -43,6 +44,20 @@ interface Deal {
   // General-purpose notes on this funded deal — surfaced here AND in the
   // rep commission view so reps have deal context alongside their pay.
   fundedNotes?: string | null;
+  // Paid-off tracking (schema fields). When the deal has been closed out
+  // — either by payoff or by being rolled into a refi — paidOff is true.
+  // paidOffAmount captures the actual settled amount, which can differ
+  // from the contracted totalPayback (early-payoff discount, etc).
+  paidOff?: boolean | null;
+  paidOffAmount?: string | null;
+  paidOffDate?: string | null;
+  /**
+   * Refi linkage — when this deal is itself a refinance OF another deal,
+   * `renewalOfDealId` points at the original. Added so the audit chain
+   * old→new survives even after the old deal is closed out.
+   * Set when the "Mark as refinanced" flow creates the new deal.
+   */
+  renewalOfDealId?: string | null;
   // Free-text fields displayed in the expand panel.
   notes?: string | null;
   renewalNotes?: string | null;
@@ -57,6 +72,11 @@ const FUNDED_SUB_STATUS: Record<string, { label: string; tone: string }> = {
   refi_eligible:  { label: 'Refi Eligible',   tone: 'teal' },
   payment_issues: { label: 'Payment Issues',  tone: 'amber' },
   default:        { label: 'Default',         tone: 'red' },
+  // 'refinanced' — terminal state set by the "Mark as refinanced" flow.
+  // Intentionally NOT in the user-facing dropdown options so it can only
+  // be reached via the explicit Mark-as-refinanced action (which also
+  // forces 100% paid in + opens a new deal form for the refi).
+  refinanced:     { label: 'Refinanced',      tone: 'violet' },
 };
 
 const TONE_CLASS: Record<string, string> = {
@@ -98,6 +118,36 @@ export default function PortfolioPage() {
   // "Add funded deal" drawer state. Lives in this top-level component so the
   // drawer survives table re-renders.
   const [showAdd, setShowAdd] = useState(false);
+
+  // List vs Card layout. Defaults to 'list' — the existing table view that
+  // admins have been using since the beginning. Card view is opt-in and
+  // remembered across visits so users who prefer it don't have to flip
+  // every time. Persistence is best-effort; SSR-safe (window guard).
+  const [viewMode, setViewMode] = useState<'list' | 'card'>(() => {
+    if (typeof window === 'undefined') return 'list';
+    return (localStorage.getItem('mca-portfolio-view') as 'list' | 'card') ?? 'list';
+  });
+  useEffect(() => {
+    try { localStorage.setItem('mca-portfolio-view', viewMode); } catch {}
+  }, [viewMode]);
+
+  // When a card is clicked, we flip to list view AND auto-expand the
+  // corresponding row so the user lands directly on the editor. This keeps
+  // ALL editing functionality on the existing FundedDealRow (no duplication
+  // of complex edit logic into the card component, and no risk of the two
+  // editors drifting apart). The id is consumed by FundedDealRow once
+  // mounted, then cleared so future row interactions aren't forced open.
+  const [autoExpandId, setAutoExpandId] = useState<string | null>(null);
+  useEffect(() => {
+    if (autoExpandId && viewMode === 'list') {
+      // Scroll the row into view after the layout switches. RAF gives the
+      // DOM one paint to render the list before we go looking for the row.
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`funded-row-${autoExpandId}`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
+  }, [autoExpandId, viewMode]);
 
   useEffect(() => {
     // Load current user FIRST so we know whether to send `?mine=1`. We don't
@@ -275,9 +325,43 @@ export default function PortfolioPage() {
             {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         )}
-        <div className="ml-auto relative w-full sm:w-auto sm:min-w-[220px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search deals or merchants…" className="pl-9" />
+        <div className="ml-auto flex items-center gap-2 w-full sm:w-auto">
+          {/* List ↔ Card view toggle. Default is the existing list/table
+              view (item 4 — "default should be like the list view the way
+              it is now"). Card view is a richer visual layout showing the
+              same funded-deal data per card with a paydown progress bar. */}
+          <div className="inline-flex rounded-md border border-input bg-card p-0.5 shrink-0" role="group" aria-label="View mode">
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              className={cn(
+                'h-8 px-2.5 rounded text-xs font-medium transition-colors flex items-center gap-1.5',
+                viewMode === 'list' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'
+              )}
+              title="List view"
+              aria-pressed={viewMode === 'list'}
+            >
+              <ListIcon className="h-3.5 w-3.5" />
+              List
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('card')}
+              className={cn(
+                'h-8 px-2.5 rounded text-xs font-medium transition-colors flex items-center gap-1.5',
+                viewMode === 'card' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'
+              )}
+              title="Card view"
+              aria-pressed={viewMode === 'card'}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Cards
+            </button>
+          </div>
+          <div className="relative flex-1 sm:flex-initial sm:min-w-[220px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search deals or merchants…" className="pl-9" />
+          </div>
         </div>
       </div>
 
@@ -287,7 +371,7 @@ export default function PortfolioPage() {
         <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">
           No funded deals yet. When a deal in Active Deals is marked &quot;Funded,&quot; it appears here.
         </CardContent></Card>
-      ) : (
+      ) : viewMode === 'list' ? (
         <Card className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -328,6 +412,7 @@ export default function PortfolioPage() {
                   p={p}
                   reps={reps}
                   funders={funders}
+                  forceExpand={autoExpandId === deal.id}
                   onUpdated={(patched) => {
                     setDeals((arr) => arr.map((d) => d.id === deal.id ? { ...d, ...patched } : d));
                   }}
@@ -337,6 +422,28 @@ export default function PortfolioPage() {
             </tbody>
           </table>
         </Card>
+      ) : (
+        // ── CARD VIEW ────────────────────────────────────────────────
+        // Grid of funded-deal cards. Each shows the same data as the list
+        // row (deal name, merchant, status, funded $, paydown %, balance)
+        // but in a richer visual layout with a paydown progress bar.
+        // Clicking a card jumps to list view with that row expanded —
+        // editing logic lives ONLY on FundedDealRow so the two views never
+        // drift apart and there's only one place to change deal-editing
+        // behavior.
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {portfolio.map(({ deal, p }) => (
+            <FundedDealCard
+              key={deal.id}
+              deal={deal}
+              p={p}
+              onOpen={() => {
+                setAutoExpandId(deal.id);
+                setViewMode('list');
+              }}
+            />
+          ))}
+        </div>
       )}
 
       {/* Centered confirmation modal — replaces native browser confirm() so
@@ -421,6 +528,7 @@ function FundedDealRow({
   p,
   reps,
   funders,
+  forceExpand,
   onUpdated,
   onRequestDelete,
 }: {
@@ -428,6 +536,12 @@ function FundedDealRow({
   p: ReturnType<typeof computePaydown>;
   reps: { id: string; name: string }[];
   funders: { id: string; name: string }[];
+  /**
+   * When true (set by the card-view click handler), force the row open on
+   * mount so the user lands directly on the editor. The local `expanded`
+   * state still owns subsequent toggles after that.
+   */
+  forceExpand?: boolean;
   onUpdated: (patch: Partial<Deal>) => void;
   onRequestDelete: () => void;
 }) {
@@ -442,9 +556,107 @@ function FundedDealRow({
   // Auto-expand cards that don't have a paydown structure yet so the user
   // immediately sees the editor prompt and can fill in the funding details
   // (otherwise the row looks normal but offers nothing useful).
-  const [expanded, setExpanded] = useState(!p.hasStructure);
+  // Also auto-expand when forceExpand is true (card view → list view jump).
+  const [expanded, setExpanded] = useState(!p.hasStructure || !!forceExpand);
+  // React to forceExpand changes after mount — the card-view handler may
+  // re-target the same row twice (set autoExpandId twice in a row), and we
+  // want the row to re-open even if the user collapsed it in between.
+  useEffect(() => {
+    if (forceExpand) setExpanded(true);
+  }, [forceExpand]);
   const [editing, setEditing] = useState(!p.hasStructure);
   const [saving, setSaving] = useState(false);
+  // Refi flow state — kicks in when admin clicks "Mark as refinanced".
+  // Confirmation dialog asks for an optional payoff amount (sometimes the
+  // refi proceeds differ from the contracted balance — discount, etc),
+  // then patches the old deal (paid off + 100% collected + sub-status
+  // 'refinanced') and routes the user to /active-deals where the new
+  // deal form opens pre-filled with the merchant's contact info.
+  const [refiOpen, setRefiOpen] = useState(false);
+  const [refiPayoff, setRefiPayoff] = useState<string>('');
+  const [refiSaving, setRefiSaving] = useState(false);
+  const router = useRouter();
+
+  /**
+   * Mark the deal as refinanced.
+   *
+   * Steps:
+   *   1. Compute the contracted total payback (fundedAmount × factorRate)
+   *      and patch the old deal: amountCollected = totalPayback (100% paid
+   *      in), fundedSubStatus = 'refinanced'.
+   *   2. Stash the merchant pre-fill (name, phone, email, business) in
+   *      sessionStorage so /active-deals can read it and open the create
+   *      drawer with those fields populated.
+   *   3. Navigate to /active-deals?refi=1 — the page reads the sessionStorage
+   *      payload on mount, then clears it so a subsequent refresh doesn't
+   *      re-open the drawer.
+   *
+   * No new endpoints, no schema changes — uses the existing PATCH route
+   * and the existing /active-deals create drawer.
+   */
+  async function markRefinanced() {
+    setRefiSaving(true);
+    const funded = Number(deal.fundedAmount ?? 0);
+    const factor = Number(deal.factorRate ?? 0);
+    const totalPayback = funded > 0 && factor > 0 ? funded * factor : Number(p.totalPayback) || 0;
+    const body: Record<string, unknown> = {
+      // 100% paid in. Keep the deal record's amountCollected synced with the
+      // contracted totalPayback so the paydown tracker shows the bar full.
+      amountCollected: totalPayback || null,
+      fundedSubStatus: 'refinanced',
+    };
+    // If the user entered an explicit payoff amount (e.g. discounted) we
+    // store it in renewalNotes for now — schema doesn't have a dedicated
+    // refi-payoff field and this preserves the actual settled number for
+    // audit. Format: "Refi payoff: $X,XXX.XX on YYYY-MM-DD"
+    if (refiPayoff && Number(refiPayoff) > 0) {
+      const today = new Date().toISOString().slice(0, 10);
+      const note = `Refi payoff: $${Number(refiPayoff).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} on ${today}`;
+      body.renewalNotes = deal.renewalNotes ? `${deal.renewalNotes}\n${note}` : note;
+    }
+    const res = await fetch(`/api/deals/${deal.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    setRefiSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      alert(j.error || 'Could not mark deal as refinanced.');
+      return;
+    }
+    // Optimistic local update so the row reflects the new state immediately,
+    // even before the parent's list refetches.
+    onUpdated({
+      amountCollected: totalPayback ? String(totalPayback) : deal.amountCollected,
+      fundedSubStatus: 'refinanced',
+      renewalNotes: body.renewalNotes as string | undefined ?? deal.renewalNotes,
+    });
+    // Stash pre-fill blob for /active-deals to pick up. Keys are flat so
+    // the consumer doesn't need to know the structure ahead of time.
+    try {
+      const prefill = {
+        sourceDealId: deal.id,
+        sourceDealName: deal.name,
+        merchantFirstName: deal.merchantFirstName ?? '',
+        merchantLastName: deal.merchantLastName ?? '',
+        merchantPhone: deal.merchantPhone ?? '',
+        merchantEmail: deal.merchantEmail ?? '',
+        businessName: deal.businessName ?? '',
+        businessAddress: deal.businessAddress ?? '',
+        businessCity: deal.businessCity ?? '',
+        businessState: deal.businessState ?? '',
+        businessZip: deal.businessZip ?? '',
+        industry: deal.industry ?? '',
+      };
+      sessionStorage.setItem('mca-refi-prefill', JSON.stringify(prefill));
+    } catch {
+      // SessionStorage unavailable (private mode, etc) — silently skip
+      // and the user can paste merchant info manually.
+    }
+    setRefiOpen(false);
+    router.push('/active-deals?refi=1');
+  }
   const [draft, setDraft] = useState<{
     fundedAmount: string;
     feePct: string;
@@ -453,7 +665,10 @@ function FundedDealRow({
     termCount: string;
     fundingDate: string;
     amountCollected: string;
-    fundedSubStatus: 'active' | 'refi_eligible' | 'payment_issues' | 'default';
+    // Draft can hold ALL possible sub-statuses including 'refinanced'.
+    // The dropdown options only expose the 4 editable ones; refinanced is
+    // a terminal state, never user-selectable.
+    fundedSubStatus: 'active' | 'refi_eligible' | 'payment_issues' | 'default' | 'refinanced';
     assignedRepId: string;
     fundedWithFunderId: string | null;
     fundedNotes: string;
@@ -466,8 +681,11 @@ function FundedDealRow({
     fundingDate: deal.fundingDate ? String(deal.fundingDate).slice(0, 10) : '',
     amountCollected: deal.amountCollected ?? '',
     // Sub-status + rep editable from the same form as funding details so
-    // the user can change everything in one save round-trip.
-    fundedSubStatus: subStatusKey as 'active' | 'refi_eligible' | 'payment_issues' | 'default',
+    // the user can change everything in one save round-trip. We accept the
+    // full 5-value union here — if the deal is already 'refinanced' the
+    // editor will still show that state read-only (the dropdown is
+    // hidden for refinanced deals).
+    fundedSubStatus: subStatusKey,
     assignedRepId: deal.assignedRepId ?? '',
     // Funded With + Notes — surfaced in the editor, persisted to the
     // deals row, exposed in commissions for reps.
@@ -556,6 +774,7 @@ function FundedDealRow({
   return (
     <>
       <tr
+        id={`funded-row-${deal.id}`}
         className={cn('transition-colors cursor-pointer',
           expanded ? 'bg-muted/40' : 'hover:bg-muted/30',
           !p.hasStructure && 'bg-amber-50/40'
@@ -776,9 +995,25 @@ function FundedDealRow({
                         {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                       </select>
                     </div>
-                    <button onClick={() => setEditing(true)} className="text-xs font-medium text-primary hover:underline">
-                      Edit funding details
-                    </button>
+                    <div className="flex items-center gap-3 ml-auto">
+                      {/* Mark as refinanced — terminal action: marks deal
+                          paid off + 100% collected and opens the new
+                          deal form pre-filled with merchant info.
+                          Hidden once already refinanced so there's no
+                          double-clicking the action. */}
+                      {subStatusKey !== 'refinanced' && (
+                        <button
+                          onClick={() => { setRefiPayoff(''); setRefiOpen(true); }}
+                          className="text-xs font-medium text-violet-700 hover:underline"
+                          title="Mark this deal as paid off via refinance and start a new deal for the refi"
+                        >
+                          Mark as refinanced
+                        </button>
+                      )}
+                      <button onClick={() => setEditing(true)} className="text-xs font-medium text-primary hover:underline">
+                        Edit funding details
+                      </button>
+                    </div>
                   </div>
                 </>
               )}
@@ -884,11 +1119,83 @@ function FundedDealRow({
           </td>
         </tr>
       )}
+
+      {/* Mark-as-refinanced confirmation. Centered modal so the user has a
+          chance to enter the actual payoff amount (often different from
+          the contracted balance — discount, payoff at par minus a small
+          credit, etc) and review what's about to happen before committing
+          the action. We render inside a <tr><td colSpan> so the modal can
+          appear within a table; the fixed-positioned overlay floats above
+          everything regardless. */}
+      {refiOpen && (
+        <tr>
+          <td colSpan={11} className="p-0">
+            <div
+              className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+              onClick={() => !refiSaving && setRefiOpen(false)}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={`refi-title-${deal.id}`}
+            >
+              <div className="absolute inset-0 bg-black/40" />
+              <div
+                className="relative bg-card rounded-lg border border-border shadow-xl max-w-md w-full p-5 space-y-4"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="space-y-1">
+                  <div id={`refi-title-${deal.id}`} className="text-base font-semibold">Mark as refinanced?</div>
+                  <div className="text-xs text-muted-foreground">
+                    This deal will be marked as paid off and 100% collected. We&apos;ll
+                    then take you to Active Deals to log the new refi deal with
+                    the merchant&apos;s info pre-filled.
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    Actual payoff amount (optional)
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={refiPayoff}
+                    onChange={(e) => setRefiPayoff(e.target.value)}
+                    placeholder="If different from the contracted balance"
+                    className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <div className="text-[11px] text-muted-foreground">
+                    Leave blank to use the contracted total payback. If the refi
+                    settled at a discount, enter the actual settled amount —
+                    we&apos;ll record it on the deal&apos;s renewal notes.
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-border">
+                  <button
+                    type="button"
+                    onClick={() => setRefiOpen(false)}
+                    disabled={refiSaving}
+                    className="h-9 px-4 rounded-md text-sm font-medium hover:bg-muted text-muted-foreground"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={markRefinanced}
+                    disabled={refiSaving}
+                    className="h-9 px-4 rounded-md text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
+                  >
+                    {refiSaving ? 'Saving…' : 'Mark refinanced & log new deal'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
     </>
   );
 }
-
-/** Small label/value pair used in the funded-deal expand detail grid. */
 function Detail({ label, value, tone }: { label: string; value: string; tone?: 'teal' }) {
   return (
     <div>
@@ -987,7 +1294,7 @@ function AddFundedDealDrawer({
     fundingDate: '',
     amountCollected: '',
     assignedRepId: '',
-    fundedSubStatus: 'active' as 'active' | 'refi_eligible' | 'payment_issues' | 'default',
+    fundedSubStatus: 'active' as 'active' | 'refi_eligible' | 'payment_issues' | 'default' | 'refinanced',
     fundedWithFunderId: '',
     fundedNotes: '',
   });
@@ -1156,5 +1463,151 @@ function AddFundedDealDrawer({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Compact funded-deal display card.
+ *
+ * Pure presentation — does NOT contain edit state, save handlers, or any
+ * mutation logic. Editing happens via the EXISTING FundedDealRow editor
+ * which is unchanged. Clicking a card calls `onOpen`, which the parent
+ * uses to flip into list view + auto-expand that row.
+ *
+ * Why this split?
+ *   • Single source of truth for editing — the inline drawer on
+ *     FundedDealRow already covers every field (funded amount, fee, factor,
+ *     term, funding date, collected, sub-status, rep, funded-with funder,
+ *     notes, paid-off + payoff amount). Duplicating that logic into a
+ *     second editor risks the two drifting apart.
+ *   • Card view stays light + scannable. The user wants a "nice display
+ *     card" — that's exactly what this is.
+ *   • Permissions stay enforced server-side. No new APIs touched.
+ */
+function FundedDealCard({
+  deal,
+  p,
+  onOpen,
+}: {
+  deal: Deal;
+  p: ReturnType<typeof computePaydown>;
+  onOpen: () => void;
+}) {
+  const subStatusKey = deal.fundedSubStatus ?? 'active';
+  const subMeta = FUNDED_SUB_STATUS[subStatusKey] ?? FUNDED_SUB_STATUS.active;
+  const merchant = `${deal.merchantFirstName ?? ''} ${deal.merchantLastName ?? ''}`.trim();
+  const isPaidOff = !!deal.paidOff;
+  // Paid-off deals are visually "done" — full bar, deemphasized.
+  // Refi-eligible deals get a teal accent on the progress bar to nudge the
+  // admin toward action. Active and payment-issues use the same primary
+  // bar — the badge already conveys those states.
+  const barClass = isPaidOff
+    ? 'bg-emerald-500/60'
+    : (p.renewalEligible ? 'bg-teal-500' : 'bg-primary');
+
+  return (
+    <Card
+      className="overflow-hidden cursor-pointer transition-shadow hover:shadow-md hover:border-foreground/20"
+      onClick={onOpen}
+      title="Click to view & edit details"
+    >
+      <CardContent className="p-4 space-y-3">
+        {/* Header: deal name + merchant + status badge */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="font-semibold truncate">{deal.name}</div>
+            {merchant && <div className="text-xs text-muted-foreground truncate">{merchant}</div>}
+          </div>
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            {isPaidOff ? (
+              // Paid off wins over the sub-status — once a deal is closed
+              // out, that's the primary fact about it.
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border bg-emerald-100 text-emerald-800 border-emerald-200">
+                Paid off
+              </span>
+            ) : (
+              <span className={cn(
+                'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border',
+                TONE_CLASS[subMeta.tone] ?? TONE_CLASS.gray,
+              )}>
+                {subMeta.label}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Balance + paid-in % side by side */}
+        <div className="flex items-end justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Balance</div>
+            <div className="text-xl font-semibold tabular-nums">
+              {p.hasStructure ? formatCurrency(p.remainingBalance) : '—'}
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Paid in</div>
+            <div className={cn(
+              'text-lg font-semibold tabular-nums',
+              p.renewalEligible ? 'text-teal-700' : 'text-foreground',
+            )}>
+              {p.hasStructure ? `${Math.round(p.pctPaidIn)}%` : '—'}
+            </div>
+          </div>
+        </div>
+
+        {/* Paydown progress bar — primary visual element of the card. */}
+        <div>
+          <div className="h-2 bg-muted rounded-full overflow-hidden">
+            <div
+              className={cn('h-full rounded-full transition-all', barClass)}
+              style={{ width: `${Math.min(100, p.hasStructure ? p.pctPaidIn : 0)}%` }}
+            />
+          </div>
+          {p.hasStructure && (
+            <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+              <span>{p.paymentsMade}/{p.paymentsTotal} payments</span>
+              <span>
+                {isPaidOff
+                  ? <span className="text-emerald-700 font-medium">Closed</span>
+                  : p.renewalEligible
+                    ? <span className="text-teal-700 font-medium">Refi ready</span>
+                    : `refi ${p.renewalDate ? p.renewalDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—'}`}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Footer: funded / payback / per-period payment in 3 cells */}
+        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border text-xs">
+          <div>
+            <div className="text-[10px] text-muted-foreground">Funded</div>
+            <div className="tabular-nums font-medium">
+              {p.hasStructure ? formatCurrency(p.fundedAmount, { compact: true }) : '—'}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] text-muted-foreground">Payback</div>
+            <div className="tabular-nums font-medium">
+              {p.hasStructure ? formatCurrency(p.totalPayback, { compact: true }) : '—'}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] text-muted-foreground">
+              {p.termMode === 'daily' ? 'Daily' : 'Weekly'}
+            </div>
+            <div className="tabular-nums font-medium">
+              {p.hasStructure ? formatCurrency(p.paymentAmount, { compact: true }) : '—'}
+            </div>
+          </div>
+        </div>
+
+        {/* Dates strip — funded + estimated payoff */}
+        <div className="text-[10px] text-muted-foreground">
+          Funded {p.fundingDate ? p.fundingDate.toLocaleDateString() : '—'}
+          {' · '}
+          Payoff ~{p.payoffDate ? p.payoffDate.toLocaleDateString() : '—'}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

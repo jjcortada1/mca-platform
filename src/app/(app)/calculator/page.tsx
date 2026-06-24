@@ -388,9 +388,13 @@ function ReverseCalc() {
       for (const fee of cleanFees) {
         for (const t of cleanTerms) {
           const s = scoreStructure(factor, fee, t);
-          // Only keep structures that reproduce the payment reasonably well.
-          // Lower threshold when variables are locked (fewer candidates exist).
-          const minScore = (lockFactor || lockFee || lockTerm) ? 60 : 80;
+          // STRICT minimum: only show predictions that hit the merchant's
+          // target payment within 5%. Per JJ's spec, suggestions below 95%
+          // accuracy are useless noise — better to show fewer high-quality
+          // matches than pad the list with stale guesses. We keep a slightly
+          // looser fallback (90%) when EVERY variable is locked so the
+          // matcher can still surface something rather than nothing.
+          const minScore = (lockFactor && lockFee && lockTerm) ? 90 : 95;
           if (s.score < minScore) continue;
           // Final rank = payment accuracy + realism (round funded + common fee).
           const rank = s.score + roundnessBonus(s.impliedFunded) + (FEE_PRIORITY[fee] ?? 0);
@@ -398,11 +402,21 @@ function ReverseCalc() {
         }
       }
     }
-    // Sort by realism-weighted rank, then by raw payment score.
-    candidates.sort((a, b) => (b.rank - a.rank) || (b.score - a.score));
+    // Sort:
+    //   1. Exact (100%) matches first — those are perfect payment hits.
+    //   2. Then by realism-weighted rank within the same accuracy bucket.
+    //   3. Tie-break by raw payment score.
+    candidates.sort((a, b) => {
+      const aExact = a.score === 100 ? 1 : 0;
+      const bExact = b.score === 100 ? 1 : 0;
+      if (aExact !== bExact) return bExact - aExact;
+      return (b.rank - a.rank) || (b.score - a.score);
+    });
+    // Take the top 4 — per spec, four options is the sweet spot for the
+    // broker (was 5 before; 4 keeps the picker scannable without scrolling).
     const top: typeof candidates = [];
     for (const c of candidates) {
-      if (top.length >= 5) break;
+      if (top.length >= 4) break;
       if (top.some((t) => t.fee === c.fee && Math.abs(t.factor - c.factor) < 0.001 && Math.abs(t.termWeeks - c.termWeeks) <= 2)) continue;
       top.push(c);
     }
@@ -522,10 +536,10 @@ function ReverseCalc() {
                           ≈ {formatCurrency(s.predictedPayment)}/{freq === 'daily' ? 'day' : 'wk'}
                         </span>
                         <Badge
-                          variant={s.score >= 95 ? 'success' : s.score >= 80 ? 'warning' : 'outline'}
+                          variant={s.score === 100 ? 'success' : s.score >= 98 ? 'warning' : 'outline'}
                           className="text-[10px] tabular-nums"
                         >
-                          {s.score}%
+                          {s.score === 100 ? '100% exact' : `${s.score}%`}
                         </Badge>
                       </span>
                     </button>

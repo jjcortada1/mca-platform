@@ -174,12 +174,19 @@ export default function CommissionsPage() {
 
   const stats = useMemo(() => {
     let total = 0, paid = 0, pending = 0, owed = 0, clawed = 0;
+    // Available balance = cleared commissions that haven't been paid out yet.
+    // A pending row sits in the 30-day clearing window; a cleared row is
+    // ready to pay. Once paidAmount catches up with the commission amount
+    // the row no longer contributes to `available`. Excludes clawed-back.
+    let available = 0;
     let fundedVolume = 0, grossTotal = 0;
     let countPending = 0, countCleared = 0, countClawed = 0;
     const now = new Date();
     const thisMonth = now.getMonth(), thisYear = now.getFullYear();
     let mtdFunded = 0, mtdCommission = 0;
-    const byRep = new Map<string, { name: string; commission: number; funded: number; count: number }>();
+    // Per-rep breakdown: now includes per-rep available balance so admins
+    // can see who's holding the most cleared-but-unpaid balance.
+    const byRep = new Map<string, { name: string; commission: number; funded: number; count: number; available: number }>();
 
     for (const r of rows) {
       const amt = Number(r.repCommissionAmount);
@@ -190,7 +197,14 @@ export default function CommissionsPage() {
       if (r.status === 'clawed_back') { clawed += amt; countClawed++; }
       else {
         total += amt; paid += Number(r.paidAmount); owed += r.owedAmount; pending += r.pendingAmount;
-        if (r.status === 'pending') countPending++; else countCleared++;
+        if (r.status === 'pending') countPending++;
+        else {
+          countCleared++;
+          // Cleared rows: anything still owed counts as available balance.
+          // `owedAmount` already excludes clawed-back rows and is clamped at 0
+          // so we don't double-count or go negative if paidAmount overshoots.
+          available += r.owedAmount;
+        }
       }
 
       if (r.fundingDate) {
@@ -201,14 +215,15 @@ export default function CommissionsPage() {
       }
 
       if (r.repId && r.status !== 'clawed_back') {
-        const e = byRep.get(r.repId) ?? { name: r.repName ?? 'Unknown', commission: 0, funded: 0, count: 0 };
+        const e = byRep.get(r.repId) ?? { name: r.repName ?? 'Unknown', commission: 0, funded: 0, count: 0, available: 0 };
         e.commission += amt; e.funded += funded; e.count++;
+        if (r.status === 'cleared') e.available += r.owedAmount;
         byRep.set(r.repId, e);
       }
     }
     const topReps = Array.from(byRep.values()).sort((a, b) => b.commission - a.commission).slice(0, 5);
     const paidPct = total > 0 ? Math.round((paid / total) * 100) : 0;
-    return { total, paid, pending, owed, clawed, fundedVolume, grossTotal, countPending, countCleared, countClawed, mtdFunded, mtdCommission, topReps, paidPct, dealCount: rows.length };
+    return { total, paid, pending, owed, available, clawed, fundedVolume, grossTotal, countPending, countCleared, countClawed, mtdFunded, mtdCommission, topReps, paidPct, dealCount: rows.length };
   }, [rows]);
 
   // Filtered view for the rep/admin commission list. "Refi" = funded deal that
@@ -240,13 +255,30 @@ export default function CommissionsPage() {
 
   // Lead source commission totals (mirrors rep stats).
   const lsStats = useMemo(() => {
-    let total = 0, paid = 0, pending = 0, owed = 0, clawed = 0;
+    let total = 0, paid = 0, pending = 0, owed = 0, available = 0, clawed = 0;
+    // Per-lead-source breakdown so admins can see who's holding the most
+    // ready-to-pay-out balance. Sorted by `available` descending below.
+    const byLs = new Map<string, { name: string; total: number; paid: number; owed: number; available: number }>();
     for (const r of lsRows) {
       const amt = Number(r.commissionAmount);
       if (r.status === 'clawed_back') { clawed += amt; continue; }
-      total += amt; paid += Number(r.paidAmount); owed += r.owedAmount; pending += r.pendingAmount;
+      total += amt;
+      paid += Number(r.paidAmount);
+      owed += r.owedAmount;
+      pending += r.pendingAmount;
+      // Available = cleared remaining. Mirrors the rep-side definition.
+      if (r.status === 'cleared') available += r.owedAmount;
+
+      const lsName = r.leadSourceName ?? 'Unknown';
+      const e = byLs.get(lsName) ?? { name: lsName, total: 0, paid: 0, owed: 0, available: 0 };
+      e.total += amt;
+      e.paid += Number(r.paidAmount);
+      e.owed += r.owedAmount;
+      if (r.status === 'cleared') e.available += r.owedAmount;
+      byLs.set(lsName, e);
     }
-    return { total, paid, pending, owed, clawed };
+    const byLeadSource = Array.from(byLs.values()).sort((a, b) => b.available - a.available);
+    return { total, paid, pending, owed, available, clawed, byLeadSource };
   }, [lsRows]);
 
   async function patch(id: string, body: Record<string, unknown>) {
@@ -379,9 +411,15 @@ export default function CommissionsPage() {
                     <div className="h-full bg-emerald-500" style={{ width: `${stats.paidPct}%` }} />
                     <div className="h-full bg-amber-400" style={{ width: `${stats.total > 0 ? Math.round((stats.pending / stats.total) * 100) : 0}%` }} />
                   </div>
-                  <div className="flex gap-4 mt-2 text-[11px] text-muted-foreground">
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[11px] text-muted-foreground">
                     <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Paid {formatCurrency(stats.paid)}</span>
                     <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-400" /> Pending {formatCurrency(stats.pending)}</span>
+                    {/* Available = cleared but not yet paid out. Bolded +
+                        primary color so reps + admins see the actionable
+                        ready-to-draw balance at a glance. */}
+                    <span className="flex items-center gap-1 font-medium text-primary">
+                      <span className="h-2 w-2 rounded-full bg-primary" /> Available {formatCurrency(stats.available)}
+                    </span>
                     <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-muted-foreground/40" /> Owed {formatCurrency(stats.owed)}</span>
                   </div>
                 </div>
@@ -538,13 +576,52 @@ export default function CommissionsPage() {
       {tab === 'lead' && isAdmin && (
         <>
           {/* Lead source commission dashboard */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
             <Tile label="Total" value={formatCurrency(lsStats.total)} />
             <Tile label="Paid" value={formatCurrency(lsStats.paid)} tone="emerald" />
             <Tile label="Pending" value={formatCurrency(lsStats.pending)} tone="amber" />
+            {/* Available = cleared but not yet paid out. Same definition as
+                the rep-side metric. Tone matches rep available so the
+                visual language is consistent. */}
+            <Tile label="Available" value={formatCurrency(lsStats.available)} tone="emerald" />
             <Tile label="Owed" value={formatCurrency(lsStats.owed)} />
             <Tile label="Clawed back" value={formatCurrency(lsStats.clawed)} tone="rose" />
           </div>
+
+          {/* Per-lead-source breakdown — shown sorted by available balance
+              descending so the admin sees at a glance who's next in line
+              for a payout. Hidden when there are no rows (covered by the
+              main table's empty state below). */}
+          {lsStats.byLeadSource.length > 0 && (
+            <Card className="overflow-hidden">
+              <CardContent className="p-0">
+                <div className="px-4 py-3 border-b border-border">
+                  <div className="text-sm font-semibold">Available balance by lead source</div>
+                  <div className="text-xs text-muted-foreground">Cleared but not yet paid out — ready to disburse on the next cycle.</div>
+                </div>
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/30 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Lead source</th>
+                      <th className="px-3 py-2 text-right">Available</th>
+                      <th className="px-3 py-2 text-right">Total owed</th>
+                      <th className="px-3 py-2 text-right">Paid to date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {lsStats.byLeadSource.map((e) => (
+                      <tr key={e.name} className="hover:bg-muted/20">
+                        <td className="px-4 py-2 font-medium">{e.name}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-emerald-700 font-medium">{formatCurrency(e.available)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(e.owed)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatCurrency(e.paid)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="overflow-hidden">
             {lsRows.length === 0 ? (

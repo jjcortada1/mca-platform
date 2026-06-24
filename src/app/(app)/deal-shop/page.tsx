@@ -534,7 +534,26 @@ export default function DealShopPage() {
     return Array.from(map.entries()).map(([tier, v]) => ({ tier, ...v })).sort((a, b) => a.tier.localeCompare(b.tier));
   }, [results]);
 
-  const filteredGroups = activeTier === 'all' ? tierGroups : tierGroups.filter((g) => g.tier === activeTier);
+  // Funder-name text search. Filters BOTH the match results view AND the
+  // no-match manual picker view so the broker can narrow down by name in
+  // either flow. Case-insensitive substring match. Tier filter (above) and
+  // this search compose — tier narrows by category, this narrows by name.
+  const [funderSearch, setFunderSearch] = useState('');
+  const funderSearchQ = funderSearch.trim().toLowerCase();
+
+  const filteredGroups = useMemo(() => {
+    const base = activeTier === 'all' ? tierGroups : tierGroups.filter((g) => g.tier === activeTier);
+    if (!funderSearchQ) return base;
+    // Apply name filter to both matched + excluded inside each tier; drop
+    // groups that become empty so the user doesn't see empty section heads.
+    return base
+      .map((g) => ({
+        ...g,
+        matched: g.matched.filter((m) => (m.funderName ?? '').toLowerCase().includes(funderSearchQ)),
+        excluded: g.excluded.filter((m) => (m.funderName ?? '').toLowerCase().includes(funderSearchQ)),
+      }))
+      .filter((g) => g.matched.length > 0 || g.excluded.length > 0);
+  }, [tierGroups, activeTier, funderSearchQ]);
   const totalMatched = results?.matched.length ?? 0;
   const totalExcluded = results?.excluded.length ?? 0;
 
@@ -567,9 +586,16 @@ export default function DealShopPage() {
       .sort((a, b) => a.tier.localeCompare(b.tier));
   }, [results, funderMap]);
 
-  const filteredManualGroups = activeManualTier === 'all'
-    ? manualTierGroups
-    : manualTierGroups.filter((g) => g.tier === activeManualTier);
+  const filteredManualGroups = useMemo(() => {
+    const base = activeManualTier === 'all' ? manualTierGroups : manualTierGroups.filter((g) => g.tier === activeManualTier);
+    if (!funderSearchQ) return base;
+    return base
+      .map((g) => ({
+        ...g,
+        funders: g.funders.filter((f) => f.name.toLowerCase().includes(funderSearchQ)),
+      }))
+      .filter((g) => g.funders.length > 0);
+  }, [manualTierGroups, activeManualTier, funderSearchQ]);
 
   function toggleExpand(id: string) {
     const next = new Set(expanded);
@@ -1039,6 +1065,31 @@ export default function DealShopPage() {
               )}
             </div>
 
+            {/* Funder name search — narrows the visible rows AFTER the tier
+                filter, so tier counts stay accurate while typing a name.
+                Useful when the broker knows the funder name and wants to
+                jump directly to it without scanning. Empty = show all. */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <input
+                type="text"
+                value={funderSearch}
+                onChange={(e) => setFunderSearch(e.target.value)}
+                placeholder="Search a funder by name…"
+                className="h-8 w-full rounded-md border border-input bg-card pl-8 pr-3 text-xs focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring/60"
+              />
+              {funderSearch && (
+                <button
+                  type="button"
+                  onClick={() => setFunderSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  title="Clear search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
             {/* Tier filter + tier-select chips.
                 Each chip is a split control:
                   • Left half (label + count badges) filters the view to
@@ -1336,6 +1387,30 @@ export default function DealShopPage() {
               </div>
             ) : (
               <>
+                {/* Funder name search — same control as the matched view.
+                    Visible regardless of tier count so the broker can pick
+                    a specific funder by name when nothing has matched yet. */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                  <input
+                    type="text"
+                    value={funderSearch}
+                    onChange={(e) => setFunderSearch(e.target.value)}
+                    placeholder="Search a funder by name…"
+                    className="h-8 w-full rounded-md border border-input bg-card pl-8 pr-3 text-xs focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring/60"
+                  />
+                  {funderSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setFunderSearch('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      title="Clear search"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
                 {/* Tier chip row — same split-control UX as the matched
                     view. Empty tier rosters get no chip. */}
                 {manualTierGroups.length > 1 && (

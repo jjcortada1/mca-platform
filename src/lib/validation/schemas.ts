@@ -145,7 +145,10 @@ export const upsertDealSchema = z.object({
   renewalNotes: z.string().max(10000).optional().nullable(),
   // Funded-deal sub-status — only meaningful when status='funded'. The
   // Funded Deals page exposes this as a small select on each row.
-  fundedSubStatus: z.enum(['active', 'refi_eligible', 'payment_issues', 'default']).optional().nullable(),
+  // 'refinanced' is NOT user-selectable from the dropdown — it's set
+  // programmatically by the "Mark as refinanced" flow on the funded deal
+  // editor. We accept it on PATCH so that flow can write it.
+  fundedSubStatus: z.enum(['active', 'refi_eligible', 'payment_issues', 'default', 'refinanced']).optional().nullable(),
 });
 
 /* ---------- Submissions ---------- */

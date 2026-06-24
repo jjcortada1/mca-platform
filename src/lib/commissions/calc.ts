@@ -102,6 +102,13 @@ export interface PayoutTotals {
   paid: number;
   pending: number;
   owed: number;       // total - paid (for non-clawed-back)
+  /**
+   * Cleared but not yet paid out. Subset of `owed` — specifically the
+   * portion that has finished its 30-day pending window and is ready to
+   * disburse. `pending` + `available` = `owed`. Same definition the rep
+   * & lead-source dashboards use, so the portal can show the same number.
+   */
+  available: number;
   clawedBack: number;
 }
 
@@ -112,7 +119,7 @@ export interface PayoutTotals {
 export function rollupTotals(
   rows: { amount: number; paid: number; status: 'pending' | 'cleared' | 'clawed_back' }[]
 ): PayoutTotals {
-  let total = 0, paid = 0, pending = 0, owed = 0, clawedBack = 0;
+  let total = 0, paid = 0, pending = 0, owed = 0, available = 0, clawedBack = 0;
   for (const r of rows) {
     const amt = num(r.amount);
     const p = num(r.paid);
@@ -125,12 +132,15 @@ export function rollupTotals(
     const remaining = Math.max(0, amt - p);
     owed += remaining;
     if (r.status === 'pending') pending += remaining;
+    // Cleared & still owing → counts as available to pay out NOW.
+    if (r.status === 'cleared') available += remaining;
   }
   return {
     total: round2(total),
     paid: round2(paid),
     pending: round2(pending),
     owed: round2(owed),
+    available: round2(available),
     clawedBack: round2(clawedBack),
   };
 }
