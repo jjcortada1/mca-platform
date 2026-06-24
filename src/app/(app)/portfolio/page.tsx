@@ -33,6 +33,18 @@ interface Deal {
   paidOff: boolean | null;
   paidOffAmount: string | null;
   paidOffDate: string | null;
+  // Funded sub-status — 'active' | 'refi_eligible' | 'payment_issues' |
+  // 'default'. Null treated as 'active'. The merchant edit modal exposes
+  // a dropdown to flip this so admins can flag refi-ready or defaulted
+  // deals without leaving the portfolio.
+  fundedSubStatus: string | null;
+  // Notes attached to a funded deal — surfaced in the edit modal and on
+  // the rep commission view for context.
+  fundedNotes: string | null;
+  // Funder that ultimately funded this deal. FK to funders table, or a
+  // free-text label for off-directory funders.
+  fundedWithFunderId: string | null;
+  fundedWithName: string | null;
 }
 
 const TONE_CLASS: Record<string, string> = {
@@ -166,18 +178,39 @@ export default function PortfolioPage() {
                       <div className="font-semibold truncate">{deal.name}</div>
                       {merchant && <div className="text-xs text-muted-foreground truncate">{merchant}</div>}
                     </div>
-                    {deal.paidOff ? (
-                      // Paid off takes visual precedence over the active
-                      // sub-status — once a deal is closed out, that's the
-                      // primary fact about it on the portfolio.
-                      <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border bg-emerald-100 text-emerald-800 border-emerald-200">
-                        Paid off
-                      </span>
-                    ) : (
-                      <span className={cn('shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border', TONE_CLASS[m.tone] ?? TONE_CLASS.gray)}>
-                        {m.label}
-                      </span>
-                    )}
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      {deal.paidOff ? (
+                        // Paid off takes visual precedence over everything
+                        // else — once a deal is closed out, that's the
+                        // primary fact about it on the portfolio.
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border bg-emerald-100 text-emerald-800 border-emerald-200">
+                          Paid off
+                        </span>
+                      ) : (
+                        <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border', TONE_CLASS[m.tone] ?? TONE_CLASS.gray)}>
+                          {m.label}
+                        </span>
+                      )}
+                      {/* Funded sub-status badge — shown when refi-ready or
+                          defaulted so admins spot them at a glance without
+                          opening the card. Active is the default state and
+                          doesn't need its own badge. */}
+                      {!deal.paidOff && deal.fundedSubStatus === 'refi_eligible' && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border bg-teal-100 text-teal-800 border-teal-200">
+                          Refi ready
+                        </span>
+                      )}
+                      {!deal.paidOff && deal.fundedSubStatus === 'default' && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border bg-red-100 text-red-800 border-red-200">
+                          Default
+                        </span>
+                      )}
+                      {!deal.paidOff && deal.fundedSubStatus === 'payment_issues' && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border bg-amber-100 text-amber-800 border-amber-200">
+                          Payment issues
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Balance */}
@@ -256,6 +289,13 @@ function EditFundedDealModal({
   const [phone, setPhone] = useState(deal.merchantPhone ?? '');
   const [email, setEmail] = useState(deal.merchantEmail ?? '');
   const [businessName, setBusinessName] = useState(deal.businessName ?? '');
+  // Funded sub-status — null treated as 'active'. The dropdown lets the
+  // admin flag a deal as refi-ready, payment-issues, or default without
+  // leaving the portfolio. Persists to deals.fundedSubStatus.
+  const [subStatus, setSubStatus] = useState<string>(deal.fundedSubStatus ?? 'active');
+  // Notes attached to the funded deal — surfaced on the card detail and
+  // on the rep commission view so context follows the deal everywhere.
+  const [fundedNotes, setFundedNotes] = useState(deal.fundedNotes ?? '');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -293,6 +333,11 @@ function EditFundedDealModal({
     if (phone !== (deal.merchantPhone ?? ''))         body.merchantPhone     = phone.trim()     || null;
     if (email !== (deal.merchantEmail ?? ''))         body.merchantEmail     = email.trim()     || null;
     if (businessName !== (deal.businessName ?? ''))   body.businessName      = businessName.trim() || null;
+    // Status / notes — only patch if changed so we don't churn the
+    // updatedAt on every Save click. Empty notes become null so display
+    // logic doesn't render a blank row.
+    if (subStatus !== (deal.fundedSubStatus ?? 'active')) body.fundedSubStatus = subStatus;
+    if (fundedNotes !== (deal.fundedNotes ?? ''))         body.fundedNotes     = fundedNotes.trim() || null;
     if (Object.keys(body).length === 0) { onClose(); return; }
 
     const res = await fetch(`/api/deals/${deal.id}`, {
@@ -459,11 +504,46 @@ function EditFundedDealModal({
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="contact@acmepizza.com" />
             </div>
 
+            {/* Funded sub-status — distinct visual block (border-top) so
+                the admin immediately reads it as a deal-level lifecycle
+                action, not a merchant edit. Only shown when the deal
+                isn't already paid off, since the payoff state supersedes
+                all sub-statuses. */}
+            {!deal.paidOff && (
+              <div className="pt-3 border-t border-border space-y-1">
+                <label className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Status</label>
+                <select
+                  value={subStatus}
+                  onChange={(e) => setSubStatus(e.target.value)}
+                  className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+                >
+                  <option value="active">Active</option>
+                  <option value="refi_eligible">Refi ready</option>
+                  <option value="payment_issues">Payment issues</option>
+                  <option value="default">Default</option>
+                </select>
+              </div>
+            )}
+
+            {/* Funded notes — free text, full width below the field grid.
+                Surfaced on the rep commission view too so context follows
+                the deal. */}
+            <div className="space-y-1">
+              <label className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Notes</label>
+              <textarea
+                value={fundedNotes}
+                onChange={(e) => setFundedNotes(e.target.value)}
+                rows={3}
+                className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm resize-y"
+                placeholder="Anything to remember about this deal — special terms, watch-list flags, contact-of-record, etc."
+              />
+            </div>
+
             {/* Paid-off block — current state + action. Distinct visual
                 weight from the merchant fields above so the admin
                 immediately sees this is a state change, not an edit. */}
             <div className="pt-3 border-t border-border space-y-2">
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Deal status</div>
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Paid off</div>
               {deal.paidOff ? (
                 <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-emerald-50 border border-emerald-200">
                   <div>

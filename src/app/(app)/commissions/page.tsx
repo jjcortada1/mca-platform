@@ -501,6 +501,11 @@ export default function CommissionsPage() {
                   <thead><tr className="bg-muted/40 border-b border-border text-left">
                     <th className="px-4 py-2 th">Deal</th>
                     {isAdmin && <th className="px-3 py-2 th">Rep</th>}
+                    {/* Date funded — surfaced in the table itself so reps
+                        and admins both see when the deal funded without
+                        clicking into the expand panel. Sourced from the
+                        commission record's fundingDate (already returned). */}
+                    <th className="px-3 py-2 th">Date funded</th>
                     <th className="px-3 py-2 th text-right">Gross</th>
                     <th className="px-3 py-2 th text-right">Split %</th>
                     <th className="px-3 py-2 th text-right">Rep comm.</th>
@@ -515,6 +520,7 @@ export default function CommissionsPage() {
                         <tr key={r.id} className="hover:bg-muted/20">
                           <td className="px-4 py-2.5 font-medium">{r.dealName}</td>
                           {isAdmin && <td className="px-3 py-2.5 text-muted-foreground">{r.repName ?? '—'}</td>}
+                          <td className="px-3 py-2.5 tabular-nums text-muted-foreground">{r.fundingDate ? formatDate(r.fundingDate) : '—'}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(r.grossCommission))}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums">{Number(r.repSplitPct)}%</td>
                           <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatCurrency(Number(r.repCommissionAmount))}</td>
@@ -531,7 +537,7 @@ export default function CommissionsPage() {
                           </td>
                         </tr>
                         {expanded === r.id && (
-                          <tr className="bg-muted/10"><td colSpan={isAdmin ? 9 : 8} className="px-4 py-3">
+                          <tr className="bg-muted/10"><td colSpan={isAdmin ? 10 : 9} className="px-4 py-3">
                             <CommissionDetail r={r} isAdmin={isAdmin} reps={reps} onPatch={patch} onDelete={softDelete} onDealPatch={dealPatch} />
                           </td></tr>
                         )}
@@ -605,6 +611,10 @@ export default function CommissionsPage() {
                   <thead><tr className="bg-muted/40 border-b border-border text-left">
                     <th className="px-4 py-2 th">Lead source</th>
                     <th className="px-3 py-2 th">Deal</th>
+                    {/* Same column as the rep table — admins always see when
+                        the deal funded so payment timing is one glance, not
+                        a click-into-expand. */}
+                    <th className="px-3 py-2 th">Date funded</th>
                     <th className="px-3 py-2 th text-right">Split / Flat</th>
                     <th className="px-3 py-2 th text-right">Commission</th>
                     <th className="px-3 py-2 th text-right">Paid</th>
@@ -618,6 +628,7 @@ export default function CommissionsPage() {
                         <tr key={r.id} className="hover:bg-muted/20">
                           <td className="px-4 py-2.5 font-medium">{r.leadSourceName}</td>
                           <td className="px-3 py-2.5 text-muted-foreground">{r.dealName}</td>
+                          <td className="px-3 py-2.5 tabular-nums text-muted-foreground">{r.fundingDate ? formatDate(r.fundingDate) : '—'}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums">{r.flatAmount ? formatCurrency(Number(r.flatAmount)) : r.splitPct ? `${Number(r.splitPct)}%` : '—'}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatCurrency(Number(r.commissionAmount))}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">{formatCurrency(Number(r.paidAmount))}</td>
@@ -634,7 +645,7 @@ export default function CommissionsPage() {
                         </tr>
                         {lsExpanded === r.id && (
                           <tr className="bg-muted/10">
-                            <td colSpan={8} className="px-4 py-3">
+                            <td colSpan={9} className="px-4 py-3">
                               <LSCommissionDetail r={r} reps={reps} onPatch={lsPatch} onDelete={lsSoftDelete} onDealPatch={dealPatch} />
                             </td>
                           </tr>
