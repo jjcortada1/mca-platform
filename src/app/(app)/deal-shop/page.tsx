@@ -128,14 +128,23 @@ export default function DealShopPage() {
        2. The submission record carries the formatted summary in its
           notes field, so submissions display shows it.
      Each subsection is optional — broker fills only what they want. */
-  type OpenBal = { id: string; funder: string; amount: string };
+  // Each open balance now carries rate (factor) and term in addition to
+  // funder + amount, so the submission tells the funder the full picture
+  // of competing positions, not just "they owe X". All four fields are
+  // optional — empty ones are skipped from the formatted output.
+  type OpenBal = { id: string; funder: string; amount: string; rate: string; term: string };
   type RecentFund = { id: string; company: string; amount: string; date: string };
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [openBalances, setOpenBalances] = useState<OpenBal[]>([]);
   const [priorHistoryMode, setPriorHistoryMode] = useState<'unset' | 'yes' | 'no'>('unset');
   const [priorHistoryDetails, setPriorHistoryDetails] = useState('');
   const [recentFundings, setRecentFundings] = useState<RecentFund[]>([]);
-  const [savingIntake, setSavingIntake] = useState(false);
+  // Auto-save indicator state — flips on every successful debounced
+  // persist. Replaces the old manual "Save intake on deal" button.
+  const [intakeSaveState, setIntakeSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  // Track the most recent in-flight save so a fast typist doesn't get
+  // an out-of-order PATCH overwriting their newest changes.
+  const intakeSaveSeqRef = useRef(0);
 
   // When a deal is loaded into the page (via ?dealId=), hydrate the
   // intake form from deal.submissionIntake. Done lazily so the fetch
@@ -148,8 +157,12 @@ export default function DealShopPage() {
         const intake = j?.deal?.submissionIntake;
         if (!intake || typeof intake !== 'object') return;
         if (Array.isArray(intake.openBalances)) {
-          setOpenBalances(intake.openBalances.map((r: { funder?: string; amount?: string }) => ({
-            id: cryptoId(), funder: r.funder ?? '', amount: r.amount ?? '',
+          setOpenBalances(intake.openBalances.map((r: { funder?: string; amount?: string; rate?: string; term?: string }) => ({
+            id: cryptoId(),
+            funder: r.funder ?? '',
+            amount: r.amount ?? '',
+            rate: r.rate ?? '',
+            term: r.term ?? '',
           })));
         }
         if (intake.priorHistory) {
@@ -170,6 +183,49 @@ export default function DealShopPage() {
       })
       .catch(() => {});
   }, [dealId]);
+
+  /* Auto-save the intake (and the email notes that get carried with it)
+     onto the deal record whenever any of the intake state changes. No
+     more manual "Save intake on deal" button — the broker just types and
+     the changes persist. Debounced 600ms so we don't fire one PATCH per
+     keystroke. A monotonically-increasing sequence number prevents an
+     older response from clobbering a newer one if requests arrive out
+     of order. Skipped entirely when there's no dealId in the URL —
+     without a deal context the intake is only used for the current
+     submission.
+
+     We also skip the very first run on mount: the hydration effect
+     above seeds state from server data, and we don't want to immediately
+     write that same data back. The hasHydratedRef flips to true after
+     the first run so subsequent edits trigger persistence. */
+  const hasHydratedRef = useRef(false);
+  useEffect(() => {
+    if (!dealId) return;
+    if (!hasHydratedRef.current) {
+      const t = setTimeout(() => { hasHydratedRef.current = true; }, 0);
+      return () => clearTimeout(t);
+    }
+    setIntakeSaveState('saving');
+    const seq = ++intakeSaveSeqRef.current;
+    const t = setTimeout(async () => {
+      const intake = buildIntakePayload(openBalances, priorHistoryMode, priorHistoryDetails, recentFundings, notes);
+      try {
+        const res = await fetch(`/api/deals/${dealId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ submissionIntake: intake }),
+        });
+        if (seq === intakeSaveSeqRef.current) {
+          setIntakeSaveState(res.ok ? 'saved' : 'idle');
+        }
+      } catch {
+        if (seq === intakeSaveSeqRef.current) setIntakeSaveState('idle');
+      }
+    }, 600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dealId, openBalances, priorHistoryMode, priorHistoryDetails, recentFundings, notes]);
+
   const [assignedRepId, setAssignedRepId] = useState('');
   const [reps, setReps] = useState<{ id: string; name: string; email: string }[]>([]);
   // Additional CC addresses entered manually. Rep CC auto-pulls from the
@@ -877,30 +933,18 @@ export default function DealShopPage() {
               setRecentFundings={setRecentFundings}
               dealId={dealId}
               notesPreview={notes}
-              saving={savingIntake}
-              onSave={async () => {
-                if (!dealId) return;
-                setSavingIntake(true);
-                const intake = buildIntakePayload(openBalances, priorHistoryMode, priorHistoryDetails, recentFundings, notes);
-                const res = await fetch(`/api/deals/${dealId}`, {
-                  method: 'PATCH',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ submissionIntake: intake }),
-                });
-                setSavingIntake(false);
-                // No toast for a silent persist — the in-section "Saved"
-                // indicator covers it.
-                return res.ok;
-              }}
+              saveState={intakeSaveState}
             />
 
             <Field label="Notes (appears at top of email)">
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                rows={3}
+                rows={4}
                 placeholder="$45k 1st position, 14 month tib, 660 fico…"
-                className="w-full rounded-md border border-input bg-card px-2.5 py-1.5 text-sm resize-y"
+                // Bigger base font + padding for readability — old styling
+                // (text-sm + py-1.5) was cramped and hard to scan.
+                className="w-full rounded-md border border-input bg-card px-3 py-2 text-base resize-y leading-relaxed"
               />
             </Field>
 
@@ -1768,6 +1812,7 @@ function FunderDetailRow({ funder }: { funder: FunderDetail }) {
  * has its own + button to add rows; trash icon per row to remove.
  * ───────────────────────────────────────────────────────────────────── */
 
+
 function SubmissionIntakeSection({
   expanded,
   onToggle,
@@ -1781,13 +1826,12 @@ function SubmissionIntakeSection({
   setRecentFundings,
   dealId,
   notesPreview,
-  saving,
-  onSave,
+  saveState,
 }: {
   expanded: boolean;
   onToggle: () => void;
-  openBalances: { id: string; funder: string; amount: string }[];
-  setOpenBalances: React.Dispatch<React.SetStateAction<{ id: string; funder: string; amount: string }[]>>;
+  openBalances: { id: string; funder: string; amount: string; rate: string; term: string }[];
+  setOpenBalances: React.Dispatch<React.SetStateAction<{ id: string; funder: string; amount: string; rate: string; term: string }[]>>;
   priorHistoryMode: 'unset' | 'yes' | 'no';
   setPriorHistoryMode: React.Dispatch<React.SetStateAction<'unset' | 'yes' | 'no'>>;
   priorHistoryDetails: string;
@@ -1796,18 +1840,15 @@ function SubmissionIntakeSection({
   setRecentFundings: React.Dispatch<React.SetStateAction<{ id: string; company: string; amount: string; date: string }[]>>;
   dealId: string | null;
   notesPreview: string;
-  saving: boolean;
-  onSave: () => Promise<boolean | undefined>;
+  saveState: 'idle' | 'saving' | 'saved';
 }) {
-  const [savedFlash, setSavedFlash] = useState(false);
-
   function addOpenBalance() {
-    setOpenBalances((arr) => [...arr, { id: cryptoId(), funder: '', amount: '' }]);
+    setOpenBalances((arr) => [...arr, { id: cryptoId(), funder: '', amount: '', rate: '', term: '' }]);
   }
   function removeOpenBalance(id: string) {
     setOpenBalances((arr) => arr.filter((r) => r.id !== id));
   }
-  function updateOpenBalance(id: string, patch: Partial<{ funder: string; amount: string }>) {
+  function updateOpenBalance(id: string, patch: Partial<{ funder: string; amount: string; rate: string; term: string }>) {
     setOpenBalances((arr) => arr.map((r) => r.id === id ? { ...r, ...patch } : r));
   }
   function addRecentFunding() {
@@ -1823,87 +1864,191 @@ function SubmissionIntakeSection({
   // Live preview — same format that ends up prepended to the email body.
   const preview = formatIntakeMessage(openBalances, priorHistoryMode, priorHistoryDetails, recentFundings);
 
-  async function handleSave() {
-    const ok = await onSave();
-    if (ok) {
-      setSavedFlash(true);
-      setTimeout(() => setSavedFlash(false), 1800);
-    }
-  }
-
   return (
-    <div className="border border-border rounded-md bg-card/50">
+    <div className="border border-border rounded-md bg-card">
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-foreground hover:bg-muted/30 rounded-t-md"
+        className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-foreground hover:bg-muted/30 rounded-t-md"
         aria-expanded={expanded}
       >
         <span className="flex items-center gap-2">
-          <span className={`inline-block transition-transform ${expanded ? 'rotate-90' : ''}`}>▸</span>
+          <span className={`inline-block transition-transform ${expanded ? 'rotate-90' : ''}`}>{'\u25B8'}</span>
           <span>Submission intake</span>
-          <span className="text-[10px] text-muted-foreground font-normal">
-            (optional — open balances, prior history, recent funding)
+          <span className="text-xs text-muted-foreground font-normal hidden sm:inline">
+            recent funding, open balances, prior history
           </span>
         </span>
-        <span className="text-[11px] text-primary">
-          {expanded ? 'Collapse' : 'Expand form'}
+        <span className="flex items-center gap-3">
+          {dealId && (
+            <span className="text-xs text-muted-foreground" aria-live="polite">
+              {saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Auto-saved' : ''}
+            </span>
+          )}
+          <span className="text-sm text-primary font-medium">
+            {expanded ? 'Collapse' : 'Expand form'}
+          </span>
         </span>
       </button>
 
       {expanded && (
-        <div className="px-3 pb-3 pt-1 space-y-4 border-t border-border">
-          {/* Open balances */}
-          <div className="space-y-2">
+        <div className="px-4 pb-4 pt-2 space-y-5 border-t border-border">
+
+          {/* Recent funding — FIRST per user's preferred ordering. The
+              funder cares most about what other funders have just put in
+              ahead of them. Each row: company, amount, date. */}
+          <section className="space-y-2">
             <div className="flex items-center justify-between">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Open balances</div>
-              <button type="button" onClick={addOpenBalance} className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-1">
+              <div className="text-sm font-semibold text-foreground">Recent funding</div>
+              <button
+                type="button"
+                onClick={addRecentFunding}
+                className="h-9 px-3 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 inline-flex items-center gap-1.5"
+              >
                 <span className="text-base leading-none">+</span> Add position
               </button>
             </div>
-            {openBalances.length === 0 ? (
-              <div className="text-[11px] text-muted-foreground italic">No positions added.</div>
+            {recentFundings.length === 0 ? (
+              <div className="text-sm text-muted-foreground italic px-1">No recent funding added yet.</div>
             ) : (
-              <div className="space-y-1.5">
-                {openBalances.map((row) => (
-                  <div key={row.id} className="flex items-center gap-2">
-                    <input
-                      value={row.funder}
-                      onChange={(e) => updateOpenBalance(row.id, { funder: e.target.value })}
-                      placeholder="Funder name (e.g. LG)"
-                      className="h-8 flex-1 rounded-md border border-input bg-card px-2 text-xs"
-                    />
-                    <input
-                      value={row.amount}
-                      onChange={(e) => updateOpenBalance(row.id, { amount: e.target.value })}
-                      placeholder="$150K"
-                      className="h-8 w-28 rounded-md border border-input bg-card px-2 text-xs"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeOpenBalance(row.id)}
-                      className="text-muted-foreground hover:text-destructive p-1 text-xs"
-                      title="Remove"
-                      aria-label="Remove position"
-                    >
-                      ✕
-                    </button>
+              <div className="space-y-2">
+                {recentFundings.map((row, i) => (
+                  <div key={row.id} className="border border-border rounded-md p-3 bg-muted/20">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Position {i + 1}</div>
+                      <button
+                        type="button"
+                        onClick={() => removeRecentFunding(row.id)}
+                        className="h-8 px-3 rounded-md border border-border text-sm text-muted-foreground hover:text-destructive hover:border-destructive/40 hover:bg-destructive/5 inline-flex items-center gap-1"
+                        title="Remove this position"
+                        aria-label="Remove recent funding position"
+                      >
+                        <span>Remove</span>
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div>
+                        <label className="text-xs text-muted-foreground font-medium block mb-1">Company</label>
+                        <input
+                          value={row.company}
+                          onChange={(e) => updateRecentFunding(row.id, { company: e.target.value })}
+                          placeholder="LG"
+                          className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground font-medium block mb-1">Amount</label>
+                        <input
+                          value={row.amount}
+                          onChange={(e) => updateRecentFunding(row.id, { amount: e.target.value })}
+                          placeholder="$150K"
+                          className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground font-medium block mb-1">Date</label>
+                        <input
+                          value={row.date}
+                          onChange={(e) => updateRecentFunding(row.id, { date: e.target.value })}
+                          placeholder="5/29"
+                          className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm"
+                        />
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
-          </div>
+          </section>
 
-          {/* Prior history toggle */}
-          <div className="space-y-2 pt-3 border-t border-border">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Prior history to current positions</div>
-            <div className="inline-flex rounded-md border border-input bg-card p-0.5" role="radiogroup" aria-label="Prior history">
+          {/* Open balances — funder, amount, rate, term. Each in its own
+              labeled row block so the four fields are easy to scan and
+              the Remove button has plenty of room. */}
+          <section className="space-y-2 pt-4 border-t border-border">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-foreground">Open balances</div>
+              <button
+                type="button"
+                onClick={addOpenBalance}
+                className="h-9 px-3 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 inline-flex items-center gap-1.5"
+              >
+                <span className="text-base leading-none">+</span> Add position
+              </button>
+            </div>
+            {openBalances.length === 0 ? (
+              <div className="text-sm text-muted-foreground italic px-1">No open balances added yet.</div>
+            ) : (
+              <div className="space-y-2">
+                {openBalances.map((row, i) => (
+                  <div key={row.id} className="border border-border rounded-md p-3 bg-muted/20">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Position {i + 1}</div>
+                      <button
+                        type="button"
+                        onClick={() => removeOpenBalance(row.id)}
+                        className="h-8 px-3 rounded-md border border-border text-sm text-muted-foreground hover:text-destructive hover:border-destructive/40 hover:bg-destructive/5 inline-flex items-center gap-1"
+                        title="Remove this position"
+                        aria-label="Remove open balance position"
+                      >
+                        <span>Remove</span>
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div>
+                        <label className="text-xs text-muted-foreground font-medium block mb-1">Funder</label>
+                        <input
+                          value={row.funder}
+                          onChange={(e) => updateOpenBalance(row.id, { funder: e.target.value })}
+                          placeholder="LG"
+                          className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground font-medium block mb-1">Amount</label>
+                        <input
+                          value={row.amount}
+                          onChange={(e) => updateOpenBalance(row.id, { amount: e.target.value })}
+                          placeholder="$50K"
+                          className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground font-medium block mb-1">Rate (factor)</label>
+                        <input
+                          value={row.rate}
+                          onChange={(e) => updateOpenBalance(row.id, { rate: e.target.value })}
+                          placeholder="1.45"
+                          inputMode="decimal"
+                          className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground font-medium block mb-1">Term</label>
+                        <input
+                          value={row.term}
+                          onChange={(e) => updateOpenBalance(row.id, { term: e.target.value })}
+                          placeholder="100 days"
+                          className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Prior history — bigger pill toggle for a more legible
+              control, with the details textarea right below when Yes. */}
+          <section className="space-y-2 pt-4 border-t border-border">
+            <div className="text-sm font-semibold text-foreground">Prior history to current positions</div>
+            <div className="inline-flex rounded-md border border-input bg-card p-1" role="radiogroup" aria-label="Prior history">
               <button
                 type="button"
                 role="radio"
                 aria-checked={priorHistoryMode === 'unset'}
                 onClick={() => setPriorHistoryMode('unset')}
-                className={`h-8 px-3 rounded text-xs font-medium ${priorHistoryMode === 'unset' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                className={`h-10 px-4 rounded text-sm font-medium ${priorHistoryMode === 'unset' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
               >
                 Not specified
               </button>
@@ -1912,7 +2057,7 @@ function SubmissionIntakeSection({
                 role="radio"
                 aria-checked={priorHistoryMode === 'no'}
                 onClick={() => setPriorHistoryMode('no')}
-                className={`h-8 px-3 rounded text-xs font-medium ${priorHistoryMode === 'no' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                className={`h-10 px-4 rounded text-sm font-medium ${priorHistoryMode === 'no' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
               >
                 No
               </button>
@@ -1921,7 +2066,7 @@ function SubmissionIntakeSection({
                 role="radio"
                 aria-checked={priorHistoryMode === 'yes'}
                 onClick={() => setPriorHistoryMode('yes')}
-                className={`h-8 px-3 rounded text-xs font-medium ${priorHistoryMode === 'yes' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                className={`h-10 px-4 rounded text-sm font-medium ${priorHistoryMode === 'yes' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
               >
                 Yes
               </button>
@@ -1930,94 +2075,40 @@ function SubmissionIntakeSection({
               <textarea
                 value={priorHistoryDetails}
                 onChange={(e) => setPriorHistoryDetails(e.target.value)}
-                rows={2}
+                rows={3}
                 placeholder="e.g. merchant is paying for a few years"
-                className="w-full rounded-md border border-input bg-card px-2.5 py-1.5 text-xs resize-y"
+                className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm resize-y"
               />
             )}
-          </div>
+          </section>
 
-          {/* Recent funding */}
-          <div className="space-y-2 pt-3 border-t border-border">
+          {/* Live preview — bigger font, more padding, scrollable when
+              the message gets long. No save button — auto-save handles
+              persistence on every keystroke (debounced). */}
+          <section className="pt-4 border-t border-border space-y-2">
             <div className="flex items-center justify-between">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Recent funding</div>
-              <button type="button" onClick={addRecentFunding} className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-1">
-                <span className="text-base leading-none">+</span> Add position
-              </button>
-            </div>
-            {recentFundings.length === 0 ? (
-              <div className="text-[11px] text-muted-foreground italic">No recent funding added.</div>
-            ) : (
-              <div className="space-y-1.5">
-                {recentFundings.map((row) => (
-                  <div key={row.id} className="flex items-center gap-2">
-                    <input
-                      value={row.company}
-                      onChange={(e) => updateRecentFunding(row.id, { company: e.target.value })}
-                      placeholder="Company (e.g. LG)"
-                      className="h-8 flex-1 rounded-md border border-input bg-card px-2 text-xs"
-                    />
-                    <input
-                      value={row.amount}
-                      onChange={(e) => updateRecentFunding(row.id, { amount: e.target.value })}
-                      placeholder="$150K"
-                      className="h-8 w-24 rounded-md border border-input bg-card px-2 text-xs"
-                    />
-                    <input
-                      value={row.date}
-                      onChange={(e) => updateRecentFunding(row.id, { date: e.target.value })}
-                      placeholder="5/29"
-                      className="h-8 w-20 rounded-md border border-input bg-card px-2 text-xs"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeRecentFunding(row.id)}
-                      className="text-muted-foreground hover:text-destructive p-1 text-xs"
-                      title="Remove"
-                      aria-label="Remove recent funding"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Live preview + save */}
-          <div className="pt-3 border-t border-border space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Preview</div>
-              {dealId && (
-                <div className="flex items-center gap-2">
-                  {savedFlash && <span className="text-[10px] text-emerald-700">Saved with deal</span>}
-                  <button
-                    type="button"
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="h-7 px-3 rounded-md bg-foreground text-background text-xs font-medium hover:opacity-90 disabled:opacity-50"
-                    title="Save the intake on this deal so it pre-fills next time you shop it"
-                  >
-                    {saving ? 'Saving…' : 'Save intake on deal'}
-                  </button>
+              <div className="text-sm font-semibold text-foreground">Message preview</div>
+              {!dealId && (
+                <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                  Not linked to a deal
                 </div>
               )}
             </div>
-            <pre className="text-[11px] font-mono whitespace-pre-wrap bg-muted/30 border border-border rounded-md px-3 py-2 max-h-48 overflow-y-auto">
+            <pre className="text-sm font-mono whitespace-pre-wrap bg-muted/30 border border-border rounded-md px-4 py-3 max-h-64 overflow-y-auto leading-relaxed">
               {preview || <span className="text-muted-foreground italic">Fill in the sections above to generate a message.</span>}
               {notesPreview && (
                 <>
                   {preview ? '\n\n' : ''}
-                  <span className="text-muted-foreground">[Notes below auto-included when sending]</span>
+                  <span className="text-muted-foreground">[Email notes below auto-included when sending]</span>
                 </>
               )}
             </pre>
             {!dealId && (
-              <div className="text-[11px] text-muted-foreground italic">
-                Open this page from an active deal (Shop this deal) to persist the intake — without a deal context, the intake is only used for the current submission.
+              <div className="text-xs text-muted-foreground italic">
+                Open this page from an active deal (Shop this deal) to auto-save the intake. Without a deal context the intake is used only for the current submission.
               </div>
             )}
-          </div>
+          </section>
         </div>
       )}
     </div>
@@ -2028,46 +2119,60 @@ function SubmissionIntakeSection({
  * Format the intake into the human-readable block that gets prepended
  * to the email body. Each section is skipped if empty so the output
  * stays clean when the broker only fills part of the form.
+ *
+ * Order matches the form: Recent Funding first (what funders care most
+ * about), Open Balances next, Prior History last. Open balance rows
+ * include optional rate + term when set.
  */
 function formatIntakeMessage(
-  openBalances: { funder: string; amount: string }[],
+  openBalances: { funder: string; amount: string; rate?: string; term?: string }[],
   priorHistoryMode: 'unset' | 'yes' | 'no',
   priorHistoryDetails: string,
   recentFundings: { company: string; amount: string; date: string }[],
 ): string {
-  const lines: string[] = [];
+  const sections: string[] = [];
 
-  const validBalances = openBalances.filter((r) => r.funder.trim() && r.amount.trim());
-  if (validBalances.length > 0) {
-    lines.push('Open Balances:');
-    for (const r of validBalances) {
-      lines.push(`  ${r.funder.trim()} ${r.amount.trim()}`);
-    }
-  }
-
-  if (priorHistoryMode === 'no') {
-    if (lines.length > 0) lines.push('');
-    lines.push('No prior history to current positions.');
-  } else if (priorHistoryMode === 'yes') {
-    if (lines.length > 0) lines.push('');
-    if (priorHistoryDetails.trim()) {
-      lines.push(`Has prior history to current positions — ${priorHistoryDetails.trim()}`);
-    } else {
-      lines.push('Has prior history to current positions.');
-    }
-  }
-
+  // 1. Recent funding — leads, per spec.
   const validFundings = recentFundings.filter((r) => r.company.trim() && r.amount.trim());
   if (validFundings.length > 0) {
-    if (lines.length > 0) lines.push('');
-    lines.push('Recent Funding:');
+    const lines: string[] = ['Recent Funding:'];
     for (const r of validFundings) {
       const dateSuffix = r.date.trim() ? ` on ${r.date.trim()}` : '';
       lines.push(`  ${r.company.trim()} funded ${r.amount.trim()}${dateSuffix}`);
     }
+    sections.push(lines.join('\n'));
   }
 
-  return lines.join('\n');
+  // 2. Open balances — including rate/term tail when present. The
+  // suffix is "(rate / term)" so the funder can scan the price + length
+  // of each competing position at a glance.
+  const validBalances = openBalances.filter((r) => r.funder.trim() && r.amount.trim());
+  if (validBalances.length > 0) {
+    const lines: string[] = ['Open Balances:'];
+    for (const r of validBalances) {
+      const rateStr = (r.rate ?? '').trim();
+      const termStr = (r.term ?? '').trim();
+      let suffix = '';
+      if (rateStr && termStr) suffix = ` (${rateStr} / ${termStr})`;
+      else if (rateStr) suffix = ` (${rateStr})`;
+      else if (termStr) suffix = ` (${termStr})`;
+      lines.push(`  ${r.funder.trim()} ${r.amount.trim()}${suffix}`);
+    }
+    sections.push(lines.join('\n'));
+  }
+
+  // 3. Prior history — single line.
+  if (priorHistoryMode === 'no') {
+    sections.push('No prior history to current positions.');
+  } else if (priorHistoryMode === 'yes') {
+    if (priorHistoryDetails.trim()) {
+      sections.push(`Has prior history to current positions \u2014 ${priorHistoryDetails.trim()}`);
+    } else {
+      sections.push('Has prior history to current positions.');
+    }
+  }
+
+  return sections.join('\n\n');
 }
 
 /**
@@ -2076,7 +2181,7 @@ function formatIntakeMessage(
  * blob stays compact and re-hydration ignores half-filled noise.
  */
 function buildIntakePayload(
-  openBalances: { funder: string; amount: string }[],
+  openBalances: { funder: string; amount: string; rate: string; term: string }[],
   priorHistoryMode: 'unset' | 'yes' | 'no',
   priorHistoryDetails: string,
   recentFundings: { company: string; amount: string; date: string }[],
@@ -2084,8 +2189,13 @@ function buildIntakePayload(
 ) {
   return {
     openBalances: openBalances
-      .filter((r) => r.funder.trim() || r.amount.trim())
-      .map((r) => ({ funder: r.funder.trim(), amount: r.amount.trim() })),
+      .filter((r) => r.funder.trim() || r.amount.trim() || r.rate.trim() || r.term.trim())
+      .map((r) => ({
+        funder: r.funder.trim(),
+        amount: r.amount.trim(),
+        rate: r.rate.trim(),
+        term: r.term.trim(),
+      })),
     priorHistory: priorHistoryMode === 'unset' ? null : {
       has: priorHistoryMode === 'yes',
       details: priorHistoryMode === 'yes' ? priorHistoryDetails.trim() : '',
