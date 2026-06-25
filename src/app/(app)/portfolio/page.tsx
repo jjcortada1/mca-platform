@@ -784,13 +784,32 @@ function FundedDealRow({
     fundedNotes: deal.fundedNotes ?? '',
   });
 
+  // Pending-confirm state — when set, a ConfirmDialog asks the user
+  // to verify before the change is applied. Covers status changes,
+  // rep reassignments, and save-funding-details — the actions that
+  // make a real state change to a funded deal. Each variant stashes
+  // just enough info for the confirm handler to fire the actual write.
+  const [pendingConfirm, setPendingConfirm] = useState<
+    | { kind: 'subStatus'; next: 'active' | 'refi_eligible' | 'payment_issues' | 'default' | 'refinanced' }
+    | { kind: 'rep'; repId: string }
+    | { kind: 'save' }
+    | null
+  >(null);
+
   // Inline sub-status changer — small select on the table row that PATCHes
   // immediately so the user doesn't need to expand the row to update it.
   // Accepts 'refinanced' from the dropdown directly too: per spec, the
   // status itself is editable. The Mark-as-refinanced BUTTON elsewhere
   // is a separate action that ALSO opens the new-deal pre-fill flow;
   // setting the status from the dropdown only changes the label.
-  async function quickSetSubStatus(next: 'active' | 'refi_eligible' | 'payment_issues' | 'default' | 'refinanced') {
+  // ALWAYS prompts for confirmation before applying — funded-deal status
+  // changes are consequential (drive refi-eligibility, commissions,
+  // celebration), so the two-step gate prevents accidental swaps.
+  function requestQuickSetSubStatus(next: 'active' | 'refi_eligible' | 'payment_issues' | 'default' | 'refinanced') {
+    if (next === subStatusKey) return;   // no-op
+    setPendingConfirm({ kind: 'subStatus', next });
+  }
+  async function applyQuickSetSubStatus(next: 'active' | 'refi_eligible' | 'payment_issues' | 'default' | 'refinanced') {
     // Optimistic local update for instant feedback.
     onUpdated({ fundedSubStatus: next });
     const res = await fetch(`/api/deals/${deal.id}`, {
@@ -804,7 +823,11 @@ function FundedDealRow({
     }
   }
 
-  async function quickSetRep(repId: string) {
+  function requestQuickSetRep(repId: string) {
+    if ((repId || null) === (deal.assignedRepId ?? null)) return;
+    setPendingConfirm({ kind: 'rep', repId });
+  }
+  async function applyQuickSetRep(repId: string) {
     const newRepName = repId ? (reps.find((r) => r.id === repId)?.name ?? null) : null;
     onUpdated({ assignedRepId: repId || null, assignedRepName: newRepName });
     await fetch(`/api/deals/${deal.id}`, {
@@ -889,7 +912,7 @@ function FundedDealRow({
               the row jumping open. Patches immediately via quickSetSubStatus. */}
           <select
             value={subStatusKey}
-            onChange={(e) => quickSetSubStatus(e.target.value as 'active' | 'refi_eligible' | 'payment_issues' | 'default' | 'refinanced')}
+            onChange={(e) => requestQuickSetSubStatus(e.target.value as 'active' | 'refi_eligible' | 'payment_issues' | 'default' | 'refinanced')}
             className={cn(
               'rounded-full border px-2 py-0.5 text-[10px] font-medium cursor-pointer whitespace-nowrap',
               TONE_CLASS[subMeta.tone] ?? TONE_CLASS.gray
@@ -1088,7 +1111,7 @@ function FundedDealRow({
                       <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Assigned rep</span>
                       <select
                         value={deal.assignedRepId ?? ''}
-                        onChange={(e) => quickSetRep(e.target.value)}
+                        onChange={(e) => requestQuickSetRep(e.target.value)}
                         className="h-7 text-xs rounded-md border border-input bg-card px-2"
                       >
                         <option value="">Unassigned</option>
@@ -1220,7 +1243,7 @@ function FundedDealRow({
                       <button onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
                     )}
                     <button
-                      onClick={save}
+                      onClick={() => setPendingConfirm({ kind: 'save' })}
                       disabled={saving}
                       className="h-8 px-3 rounded-md bg-foreground text-background text-xs font-medium hover:opacity-90 disabled:opacity-50"
                     >
@@ -1241,6 +1264,46 @@ function FundedDealRow({
           the action. We render inside a <tr><td colSpan> so the modal can
           appear within a table; the fixed-positioned overlay floats above
           everything regardless. */}
+
+      {/* Two-step confirmation for state-changing actions on this row.
+          Triggers from the inline status dropdown, the rep picker, and
+          the Save button on the funding-details editor. The dialog
+          renders inside its own <tr><td colSpan> because we're in a
+          table; ConfirmDialog is fixed-positioned so it floats above
+          the table regardless. */}
+      {pendingConfirm && (
+        <tr>
+          <td colSpan={11} className="p-0">
+            <ConfirmDialog
+              open
+              title={
+                pendingConfirm.kind === 'subStatus'
+                  ? `Change status to "${FUNDED_SUB_STATUS[pendingConfirm.next]?.label ?? pendingConfirm.next}"?`
+                  : pendingConfirm.kind === 'rep'
+                    ? `Reassign deal to ${pendingConfirm.repId ? (reps.find((r) => r.id === pendingConfirm.repId)?.name ?? 'this rep') : 'no one'}?`
+                    : 'Save changes?'
+              }
+              description={
+                pendingConfirm.kind === 'subStatus'
+                  ? `This will update the funded-deal status on "${deal.name}".`
+                  : pendingConfirm.kind === 'rep'
+                    ? `Commission attribution for "${deal.name}" will move with the assignment.`
+                    : `Apply the funding-details changes for "${deal.name}".`
+              }
+              confirmLabel={pendingConfirm.kind === 'save' ? 'Save changes' : 'Confirm'}
+              onCancel={() => setPendingConfirm(null)}
+              onConfirm={async () => {
+                const p = pendingConfirm;
+                setPendingConfirm(null);
+                if (p.kind === 'subStatus') await applyQuickSetSubStatus(p.next);
+                else if (p.kind === 'rep') await applyQuickSetRep(p.repId);
+                else await save();
+              }}
+            />
+          </td>
+        </tr>
+      )}
+
       {refiOpen && (
         <tr>
           <td colSpan={11} className="p-0">

@@ -34,11 +34,7 @@ export default function DocRequestPage() {
   // Phone is stored raw (digits + formatting) — formatted live as the
   // user types via formatPhone() below.
   const [merchantCell, setMerchantCell] = useState<string>('');
-  // Extra detail fields — common adds brokers asked for. All optional;
-  // skipped from the generated message when blank.
-  const [businessName, setBusinessName] = useState<string>('');
-  const [position, setPosition] = useState<string>('');
-  const [holdbackPct, setHoldbackPct] = useState<string>('');
+  // Free-form notes (anything else the funder should know).
   const [notes, setNotes] = useState<string>('');
 
   /**
@@ -82,12 +78,9 @@ export default function DocRequestPage() {
     const lines: string[] = [];
     const moneyStr = fmtMoney(fundingAmount);
     if (moneyStr) lines.push(`Send docs for ${moneyStr}`);
-    if (businessName) lines.push(`Business: ${businessName.trim()}`);
     if (rate)     lines.push(`Rate: ${rate}`);
     if (feePct)   lines.push(`Fee: ${feePct}%`);
     if (termCount) lines.push(`Term: ${termCount} ${termUnit}`);
-    if (position) lines.push(`Position: ${position.trim()}`);
-    if (holdbackPct) lines.push(`Holdback: ${holdbackPct}%`);
 
     // EPO line — flatten populated rows into one line.
     //   "EPO: 1.10 / 30 days, 1.20 / 60 days, 1.30 / 90 days"
@@ -107,7 +100,7 @@ export default function DocRequestPage() {
     if (notes) lines.push(`Notes: ${notes.trim()}`);
 
     return lines.join('\n');
-  }, [fundingAmount, rate, feePct, termCount, termUnit, epos, merchantEmail, merchantCell, businessName, position, holdbackPct, notes]);
+  }, [fundingAmount, rate, feePct, termCount, termUnit, epos, merchantEmail, merchantCell, notes]);
 
   async function copyMessage() {
     if (!message) {
@@ -142,16 +135,6 @@ export default function DocRequestPage() {
           <CardContent className="p-5 space-y-4">
             <div className="text-sm font-semibold">Deal details</div>
 
-            <Field label="Business name">
-              {/* Optional but commonly the first thing a funder asks for.
-                  Free text so DBAs + variations are fine. */}
-              <Input
-                value={businessName}
-                onChange={(e) => setBusinessName(e.target.value)}
-                placeholder="Acme Pizza LLC"
-              />
-            </Field>
-
             <Field label="Funding amount">
               {/* CurrencyInput adds $ prefix + commas as the user types. */}
               <CurrencyInput
@@ -178,26 +161,6 @@ export default function DocRequestPage() {
                   value={feePct}
                   onChange={setFeePct}
                   placeholder="5"
-                />
-              </Field>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Position">
-                {/* Position in stack — 1st, 2nd, 3rd, etc. Free text so
-                    "1st", "1", or "first" all work — the broker decides
-                    the convention. */}
-                <Input
-                  value={position}
-                  onChange={(e) => setPosition(e.target.value)}
-                  placeholder="1st"
-                />
-              </Field>
-              <Field label="Holdback (%)">
-                <PercentInput
-                  value={holdbackPct}
-                  onChange={setHoldbackPct}
-                  placeholder="12"
                 />
               </Field>
             </div>

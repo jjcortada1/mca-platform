@@ -58,12 +58,27 @@ interface SubmissionRow {
   createdAt: string;
   updatedAt: string;
   funders: SubmissionFunder[];
+  // Structured intake captured on the deal at shop time (open balances,
+  // prior history, recent fundings, notes). Rendered in the secondary-
+  // expand details panel inside the row's main expand.
+  submissionIntake?: {
+    openBalances?: { funder: string; amount: string }[];
+    priorHistory?: { has: boolean; details?: string } | null;
+    recentFundings?: { company: string; amount: string; date: string }[];
+    notes?: string;
+  } | null;
 }
 
 export default function SubmissionsPage() {
   const [rows, setRows] = useState<SubmissionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Secondary expand — keyed the same way as `expanded`, this controls
+  // whether the deal-context details panel (intake form summary) is
+  // open within an already-expanded submission row. Two independent
+  // expansions so the user can read funder responses OR deal context
+  // without one collapsing the other.
+  const [detailsExpanded, setDetailsExpanded] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Record<string, { status: string; notes: string }>>({});
   const [showManualAdd, setShowManualAdd] = useState(false);
   const [funderList, setFunderList] = useState<{ id: string; name: string }[]>([]);
@@ -568,6 +583,85 @@ export default function SubmissionsPage() {
 
                 {isOpen && (
                   <CardContent className="border-t border-border">
+                    {/* Deal context — secondary expand. Shows the structured
+                        intake captured at shop time (open balances, prior
+                        history, recent fundings, notes). Independent of the
+                        funder-status list below, so the user can see one
+                        without collapsing the other. */}
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => setDetailsExpanded((p) => ({ ...p, [row.submissionId]: !p[row.submissionId] }))}
+                        className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-1"
+                        aria-expanded={!!detailsExpanded[row.submissionId]}
+                      >
+                        <span className={`inline-block transition-transform ${detailsExpanded[row.submissionId] ? 'rotate-90' : ''}`}>▸</span>
+                        {detailsExpanded[row.submissionId] ? 'Hide deal details' : 'Show deal details'}
+                      </button>
+                      {detailsExpanded[row.submissionId] && (
+                        <div className="mt-2 px-3 py-2 rounded-md border border-border bg-muted/20 text-xs space-y-2">
+                          {(() => {
+                            const intake = row.submissionIntake;
+                            if (!intake) {
+                              return <div className="italic text-muted-foreground">No intake captured for this deal.</div>;
+                            }
+                            const hasBalances = Array.isArray(intake.openBalances) && intake.openBalances.length > 0;
+                            const hasFundings = Array.isArray(intake.recentFundings) && intake.recentFundings.length > 0;
+                            const hasHistory = intake.priorHistory != null;
+                            const hasNotes = !!intake.notes?.trim();
+                            if (!hasBalances && !hasFundings && !hasHistory && !hasNotes) {
+                              return <div className="italic text-muted-foreground">No intake details on this deal.</div>;
+                            }
+                            return (
+                              <>
+                                {hasBalances && (
+                                  <div>
+                                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Open balances</div>
+                                    <ul className="space-y-0.5 ml-1">
+                                      {intake.openBalances!.map((b, i) => (
+                                        <li key={i}><span className="font-medium">{b.funder}</span> {b.amount}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                                {hasHistory && (
+                                  <div>
+                                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Prior history</div>
+                                    <div>
+                                      {intake.priorHistory!.has
+                                        ? (intake.priorHistory!.details
+                                            ? `Has prior history to current positions — ${intake.priorHistory!.details}`
+                                            : 'Has prior history to current positions.')
+                                        : 'No prior history to current positions.'}
+                                    </div>
+                                  </div>
+                                )}
+                                {hasFundings && (
+                                  <div>
+                                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Recent funding</div>
+                                    <ul className="space-y-0.5 ml-1">
+                                      {intake.recentFundings!.map((f, i) => (
+                                        <li key={i}>
+                                          <span className="font-medium">{f.company}</span> funded {f.amount}
+                                          {f.date ? ` on ${f.date}` : ''}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                                {hasNotes && (
+                                  <div>
+                                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Notes</div>
+                                    <div className="whitespace-pre-wrap">{intake.notes}</div>
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+
                     <div className="space-y-1.5 mt-3">
                       {/* Funders sorted Approved → Declined → Pending. Changing
                           a funder's status via the dropdown does an optimistic

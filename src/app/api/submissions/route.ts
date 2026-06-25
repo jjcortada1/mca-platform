@@ -34,6 +34,10 @@ export async function GET() {
         merchantFirstName: deals.merchantFirstName,
         merchantLastName: deals.merchantLastName,
         assignedRepId: deals.assignedRepId,
+        // Submission intake — structured "what to tell the funder"
+        // context that lives on the deal. Returned here so submissions
+        // can show it on the secondary-expand details panel.
+        submissionIntake: deals.submissionIntake,
       })
       .from(submissions)
       .innerJoin(deals, eq(deals.id, submissions.dealId))
@@ -85,6 +89,10 @@ export async function GET() {
       // Both id and name — the client uses id for filtering and name for display.
       assignedRepId: s.assignedRepId,
       assignedRepName: s.assignedRepId ? repsMap.get(s.assignedRepId) : null,
+      // Submission intake — surfaced for the secondary-expand details
+      // panel on the submissions UI. May be null when the deal was
+      // submitted without filling the intake form.
+      submissionIntake: s.submissionIntake,
       updatedAt: s.sUpdatedAt,
       createdAt: s.sCreatedAt,
       funders: (sfBySubmission.get(s.sId) ?? []).map((sf) => ({

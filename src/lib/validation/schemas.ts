@@ -149,6 +149,19 @@ export const upsertDealSchema = z.object({
   // programmatically by the "Mark as refinanced" flow on the funded deal
   // editor. We accept it on PATCH so that flow can write it.
   fundedSubStatus: z.enum(['active', 'refi_eligible', 'payment_issues', 'default', 'refinanced']).optional().nullable(),
+  // Funded-with funder linkage — admin sets it on the funded-deal editor;
+  // reps can set it from their commission detail panel.
+  fundedWithFunderId: z.string().uuid().optional().nullable().or(z.literal('')),
+  fundedWithName: z.string().max(200).optional().nullable(),
+  // Notes attached to the funded deal — separate from offerNotes (which
+  // is pre-funding context) so the funded notes don't pollute the shop view.
+  fundedNotes: z.string().max(10000).optional().nullable(),
+  // Submission intake — JSON blob with the structured "what to send the
+  // funder" context. Shape is enforced by the form UI on /deal-shop;
+  // the API just round-trips it. z.any() is intentional: the shape may
+  // grow with new sections (e.g. payments history) without needing a
+  // migration. Pass null to clear; omit to leave unchanged.
+  submissionIntake: z.any().optional().nullable(),
 });
 
 /* ---------- Submissions ---------- */

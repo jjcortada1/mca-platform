@@ -120,6 +120,56 @@ export default function DealShopPage() {
   const [dealName, setDealName] = useState('');
   const [dealNameLocked, setDealNameLocked] = useState(false);
   const [notes, setNotes] = useState('');
+
+  /* Submission intake — structured "what to tell the funder" context.
+     Lives in its own expandable section above Notes on the form. The
+     data persists on the deal record (deal.submissionIntake JSONB) so:
+       1. Re-shopping to additional funders pre-fills automatically.
+       2. The submission record carries the formatted summary in its
+          notes field, so submissions display shows it.
+     Each subsection is optional — broker fills only what they want. */
+  type OpenBal = { id: string; funder: string; amount: string };
+  type RecentFund = { id: string; company: string; amount: string; date: string };
+  const [intakeOpen, setIntakeOpen] = useState(false);
+  const [openBalances, setOpenBalances] = useState<OpenBal[]>([]);
+  const [priorHistoryMode, setPriorHistoryMode] = useState<'unset' | 'yes' | 'no'>('unset');
+  const [priorHistoryDetails, setPriorHistoryDetails] = useState('');
+  const [recentFundings, setRecentFundings] = useState<RecentFund[]>([]);
+  const [savingIntake, setSavingIntake] = useState(false);
+
+  // When a deal is loaded into the page (via ?dealId=), hydrate the
+  // intake form from deal.submissionIntake. Done lazily so the fetch
+  // only fires when the user actually has a deal context.
+  useEffect(() => {
+    if (!dealId) return;
+    fetch(`/api/deals/${dealId}`, { cache: 'no-store' })
+      .then((r) => r.ok ? r.json() : null)
+      .then((j) => {
+        const intake = j?.deal?.submissionIntake;
+        if (!intake || typeof intake !== 'object') return;
+        if (Array.isArray(intake.openBalances)) {
+          setOpenBalances(intake.openBalances.map((r: { funder?: string; amount?: string }) => ({
+            id: cryptoId(), funder: r.funder ?? '', amount: r.amount ?? '',
+          })));
+        }
+        if (intake.priorHistory) {
+          setPriorHistoryMode(intake.priorHistory.has ? 'yes' : 'no');
+          setPriorHistoryDetails(intake.priorHistory.details ?? '');
+        }
+        if (Array.isArray(intake.recentFundings)) {
+          setRecentFundings(intake.recentFundings.map((r: { company?: string; amount?: string; date?: string }) => ({
+            id: cryptoId(), company: r.company ?? '', amount: r.amount ?? '', date: r.date ?? '',
+          })));
+        }
+        // Notes is part of the same intake blob — kept separate from the
+        // existing top-of-email Notes field. We populate the existing
+        // notes field if it's empty so the broker doesn't lose context.
+        if (intake.notes && typeof intake.notes === 'string') {
+          setNotes((prev) => prev || intake.notes);
+        }
+      })
+      .catch(() => {});
+  }, [dealId]);
   const [assignedRepId, setAssignedRepId] = useState('');
   const [reps, setReps] = useState<{ id: string; name: string; email: string }[]>([]);
   // Additional CC addresses entered manually. Rep CC auto-pulls from the
@@ -301,7 +351,24 @@ export default function DealShopPage() {
     const fd = new FormData();
     if (dealId) fd.append('dealId', dealId);
     fd.append('dealName', dealName.trim());
-    fd.append('bodyNotes', notes);
+    // Prepend the formatted intake summary to the email body so the
+    // funder receives the open balances / prior history / recent
+    // funding context above the broker's free-form notes. The intake
+    // is also persisted on the deal record so re-shopping pre-fills.
+    const intakeSummary = formatIntakeMessage(openBalances, priorHistoryMode, priorHistoryDetails, recentFundings);
+    const composedBody = intakeSummary ? `${intakeSummary}\n\n${notes}`.trim() : notes;
+    fd.append('bodyNotes', composedBody);
+    // Best-effort persist of intake on the deal so it's there next time
+    // this deal is shopped. Fire-and-forget — submission goes ahead even
+    // if the persist call hits a transient error.
+    if (dealId) {
+      const intake = buildIntakePayload(openBalances, priorHistoryMode, priorHistoryDetails, recentFundings, notes);
+      fetch(`/api/deals/${dealId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ submissionIntake: intake }),
+      }).catch(() => {});
+    }
     fd.append('funders', JSON.stringify(targets));
     if (assignedRepId) fd.append('assignedRepId', assignedRepId);
     fd.append('ccEmails', JSON.stringify(ccList));
@@ -790,6 +857,42 @@ export default function DealShopPage() {
                 )}
               </Field>
             </div>
+
+            {/* Submission intake — expandable section. Collapsed by
+                default; broker presses Expand form to open it. Captures
+                structured deal context (open balances, prior history,
+                recent fundings) that gets formatted into the submission
+                message AND persists on the deal record so re-shopping
+                pre-fills automatically. */}
+            <SubmissionIntakeSection
+              expanded={intakeOpen}
+              onToggle={() => setIntakeOpen((v) => !v)}
+              openBalances={openBalances}
+              setOpenBalances={setOpenBalances}
+              priorHistoryMode={priorHistoryMode}
+              setPriorHistoryMode={setPriorHistoryMode}
+              priorHistoryDetails={priorHistoryDetails}
+              setPriorHistoryDetails={setPriorHistoryDetails}
+              recentFundings={recentFundings}
+              setRecentFundings={setRecentFundings}
+              dealId={dealId}
+              notesPreview={notes}
+              saving={savingIntake}
+              onSave={async () => {
+                if (!dealId) return;
+                setSavingIntake(true);
+                const intake = buildIntakePayload(openBalances, priorHistoryMode, priorHistoryDetails, recentFundings, notes);
+                const res = await fetch(`/api/deals/${dealId}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ submissionIntake: intake }),
+                });
+                setSavingIntake(false);
+                // No toast for a silent persist — the in-section "Saved"
+                // indicator covers it.
+                return res.ok;
+              }}
+            />
 
             <Field label="Notes (appears at top of email)">
               <textarea
@@ -1637,4 +1740,372 @@ function FunderDetailRow({ funder }: { funder: FunderDetail }) {
       )}
     </div>
   );
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Submission intake section
+ * ─────────────────────────────────────────────────────────────────────
+ * Expandable form embedded on /deal-shop that captures the structured
+ * "what to send the funder" context. Sits between the merchant info
+ * inputs and the Notes field. The output is a formatted message block
+ * that gets prepended to the email body when shopping AND persists on
+ * the deal record so re-shopping starts from the same context.
+ *
+ * Sections (all optional):
+ *   • Open balances    — list of (funder, amount) rows. Output:
+ *                          Open Balances:
+ *                            LG $150K
+ *                            XYZ $50K
+ *   • Prior history    — yes / no toggle. "No" prints "No prior history
+ *                        to current positions." "Yes" prints "Has prior
+ *                        history to current positions" + optional detail
+ *                        text (e.g. "merchant is paying for a few years").
+ *   • Recent funding   — list of (company, amount, date) rows. Output:
+ *                          Recent Funding:
+ *                            LG funded $150K on 5/29
+ *
+ * Closed by default — broker presses Expand form to open. Each subsection
+ * has its own + button to add rows; trash icon per row to remove.
+ * ───────────────────────────────────────────────────────────────────── */
+
+function SubmissionIntakeSection({
+  expanded,
+  onToggle,
+  openBalances,
+  setOpenBalances,
+  priorHistoryMode,
+  setPriorHistoryMode,
+  priorHistoryDetails,
+  setPriorHistoryDetails,
+  recentFundings,
+  setRecentFundings,
+  dealId,
+  notesPreview,
+  saving,
+  onSave,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+  openBalances: { id: string; funder: string; amount: string }[];
+  setOpenBalances: React.Dispatch<React.SetStateAction<{ id: string; funder: string; amount: string }[]>>;
+  priorHistoryMode: 'unset' | 'yes' | 'no';
+  setPriorHistoryMode: React.Dispatch<React.SetStateAction<'unset' | 'yes' | 'no'>>;
+  priorHistoryDetails: string;
+  setPriorHistoryDetails: React.Dispatch<React.SetStateAction<string>>;
+  recentFundings: { id: string; company: string; amount: string; date: string }[];
+  setRecentFundings: React.Dispatch<React.SetStateAction<{ id: string; company: string; amount: string; date: string }[]>>;
+  dealId: string | null;
+  notesPreview: string;
+  saving: boolean;
+  onSave: () => Promise<boolean | undefined>;
+}) {
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  function addOpenBalance() {
+    setOpenBalances((arr) => [...arr, { id: cryptoId(), funder: '', amount: '' }]);
+  }
+  function removeOpenBalance(id: string) {
+    setOpenBalances((arr) => arr.filter((r) => r.id !== id));
+  }
+  function updateOpenBalance(id: string, patch: Partial<{ funder: string; amount: string }>) {
+    setOpenBalances((arr) => arr.map((r) => r.id === id ? { ...r, ...patch } : r));
+  }
+  function addRecentFunding() {
+    setRecentFundings((arr) => [...arr, { id: cryptoId(), company: '', amount: '', date: '' }]);
+  }
+  function removeRecentFunding(id: string) {
+    setRecentFundings((arr) => arr.filter((r) => r.id !== id));
+  }
+  function updateRecentFunding(id: string, patch: Partial<{ company: string; amount: string; date: string }>) {
+    setRecentFundings((arr) => arr.map((r) => r.id === id ? { ...r, ...patch } : r));
+  }
+
+  // Live preview — same format that ends up prepended to the email body.
+  const preview = formatIntakeMessage(openBalances, priorHistoryMode, priorHistoryDetails, recentFundings);
+
+  async function handleSave() {
+    const ok = await onSave();
+    if (ok) {
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1800);
+    }
+  }
+
+  return (
+    <div className="border border-border rounded-md bg-card/50">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-foreground hover:bg-muted/30 rounded-t-md"
+        aria-expanded={expanded}
+      >
+        <span className="flex items-center gap-2">
+          <span className={`inline-block transition-transform ${expanded ? 'rotate-90' : ''}`}>▸</span>
+          <span>Submission intake</span>
+          <span className="text-[10px] text-muted-foreground font-normal">
+            (optional — open balances, prior history, recent funding)
+          </span>
+        </span>
+        <span className="text-[11px] text-primary">
+          {expanded ? 'Collapse' : 'Expand form'}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="px-3 pb-3 pt-1 space-y-4 border-t border-border">
+          {/* Open balances */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Open balances</div>
+              <button type="button" onClick={addOpenBalance} className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-1">
+                <span className="text-base leading-none">+</span> Add position
+              </button>
+            </div>
+            {openBalances.length === 0 ? (
+              <div className="text-[11px] text-muted-foreground italic">No positions added.</div>
+            ) : (
+              <div className="space-y-1.5">
+                {openBalances.map((row) => (
+                  <div key={row.id} className="flex items-center gap-2">
+                    <input
+                      value={row.funder}
+                      onChange={(e) => updateOpenBalance(row.id, { funder: e.target.value })}
+                      placeholder="Funder name (e.g. LG)"
+                      className="h-8 flex-1 rounded-md border border-input bg-card px-2 text-xs"
+                    />
+                    <input
+                      value={row.amount}
+                      onChange={(e) => updateOpenBalance(row.id, { amount: e.target.value })}
+                      placeholder="$150K"
+                      className="h-8 w-28 rounded-md border border-input bg-card px-2 text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeOpenBalance(row.id)}
+                      className="text-muted-foreground hover:text-destructive p-1 text-xs"
+                      title="Remove"
+                      aria-label="Remove position"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Prior history toggle */}
+          <div className="space-y-2 pt-3 border-t border-border">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Prior history to current positions</div>
+            <div className="inline-flex rounded-md border border-input bg-card p-0.5" role="radiogroup" aria-label="Prior history">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={priorHistoryMode === 'unset'}
+                onClick={() => setPriorHistoryMode('unset')}
+                className={`h-8 px-3 rounded text-xs font-medium ${priorHistoryMode === 'unset' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                Not specified
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={priorHistoryMode === 'no'}
+                onClick={() => setPriorHistoryMode('no')}
+                className={`h-8 px-3 rounded text-xs font-medium ${priorHistoryMode === 'no' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={priorHistoryMode === 'yes'}
+                onClick={() => setPriorHistoryMode('yes')}
+                className={`h-8 px-3 rounded text-xs font-medium ${priorHistoryMode === 'yes' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                Yes
+              </button>
+            </div>
+            {priorHistoryMode === 'yes' && (
+              <textarea
+                value={priorHistoryDetails}
+                onChange={(e) => setPriorHistoryDetails(e.target.value)}
+                rows={2}
+                placeholder="e.g. merchant is paying for a few years"
+                className="w-full rounded-md border border-input bg-card px-2.5 py-1.5 text-xs resize-y"
+              />
+            )}
+          </div>
+
+          {/* Recent funding */}
+          <div className="space-y-2 pt-3 border-t border-border">
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Recent funding</div>
+              <button type="button" onClick={addRecentFunding} className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-1">
+                <span className="text-base leading-none">+</span> Add position
+              </button>
+            </div>
+            {recentFundings.length === 0 ? (
+              <div className="text-[11px] text-muted-foreground italic">No recent funding added.</div>
+            ) : (
+              <div className="space-y-1.5">
+                {recentFundings.map((row) => (
+                  <div key={row.id} className="flex items-center gap-2">
+                    <input
+                      value={row.company}
+                      onChange={(e) => updateRecentFunding(row.id, { company: e.target.value })}
+                      placeholder="Company (e.g. LG)"
+                      className="h-8 flex-1 rounded-md border border-input bg-card px-2 text-xs"
+                    />
+                    <input
+                      value={row.amount}
+                      onChange={(e) => updateRecentFunding(row.id, { amount: e.target.value })}
+                      placeholder="$150K"
+                      className="h-8 w-24 rounded-md border border-input bg-card px-2 text-xs"
+                    />
+                    <input
+                      value={row.date}
+                      onChange={(e) => updateRecentFunding(row.id, { date: e.target.value })}
+                      placeholder="5/29"
+                      className="h-8 w-20 rounded-md border border-input bg-card px-2 text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeRecentFunding(row.id)}
+                      className="text-muted-foreground hover:text-destructive p-1 text-xs"
+                      title="Remove"
+                      aria-label="Remove recent funding"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Live preview + save */}
+          <div className="pt-3 border-t border-border space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Preview</div>
+              {dealId && (
+                <div className="flex items-center gap-2">
+                  {savedFlash && <span className="text-[10px] text-emerald-700">Saved with deal</span>}
+                  <button
+                    type="button"
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="h-7 px-3 rounded-md bg-foreground text-background text-xs font-medium hover:opacity-90 disabled:opacity-50"
+                    title="Save the intake on this deal so it pre-fills next time you shop it"
+                  >
+                    {saving ? 'Saving…' : 'Save intake on deal'}
+                  </button>
+                </div>
+              )}
+            </div>
+            <pre className="text-[11px] font-mono whitespace-pre-wrap bg-muted/30 border border-border rounded-md px-3 py-2 max-h-48 overflow-y-auto">
+              {preview || <span className="text-muted-foreground italic">Fill in the sections above to generate a message.</span>}
+              {notesPreview && (
+                <>
+                  {preview ? '\n\n' : ''}
+                  <span className="text-muted-foreground">[Notes below auto-included when sending]</span>
+                </>
+              )}
+            </pre>
+            {!dealId && (
+              <div className="text-[11px] text-muted-foreground italic">
+                Open this page from an active deal (Shop this deal) to persist the intake — without a deal context, the intake is only used for the current submission.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Format the intake into the human-readable block that gets prepended
+ * to the email body. Each section is skipped if empty so the output
+ * stays clean when the broker only fills part of the form.
+ */
+function formatIntakeMessage(
+  openBalances: { funder: string; amount: string }[],
+  priorHistoryMode: 'unset' | 'yes' | 'no',
+  priorHistoryDetails: string,
+  recentFundings: { company: string; amount: string; date: string }[],
+): string {
+  const lines: string[] = [];
+
+  const validBalances = openBalances.filter((r) => r.funder.trim() && r.amount.trim());
+  if (validBalances.length > 0) {
+    lines.push('Open Balances:');
+    for (const r of validBalances) {
+      lines.push(`  ${r.funder.trim()} ${r.amount.trim()}`);
+    }
+  }
+
+  if (priorHistoryMode === 'no') {
+    if (lines.length > 0) lines.push('');
+    lines.push('No prior history to current positions.');
+  } else if (priorHistoryMode === 'yes') {
+    if (lines.length > 0) lines.push('');
+    if (priorHistoryDetails.trim()) {
+      lines.push(`Has prior history to current positions — ${priorHistoryDetails.trim()}`);
+    } else {
+      lines.push('Has prior history to current positions.');
+    }
+  }
+
+  const validFundings = recentFundings.filter((r) => r.company.trim() && r.amount.trim());
+  if (validFundings.length > 0) {
+    if (lines.length > 0) lines.push('');
+    lines.push('Recent Funding:');
+    for (const r of validFundings) {
+      const dateSuffix = r.date.trim() ? ` on ${r.date.trim()}` : '';
+      lines.push(`  ${r.company.trim()} funded ${r.amount.trim()}${dateSuffix}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Convert the form state into the JSON shape stored in
+ * deals.submissionIntake. Empty rows are stripped so the persisted
+ * blob stays compact and re-hydration ignores half-filled noise.
+ */
+function buildIntakePayload(
+  openBalances: { funder: string; amount: string }[],
+  priorHistoryMode: 'unset' | 'yes' | 'no',
+  priorHistoryDetails: string,
+  recentFundings: { company: string; amount: string; date: string }[],
+  notes: string,
+) {
+  return {
+    openBalances: openBalances
+      .filter((r) => r.funder.trim() || r.amount.trim())
+      .map((r) => ({ funder: r.funder.trim(), amount: r.amount.trim() })),
+    priorHistory: priorHistoryMode === 'unset' ? null : {
+      has: priorHistoryMode === 'yes',
+      details: priorHistoryMode === 'yes' ? priorHistoryDetails.trim() : '',
+    },
+    recentFundings: recentFundings
+      .filter((r) => r.company.trim() || r.amount.trim() || r.date.trim())
+      .map((r) => ({ company: r.company.trim(), amount: r.amount.trim(), date: r.date.trim() })),
+    notes: notes.trim(),
+  };
+}
+
+/**
+ * Stable opaque id for an intake row. crypto.randomUUID isn't universally
+ * available (older browsers/jsdom); fall back to a timestamp + random
+ * suffix combo. Only used as a React key — uniqueness within siblings
+ * is the only requirement.
+ */
+function cryptoId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }

@@ -9,6 +9,7 @@ import { formatDate, formatCurrency } from '@/lib/utils';
 import { Plus, Trash2, Briefcase, Search, X, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { computePaydown, buildPaymentSchedule, DEAL_STATUS_META, DEAL_STATUS_OPTIONS } from '@/lib/deals/paydown';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 interface Deal {
   id: string;
@@ -97,6 +98,17 @@ export default function ActiveDealsPage() {
 
   // New deal form
   const [creating, setCreating] = useState<Deal | null>(null);
+  // Two-step confirmation for state-changing actions on the active-deals
+  // page. Status changes, rep reassigns, edit saves, and deletes all
+  // route through this single dialog. Each variant carries the minimum
+  // info the confirm handler needs to fire the actual write.
+  const [pendingConfirm, setPendingConfirm] = useState<
+    | { kind: 'status'; deal: Deal; next: Deal['status'] }
+    | { kind: 'rep'; deal: Deal; repId: string | null; repName: string | null }
+    | { kind: 'saveDraft'; deal: Deal }
+    | { kind: 'delete'; deal: Deal }
+    | null
+  >(null);
 
   async function load() {
     setLoading(true);
@@ -208,6 +220,12 @@ export default function ActiveDealsPage() {
       setMarkingFunded(deal);
       return;
     }
+    // All other status moves go through the two-step confirm.
+    if (status === deal.status) return;   // no-op
+    setPendingConfirm({ kind: 'status', deal, next: status });
+  }
+  // Internal — fires the actual PATCH after confirmation.
+  async function applyStatusChange(deal: Deal, status: Deal['status']) {
     const ok = await persist(deal, { status });
     if (ok) {
       toast.success(`Marked as ${status}.`);
@@ -215,8 +233,13 @@ export default function ActiveDealsPage() {
     }
   }
 
-  // Inline rep change — saves immediately
+  // Inline rep change — confirms before saving.
   async function quickRepChange(deal: Deal, repId: string | null) {
+    if ((repId || null) === (deal.assignedRepId ?? null)) return;
+    const repName = repId ? (reps.find((r) => r.id === repId)?.name ?? null) : null;
+    setPendingConfirm({ kind: 'rep', deal, repId, repName });
+  }
+  async function applyRepChange(deal: Deal, repId: string | null) {
     const ok = await persist(deal, { assignedRepId: repId });
     if (ok) {
       toast.success('Rep updated.');
@@ -224,8 +247,11 @@ export default function ActiveDealsPage() {
     }
   }
 
-  // Save draft (from expanded row)
+  // Save draft (from expanded row) — confirms before applying.
   async function saveDraft(deal: Deal) {
+    setPendingConfirm({ kind: 'saveDraft', deal });
+  }
+  async function applySaveDraft(deal: Deal) {
     const patch = { ...draft };
     delete (patch as any).id;
     const ok = await persist(deal, patch);
@@ -237,7 +263,12 @@ export default function ActiveDealsPage() {
   }
 
   async function del(deal: Deal) {
-    if (!confirm(`Delete "${deal.name}"? This cannot be undone.`)) return;
+    // Two-step confirm dialog (was a browser confirm() before — jarring
+    // and easy to misclick). The ConfirmDialog gives a proper review step
+    // with consistent styling and Esc-to-cancel support.
+    setPendingConfirm({ kind: 'delete', deal });
+  }
+  async function applyDelete(deal: Deal) {
     const res = await fetch(`/api/deals/${deal.id}`, { method: 'DELETE' });
     if (res.ok) {
       toast.success('Deal deleted.');
@@ -668,6 +699,44 @@ export default function ActiveDealsPage() {
             // celebration in the middle of a data-entry modal — the user
             // wants it to happen at the moment the deal visibly lands on
             // the board.
+          }}
+        />
+      )}
+
+      {/* Two-step confirm for any state-changing action — status flip,
+          rep reassignment, edit-form save, or delete. Each variant has
+          its own title + description tuned to the action context. */}
+      {pendingConfirm && (
+        <ConfirmDialog
+          open
+          destructive={pendingConfirm.kind === 'delete'}
+          title={
+            pendingConfirm.kind === 'status'
+              ? `Change status to "${DEAL_STATUS_META[pendingConfirm.next]?.label ?? pendingConfirm.next}"?`
+              : pendingConfirm.kind === 'rep'
+                ? `Reassign deal to ${pendingConfirm.repName ?? 'no one'}?`
+                : pendingConfirm.kind === 'saveDraft'
+                  ? 'Save deal changes?'
+                  : `Delete "${pendingConfirm.deal.name}"?`
+          }
+          description={
+            pendingConfirm.kind === 'status'
+              ? `This will update "${pendingConfirm.deal.name}" in the active deals list.`
+              : pendingConfirm.kind === 'rep'
+                ? `Commission attribution for "${pendingConfirm.deal.name}" moves with the assignment.`
+                : pendingConfirm.kind === 'saveDraft'
+                  ? `Apply the field changes for "${pendingConfirm.deal.name}".`
+                  : `This permanently removes the deal from active lists. Cannot be undone.`
+          }
+          confirmLabel={pendingConfirm.kind === 'delete' ? 'Delete' : 'Confirm'}
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={() => {
+            const p = pendingConfirm;
+            setPendingConfirm(null);
+            if (p.kind === 'status') applyStatusChange(p.deal, p.next);
+            else if (p.kind === 'rep') applyRepChange(p.deal, p.repId);
+            else if (p.kind === 'saveDraft') applySaveDraft(p.deal);
+            else applyDelete(p.deal);
           }}
         />
       )}

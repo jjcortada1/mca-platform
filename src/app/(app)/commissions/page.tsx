@@ -10,6 +10,7 @@ import { exportCSV } from '@/lib/csv-export';
 import { Download } from 'lucide-react';
 import { formatCalendarDate, toDateInput } from '@/lib/dates';
 import { SearchableDealSelect } from '@/components/ui/searchable-deal-select';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 /* ---------- comma formatting helpers ---------- */
 // Display a numeric string with thousands separators while typing (keeps a
@@ -76,6 +77,11 @@ interface Commission {
   // both admin and rep views so the rep sees deal context next to pay.
   dealFundingDate?: string | null;
   dealFundedNotes?: string | null;
+  // Which funder actually funded the deal — sourced from the deal record
+  // via the join in /api/commissions. Reps can update this from their
+  // commission detail panel; the picker patches the underlying deal.
+  dealFundedWithFunderId?: string | null;
+  dealFundedWithName?: string | null;
   clearedDate: string | null;
   earlyPayoffDiscount: string | null;
   notes: string | null;
@@ -91,6 +97,7 @@ interface Deal {
   status?: string | null;
 }
 interface Rep { id: string; name: string; role: string; }
+interface Funder { id: string; name: string; }
 interface LeadSource { id: string; name: string; contactEmail: string | null; contactPhone: string | null; isActive: boolean; }
 interface LSCommission {
   id: string; dealId: string; dealName: string; merchantName: string | null;
@@ -126,7 +133,10 @@ export default function CommissionsPage() {
   const [lsRows, setLsRows] = useState<LSCommission[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [reps, setReps] = useState<Rep[]>([]);
+  const [funders, setFunders] = useState<Funder[]>([]);
   const [leadSources, setLeadSources] = useState<LeadSource[]>([]);
+  // LS table filter — narrow rows to a specific lead source. '' = all.
+  const [lsFilter, setLsFilter] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [lsExpanded, setLsExpanded] = useState<string | null>(null);
@@ -151,6 +161,18 @@ export default function CommissionsPage() {
       }
       const cRes = await fetch('/api/commissions');
       setRows((await cRes.json()).commissions ?? []);
+
+      // Funders are loaded for everyone — reps need them for the
+      // "Funded with" picker on their commission detail panel. The
+      // /api/funders endpoint is read-accessible to any authenticated
+      // user (writes are admin-gated separately).
+      try {
+        const fRes = await fetch('/api/funders', { cache: 'no-store' });
+        const fJson = await fRes.json();
+        setFunders((fJson.data ?? fJson.funders ?? []) as Funder[]);
+      } catch {
+        setFunders([]);
+      }
 
       if (admin) {
         const [dRes, uRes, lsRes, lscRes] = await Promise.all([
@@ -284,6 +306,14 @@ export default function CommissionsPage() {
     return { total, paid, pending, owed, available, clawed, byLeadSource };
   }, [lsRows]);
 
+  // Filtered LS rows for the main table — lsStats totals stay across
+  // ALL rows so the headline numbers don't shift with the filter (the
+  // filter is purely a table-narrowing UX aid, not a data scope change).
+  const lsRowsFiltered = useMemo(() => {
+    if (!lsFilter) return lsRows;
+    return lsRows.filter((r) => r.leadSourceId === lsFilter);
+  }, [lsRows, lsFilter]);
+
   async function patch(id: string, body: Record<string, unknown>) {
     const res = await fetch(`/api/commissions/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!res.ok) { const j = await res.json().catch(() => ({})); toast.error(j.error || 'Update failed'); return; }
@@ -326,10 +356,14 @@ export default function CommissionsPage() {
                   variant="outline"
                   onClick={() => exportCSV('rep-commissions', filteredRows, [
                     { key: 'dealName', label: 'Deal Name' },
-                    { key: 'repName', label: 'Rep' },
-                    { key: 'grossCommission', label: 'Gross Commission', format: (v) => (v ? Number(v) : 0) },
-                    { key: 'brokerFee', label: 'Broker Fee', format: (v) => (v ? Number(v) : 0) },
-                    { key: 'repSplitPct', label: 'Rep Split %', format: (v) => (v ? Number(v) : 0) },
+                    // Rep column + gross/broker-fee/split columns are
+                    // admin-only — reps export only their own earnings.
+                    ...(isAdmin ? [
+                      { key: 'repName' as const, label: 'Rep' },
+                      { key: 'grossCommission' as const, label: 'Gross Commission', format: (v: unknown) => (v ? Number(v) : 0) },
+                      { key: 'brokerFee' as const, label: 'Broker Fee', format: (v: unknown) => (v ? Number(v) : 0) },
+                      { key: 'repSplitPct' as const, label: 'Rep Split %', format: (v: unknown) => (v ? Number(v) : 0) },
+                    ] : []),
                     { key: 'repCommissionAmount', label: 'Rep Commission', format: (v) => (v ? Number(v) : 0) },
                     { key: 'paidAmount', label: 'Paid', format: (v) => (v ? Number(v) : 0) },
                     { key: 'owedAmount', label: 'Owed', format: (v) => (v != null ? Number(v) : 0) },
@@ -346,10 +380,24 @@ export default function CommissionsPage() {
                 <Button variant="outline" onClick={() => setShowDraw(true)}>+ Log draw</Button>
                 <Button onClick={() => setShowAdd(true)}>+ Add commission</Button>
               </div>
-            : <div className="flex gap-2">
+            : <div className="flex gap-2 flex-wrap items-center">
+                {/* Lead-source filter — narrows the main LS table to a
+                    single lead source. Stats above the table stay across
+                    the full set so headline numbers don't move when you
+                    filter (filter is a navigation aid, not a scope
+                    change). Clearing returns to "All". */}
+                <select
+                  value={lsFilter}
+                  onChange={(e) => setLsFilter(e.target.value)}
+                  className="h-10 rounded-md border border-input bg-card px-3 text-sm min-w-[180px]"
+                  title="Filter rows by lead source"
+                >
+                  <option value="">All lead sources</option>
+                  {leadSources.map((ls) => <option key={ls.id} value={ls.id}>{ls.name}</option>)}
+                </select>
                 <Button
                   variant="outline"
-                  onClick={() => exportCSV('lead-source-commissions', lsRows, [
+                  onClick={() => exportCSV('lead-source-commissions', lsRowsFiltered, [
                     { key: 'leadSourceName', label: 'Lead Source' },
                     { key: 'dealName', label: 'Deal Name' },
                     { key: 'grossCommission', label: 'Gross', format: (v) => (v ? Number(v) : '') },
@@ -363,7 +411,7 @@ export default function CommissionsPage() {
                     { key: 'fundingDate', label: 'Funded Date', format: (v) => (v ? new Date(v as string).toISOString().slice(0, 10) : '') },
                     { key: 'notes', label: 'Notes' },
                   ])}
-                  disabled={lsRows.length === 0}
+                  disabled={lsRowsFiltered.length === 0}
                   className="gap-1.5"
                 >
                   <Download className="h-4 w-4" /> Export CSV
@@ -455,8 +503,20 @@ export default function CommissionsPage() {
                   <StatusRow label="Clawed back" count={stats.countClawed} tone="destructive" amount={stats.clawed} />
                 </div>
                 <div className="mt-3 pt-3 border-t border-border flex justify-between text-xs">
-                  <span className="text-muted-foreground">Gross (pre-split)</span>
-                  <span className="font-medium tabular-nums">{formatCurrency(stats.grossTotal)}</span>
+                  {/* Gross (pre-split) — admin-only. Reps shouldn't see
+                      the company's gross commission before their split
+                      is applied; it's confusing and not their math. */}
+                  {isAdmin ? (
+                    <>
+                      <span className="text-muted-foreground">Gross (pre-split)</span>
+                      <span className="font-medium tabular-nums">{formatCurrency(stats.grossTotal)}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-muted-foreground">Your earnings</span>
+                      <span className="font-medium tabular-nums">{formatCurrency(stats.total)}</span>
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -578,7 +638,7 @@ export default function CommissionsPage() {
                         </tr>
                         {expanded === r.id && (
                           <tr className="bg-muted/10"><td colSpan={isAdmin ? 10 : 7} className="px-4 py-3">
-                            <CommissionDetail r={r} isAdmin={isAdmin} reps={reps} onPatch={patch} onDelete={softDelete} onDealPatch={dealPatch} />
+                            <CommissionDetail r={r} isAdmin={isAdmin} reps={reps} funders={funders} onPatch={patch} onDelete={softDelete} onDealPatch={dealPatch} />
                           </td></tr>
                         )}
                       </>
@@ -643,9 +703,11 @@ export default function CommissionsPage() {
           )}
 
           <Card className="overflow-hidden">
-            {lsRows.length === 0 ? (
+            {lsRowsFiltered.length === 0 ? (
               <CardContent className="py-12 text-center text-sm text-muted-foreground">
-                No lead source commissions yet. Add a lead source, then assign it to a deal.
+                {lsRows.length === 0
+                  ? 'No lead source commissions yet. Add a lead source, then assign it to a deal.'
+                  : `No commissions for ${leadSources.find((ls) => ls.id === lsFilter)?.name ?? 'this lead source'}.`}
               </CardContent>
             ) : (
               <div className="overflow-x-auto">
@@ -666,7 +728,7 @@ export default function CommissionsPage() {
                     <th className="w-16"></th>
                   </tr></thead>
                   <tbody className="divide-y divide-border/60">
-                    {lsRows.map((r) => (
+                    {lsRowsFiltered.map((r) => (
                       <>
                         <tr
                           key={r.id}
@@ -1149,9 +1211,10 @@ function StatusRow({ label, count, tone, amount }: { label: string; count: numbe
   );
 }
 
-function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: {
+function CommissionDetail({ r, isAdmin, reps, funders, onPatch, onDelete, onDealPatch }: {
   r: Commission; isAdmin: boolean;
   reps: Rep[];
+  funders: Funder[];
   onPatch: (id: string, body: Record<string, unknown>) => void;
   onDelete: (id: string) => void;
   onDealPatch: (dealId: string, body: Record<string, unknown>) => Promise<boolean>;
@@ -1179,6 +1242,14 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
                        : '';
   const [fundingDate, setFundingDate] = useState(dealFundedISO);
   const [earlyPayoffDiscount, setEarlyPayoffDiscount] = useState(r.earlyPayoffDiscount ?? '');
+  // Confirmation state for save/delete actions triggered from this
+  // detail panel. ConfirmDialog mounted at the bottom handles all three.
+  const [pendingConfirm, setPendingConfirm] = useState<
+    | { kind: 'saveDeal' }
+    | { kind: 'saveCommission' }
+    | { kind: 'delete' }
+    | null
+  >(null);
   // Editable deal fields (admin only — patches the parent deal record)
   const [dealName, setDealName] = useState(r.dealName);
   const [merchantFirstName, setMerchantFirstName] = useState(r.merchantFirstName ?? '');
@@ -1253,6 +1324,19 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
         </div>
       )}
 
+      {/* Funded-with funder — rep-accessible. Reps mark which funder
+          actually funded the deal from their commission detail. Patches
+          deal.fundedWithFunderId directly via onDealPatch (no commission-
+          row write needed; this is a deal-level attribute). Save fires
+          immediately on change for snappy UX — no separate Save button
+          since it's a single field. */}
+      <FundedWithPicker
+        dealId={r.dealId}
+        currentFunderId={r.dealFundedWithFunderId ?? null}
+        currentFunderName={r.dealFundedWithName ?? null}
+        funders={funders}
+        onDealPatch={onDealPatch}
+      />
       {/* Admin-only Edit toggle. Default is read-only details; admin clicks
           to expose the editable forms below. Keeps view ≠ edit. */}
       {isAdmin && !editing && (
@@ -1284,7 +1368,7 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
               <Field label="Merchant last name" className="w-44"><Input value={merchantLastName} onChange={(e) => setMerchantLastName(e.target.value)} /></Field>
               <Field label="Merchant phone" className="w-40"><Input value={merchantPhone} onChange={(e) => setMerchantPhone(e.target.value)} /></Field>
               <Field label="Merchant email" className="w-56"><Input value={merchantEmail} onChange={(e) => setMerchantEmail(e.target.value)} /></Field>
-              <Button size="sm" onClick={saveDeal}>Save deal details</Button>
+              <Button size="sm" onClick={() => setPendingConfirm({ kind: 'saveDeal' })}>Save deal details</Button>
             </div>
           </div>
 
@@ -1312,10 +1396,42 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
               </Field>
               <Field label="Early payoff discount" className="w-44"><Input value={earlyPayoffDiscount} onChange={(e) => setEarlyPayoffDiscount(e.target.value)} placeholder="e.g. 10% or $500" /></Field>
               <Field label="Notes" className="flex-1 min-w-[180px]"><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
-              <Button size="sm" onClick={saveCommission}>Save commission</Button>
-              <Button size="sm" variant="outline" onClick={() => onDelete(r.id)}>Remove</Button>
+              <Button size="sm" onClick={() => setPendingConfirm({ kind: 'saveCommission' })}>Save commission</Button>
+              <Button size="sm" variant="outline" onClick={() => setPendingConfirm({ kind: 'delete' })}>Remove</Button>
             </div>
           </div>
+
+          {/* Two-step confirmation for save / delete actions. ConfirmDialog
+              renders fixed-position above everything; safe to mount inline
+              here since we're already inside an editable panel that's
+              parented to a table row. */}
+          {pendingConfirm && (
+            <ConfirmDialog
+              open
+              destructive={pendingConfirm.kind === 'delete'}
+              title={
+                pendingConfirm.kind === 'saveDeal' ? 'Save deal details?' :
+                pendingConfirm.kind === 'saveCommission' ? 'Save commission changes?' :
+                'Remove this commission?'
+              }
+              description={
+                pendingConfirm.kind === 'saveDeal'
+                  ? `Apply changes to "${r.dealName}".`
+                  : pendingConfirm.kind === 'saveCommission'
+                    ? `Apply changes to ${r.repName ?? 'this rep'}'s commission on "${r.dealName}".`
+                    : `This soft-deletes the commission. It won't appear in lists or stats anymore.`
+              }
+              confirmLabel={pendingConfirm.kind === 'delete' ? 'Remove' : 'Save'}
+              onCancel={() => setPendingConfirm(null)}
+              onConfirm={() => {
+                const p = pendingConfirm;
+                setPendingConfirm(null);
+                if (p.kind === 'saveDeal') saveDeal();
+                else if (p.kind === 'saveCommission') saveCommission();
+                else onDelete(r.id);
+              }}
+            />
+          )}
         </>
       )}
       {isAdmin && <LogPaymentInline commissionId={r.id} repId={r.repId} onLogged={() => onPatch(r.id, {})} />}
@@ -1465,6 +1581,13 @@ function LSCommissionDetail({
   const [merchantPhone, setMerchantPhone] = useState(r.merchantPhone ?? '');
   const [merchantEmail, setMerchantEmail] = useState(r.merchantEmail ?? '');
   const [assignedRepId, setAssignedRepId] = useState(r.assignedRepId ?? '');
+  // Confirmation state for save/delete actions in this LS panel.
+  const [pendingConfirm, setPendingConfirm] = useState<
+    | { kind: 'saveDeal' }
+    | { kind: 'saveAll' }
+    | { kind: 'delete' }
+    | null
+  >(null);
 
   async function saveDeal() {
     const body: Record<string, unknown> = {};
@@ -1529,7 +1652,7 @@ function LSCommissionDetail({
           <Field label="Merchant last name" className="w-44"><Input value={merchantLastName} onChange={(e) => setMerchantLastName(e.target.value)} /></Field>
           <Field label="Merchant phone" className="w-40"><Input value={merchantPhone} onChange={(e) => setMerchantPhone(e.target.value)} /></Field>
           <Field label="Merchant email" className="w-56"><Input value={merchantEmail} onChange={(e) => setMerchantEmail(e.target.value)} /></Field>
-          <Button size="sm" onClick={saveDeal}>Save deal details</Button>
+          <Button size="sm" onClick={() => setPendingConfirm({ kind: 'saveDeal' })}>Save deal details</Button>
         </div>
       </div>
 
@@ -1570,11 +1693,40 @@ function LSCommissionDetail({
         </Field>
         <Field label="Early payoff discount" className="w-48"><Input value={earlyPayoffDiscount} onChange={(e) => setEarlyPayoffDiscount(e.target.value)} placeholder="e.g. 10% or $500" /></Field>
         <Field label="Notes" className="flex-1 min-w-[180px]"><Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Visible to the lead source" /></Field>
-        <Button size="sm" onClick={saveAll}>Save</Button>
-        <Button size="sm" variant="outline" onClick={() => onDelete(r.id)}>Remove</Button>
+        <Button size="sm" onClick={() => setPendingConfirm({ kind: 'saveAll' })}>Save</Button>
+        <Button size="sm" variant="outline" onClick={() => setPendingConfirm({ kind: 'delete' })}>Remove</Button>
       </div>
 
       <LogLSPaymentInline lsCommissionId={r.id} onLogged={() => onPatch(r.id, {})} />
+
+      {/* Two-step confirmation for save / delete on the LS commission. */}
+      {pendingConfirm && (
+        <ConfirmDialog
+          open
+          destructive={pendingConfirm.kind === 'delete'}
+          title={
+            pendingConfirm.kind === 'saveDeal' ? 'Save deal details?' :
+            pendingConfirm.kind === 'saveAll' ? 'Save commission changes?' :
+            'Remove this commission?'
+          }
+          description={
+            pendingConfirm.kind === 'saveDeal'
+              ? `Apply changes to "${r.dealName}".`
+              : pendingConfirm.kind === 'saveAll'
+                ? `Apply changes to ${r.leadSourceName}'s commission on "${r.dealName}".`
+                : `This soft-deletes the LS commission. It won't appear in lists or stats anymore.`
+          }
+          confirmLabel={pendingConfirm.kind === 'delete' ? 'Remove' : 'Save'}
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={() => {
+            const p = pendingConfirm;
+            setPendingConfirm(null);
+            if (p.kind === 'saveDeal') saveDeal();
+            else if (p.kind === 'saveAll') saveAll();
+            else onDelete(r.id);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1661,6 +1813,72 @@ function LogLSPaymentInline({ lsCommissionId, onLogged }: { lsCommissionId: stri
           <Button size="sm" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Inline "Funded with" funder picker — rep-accessible on the commission
+ * detail panel. Saves directly to the deal record (which is the source
+ * of truth for fundedWithFunderId) via the parent's onDealPatch.
+ *
+ * Why this is a separate small component rather than inline:
+ *   • Its save state (last-saved indicator) is its own concern
+ *   • Both rep + admin views share it — keeps the contract explicit
+ *
+ * Rep permission: the /api/deals/[id] PATCH route allows the deal's
+ * assigned rep to update their own deal's fundedWithFunderId field.
+ * If the rep isn't assigned (admin-assigned to someone else), the
+ * server-side check rejects with 403 and we surface the error.
+ */
+function FundedWithPicker({
+  dealId,
+  currentFunderId,
+  currentFunderName,
+  funders,
+  onDealPatch,
+}: {
+  dealId: string;
+  currentFunderId: string | null;
+  currentFunderName: string | null;
+  funders: Funder[];
+  onDealPatch: (dealId: string, body: Record<string, unknown>) => Promise<boolean>;
+}) {
+  const [value, setValue] = useState<string>(currentFunderId ?? '');
+  const [saving, setSaving] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  async function applyChange(next: string) {
+    setValue(next);
+    setSaving(true);
+    const ok = await onDealPatch(dealId, { fundedWithFunderId: next || null });
+    setSaving(false);
+    if (ok) {
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1500);
+    }
+  }
+
+  return (
+    <div className="text-xs flex flex-wrap items-center gap-2 pt-2 border-t border-dashed border-border">
+      <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Funded with</span>
+      <select
+        value={value}
+        onChange={(e) => applyChange(e.target.value)}
+        disabled={saving}
+        className="h-8 rounded-md border border-input bg-card px-2 text-xs min-w-[180px]"
+      >
+        <option value="">— pick a funder —</option>
+        {/* If the current value points at a funder not in the loaded
+            list (deactivated, deleted, etc), still show its name so the
+            user knows what's currently set rather than seeing it blank. */}
+        {currentFunderId && !funders.some((f) => f.id === currentFunderId) && currentFunderName && (
+          <option value={currentFunderId}>{currentFunderName} (inactive)</option>
+        )}
+        {funders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+      </select>
+      {saving && <span className="text-[10px] text-muted-foreground">Saving…</span>}
+      {savedFlash && <span className="text-[10px] text-emerald-700">Saved</span>}
     </div>
   );
 }

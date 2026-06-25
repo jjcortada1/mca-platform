@@ -45,6 +45,10 @@ export async function GET() {
         // truth for display when there's no separate commission record date.
         dealFundingDate: deals.fundingDate,
         dealFundedNotes: deals.fundedNotes,
+        // Which funder funded this deal — surfaced so the rep view can
+        // show + update it from the commission detail panel.
+        dealFundedWithFunderId: deals.fundedWithFunderId,
+        dealFundedWithName: deals.fundedWithName,
         repName: users.name,
       })
       .from(dealCommissions)
@@ -58,7 +62,7 @@ export async function GET() {
       .orderBy(desc(dealCommissions.updatedAt));
 
     const now = new Date();
-    const data = rows.map(({ c, dealName, merchantFirstName, merchantLastName, merchantPhone, merchantEmail, assignedRepId, repName, dealFundingDate, dealFundedNotes }) => {
+    const data = rows.map(({ c, dealName, merchantFirstName, merchantLastName, merchantPhone, merchantEmail, assignedRepId, repName, dealFundingDate, dealFundedNotes, dealFundedWithFunderId, dealFundedWithName }) => {
       const effectiveStatus = resolveAutoStatus(c.status, c.fundingDate, now);
       const amount = Number(c.repCommissionAmount);
       const paid = Number(c.paidAmount);
@@ -88,6 +92,8 @@ export async function GET() {
         // Deal-level fields surfaced for rep + admin views alike.
         dealFundingDate,
         dealFundedNotes,
+        dealFundedWithFunderId,
+        dealFundedWithName,
         clearedDate: c.clearedDate,
         earlyPayoffDiscount: c.earlyPayoffDiscount,
         notes: c.notes,

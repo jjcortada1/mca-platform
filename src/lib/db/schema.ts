@@ -361,6 +361,21 @@ export const deals = pgTable(
     // etc). Surfaced in the funded-deal expand view AND in the rep
     // commissions view so reps see the deal context next to their pay.
     fundedNotes: text('funded_notes'),
+    /**
+     * Submission intake — the structured context broker wants funders to
+     * see when shopping. Stored as JSONB so we can evolve the shape
+     * without migrations. Shape (all keys optional):
+     *   {
+     *     openBalances:    [{ funder: string; amount: string }, ...],
+     *     priorHistory:    { has: boolean; details?: string } | null,
+     *     notes:           string,
+     *     recentFundings:  [{ company: string; amount: string; date: string }, ...],
+     *   }
+     * The page-level form on /deal-shop reads + writes this directly.
+     * It sticks to the deal so re-shopping (submitting to additional
+     * funders) starts from the same context — no re-entry.
+     */
+    submissionIntake: jsonb('submission_intake'),
     // Soft-delete flag. When true, the deal is treated as gone everywhere —
     // hidden from dropdowns, lists, commission views, accounting, etc. We
     // soft-delete instead of hard-delete so historical audit data is
