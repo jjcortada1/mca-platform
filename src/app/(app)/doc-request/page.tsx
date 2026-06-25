@@ -57,7 +57,9 @@ export default function DocRequestPage() {
     setEpos((rows) => [...rows, { id: cryptoId(), days: '', factor: '' }]);
   }
   function removeEpo(id: string) {
-    setEpos((rows) => rows.length > 1 ? rows.filter((r) => r.id !== id) : rows);
+    // EPO lines are optional — removing all of them is fine. The
+    // generated message just omits the EPO line when none are populated.
+    setEpos((rows) => rows.filter((r) => r.id !== id));
   }
   function updateEpo(id: string, patch: Partial<EpoRow>) {
     setEpos((rows) => rows.map((r) => r.id === id ? { ...r, ...patch } : r));
@@ -252,6 +254,11 @@ export default function DocRequestPage() {
               </div>
 
               <div className="space-y-2">
+                {epos.length === 0 && (
+                  <div className="text-[11px] text-muted-foreground italic">
+                    No EPO lines. Click "Add another EPO" to add one.
+                  </div>
+                )}
                 {epos.map((row, i) => (
                   <div key={row.id} className="flex items-center gap-2">
                     {/* Factor first (left), days second (right) — mirrors
@@ -276,12 +283,17 @@ export default function DocRequestPage() {
                       aria-label={`EPO ${i + 1} days`}
                     />
                     <span className="text-xs text-muted-foreground">days</span>
+                    {/* Trash button is always enabled — EPO rows are
+                        purely optional, so removing the last one is
+                        valid. (The previous "must keep one row" rule
+                        confused users who thought the button was
+                        broken when they couldn't delete their last
+                        line.) */}
                     <button
                       type="button"
                       onClick={() => removeEpo(row.id)}
-                      disabled={epos.length === 1}
-                      className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-30 disabled:cursor-not-allowed"
-                      title={epos.length === 1 ? 'At least one row required' : 'Remove this EPO line'}
+                      className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      title="Remove this EPO line"
                       aria-label="Remove EPO line"
                     >
                       <Trash2 className="h-3.5 w-3.5" />

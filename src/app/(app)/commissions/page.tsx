@@ -1169,7 +1169,15 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
   const [gross, setGross] = useState(r.grossCommission ?? '');
   const [brokerFee, setBrokerFee] = useState(r.brokerFee ?? '');
   const [splitPct, setSplitPct] = useState(r.repSplitPct ?? '');
-  const [fundingDate, setFundingDate] = useState(r.fundingDate ? r.fundingDate.slice(0, 10) : '');
+  // Funding date — source of truth is the DEAL's funding date
+  // (deal.fundingDate, joined onto the commission row as dealFundingDate).
+  // The commission row has its own fundingDate column for legacy reasons
+  // but the table + paydown math both read deal.fundingDate. Seeding the
+  // edit form from dealFundingDate keeps the form in sync with the table.
+  const dealFundedISO = r.dealFundingDate ? r.dealFundingDate.slice(0, 10)
+                       : r.fundingDate ? r.fundingDate.slice(0, 10)
+                       : '';
+  const [fundingDate, setFundingDate] = useState(dealFundedISO);
   const [earlyPayoffDiscount, setEarlyPayoffDiscount] = useState(r.earlyPayoffDiscount ?? '');
   // Editable deal fields (admin only — patches the parent deal record)
   const [dealName, setDealName] = useState(r.dealName);
@@ -1197,12 +1205,25 @@ function CommissionDetail({ r, isAdmin, reps, onPatch, onDelete, onDealPatch }: 
     await onDealPatch(r.dealId, body);
   }
 
-  function saveCommission() {
+  async function saveCommission() {
     const body: Record<string, unknown> = { paidAmount: Number(paid), status, notes, earlyPayoffDiscount: earlyPayoffDiscount || null };
     if (gross !== (r.grossCommission ?? '')) body.grossCommission = Number(gross) || 0;
     if (brokerFee !== (r.brokerFee ?? '')) body.brokerFee = Number(brokerFee) || 0;
     if (splitPct !== (r.repSplitPct ?? '')) body.repSplitPct = Number(splitPct) || 0;
-    if (fundingDate && fundingDate !== (r.fundingDate ?? '').slice(0, 10)) body.fundingDate = fundingDate;
+    // Funding date — if changed, mirror it onto the DEAL record (source
+    // of truth for the table display) AND store it on the commission
+    // row so legacy reads still work. Two writes are intentional:
+    //   1. PATCH /api/deals/[id] → updates deal.fundingDate (drives
+    //      table display via the dealFundingDate join)
+    //   2. PATCH /api/commissions/[id] → updates the commission's own
+    //      fundingDate field for backwards compat
+    if (fundingDate && fundingDate !== dealFundedISO) {
+      body.fundingDate = fundingDate;
+      // Fire the deal patch first so the next list refresh sees the
+      // updated source of truth. Don't await — saveCommission is the
+      // user-visible action so we want it to feel snappy.
+      onDealPatch(r.dealId, { fundingDate });
+    }
     onPatch(r.id, body);
   }
 
@@ -1430,7 +1451,13 @@ function LSCommissionDetail({
   const [splitPct, setSplitPct] = useState(r.splitPct ?? '');
   const [flatAmount, setFlatAmount] = useState(r.flatAmount ?? '');
   const [mode, setMode] = useState<'split' | 'flat'>(r.flatAmount && Number(r.flatAmount) > 0 ? 'flat' : 'split');
-  const [fundingDate, setFundingDate] = useState(r.fundingDate ? r.fundingDate.slice(0, 10) : '');
+  // Funding date — source of truth is the DEAL's funding date. See
+  // comment in CommissionDetail for the rationale.
+  const [fundingDate, setFundingDate] = useState(
+    r.dealFundingDate ? r.dealFundingDate.slice(0, 10)
+    : r.fundingDate ? r.fundingDate.slice(0, 10)
+    : ''
+  );
   // Editable deal fields (admin patches the parent deal record)
   const [dealName, setDealName] = useState(r.dealName);
   const [merchantFirstName, setMerchantFirstName] = useState(r.merchantFirstName ?? '');
@@ -1467,7 +1494,14 @@ function LSCommissionDetail({
     if (brokerFee !== (r.brokerFee ?? '')) body.brokerFee = Number(brokerFee) || 0;
     if (mode === 'split' && splitPct !== (r.splitPct ?? '')) { body.splitPct = Number(splitPct) || 0; body.flatAmount = null; }
     if (mode === 'flat' && flatAmount !== (r.flatAmount ?? '')) { body.flatAmount = Number(flatAmount) || 0; body.splitPct = null; }
-    if (fundingDate && fundingDate !== (r.fundingDate ?? '').slice(0, 10)) body.fundingDate = fundingDate;
+    // Funding date — mirror to the deal record so the table view
+    // (which reads dealFundingDate from the join) stays in sync.
+    const initialIso = r.dealFundingDate ? r.dealFundingDate.slice(0, 10)
+                      : r.fundingDate ? r.fundingDate.slice(0, 10) : '';
+    if (fundingDate && fundingDate !== initialIso) {
+      body.fundingDate = fundingDate;
+      onDealPatch(r.dealId, { fundingDate });
+    }
     onPatch(r.id, body);
   }
 

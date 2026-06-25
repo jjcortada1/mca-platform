@@ -166,22 +166,33 @@ export function FundingCelebration() {
               <circle cx="100" cy="105" r="45" fill="none" stroke="#78350f" strokeWidth="1.5" opacity="0.5" />
               <circle cx="100" cy="105" r="25" fill="url(#gongInner)" stroke="#451a03" strokeWidth="2" />
             </g>
-            {/* Hammer — swings in from the upper-right, strikes the disc
-                center, bounces back. SVG transform places the pivot in
-                viewBox coordinates (so it actually appears inside the
-                visible area); CSS only animates rotation. The previous
-                version used CSS px values which don't map to viewBox
-                units and put the hammer off-screen. Hammer extends LEFT
-                from the pivot so the head lands on the disc center. */}
-            <g transform="translate(175 55)">
+            {/* Hammer — pivots at SVG (180, 50) (upper-right, well inside
+                viewBox). Handle extends LEFT from pivot; head ellipse at
+                the far left tip of the handle. Math:
+                  • Disc center is at (100, 105)
+                  • Vector from pivot to disc center: (-80, 55)
+                  • Required angle for head to point at disc: atan2(55,-80)
+                    ≈ 146° in CSS-clockwise convention
+                  • Head at rotation 0° points at 180° (straight left)
+                  • So rotation -34° aligns the head with the disc center
+                The keyframes below cock back to +30° (head up & visible at
+                top of frame), swing through to -34° (head striking disc
+                face), then bounce to -20°. Previously these used CSS px
+                translate values that didn't map to viewBox units and put
+                the hammer entirely off-screen above the disc. */}
+            <g transform="translate(180 50)">
               <g className="gong-hammer">
-                {/* Handle: from pivot (0,0) extending left to (-55, 0).
-                    The pivot is the user's grip point (end of handle). */}
-                <line x1="0" y1="0" x2="-55" y2="0" stroke="#451a03" strokeWidth="6" strokeLinecap="round" />
-                {/* Head — slightly larger so it's clearly visible at the
-                    small sizes the gong renders at on mobile. */}
-                <ellipse cx="-62" cy="0" rx="16" ry="11" fill="#451a03" stroke="#1c1917" strokeWidth="1.5" />
-                <ellipse cx="-62" cy="-3" rx="13" ry="7" fill="#78716c" opacity="0.5" />
+                {/* Handle: from pivot (0,0) extending LEFT to (-65, 0).
+                    Thicker (8px stroke) so it reads at mobile sizes. */}
+                <line x1="0" y1="0" x2="-65" y2="0" stroke="#451a03" strokeWidth="8" strokeLinecap="round" />
+                {/* Mallet head — larger so the "thick part" is clearly the
+                    business end. Drawn slightly elongated vertically
+                    (perpendicular to handle) so it reads as a striker
+                    rather than just a bulb. Highlight is a small dot
+                    rather than a long oval to avoid looking "upside
+                    down" at any rotation. */}
+                <ellipse cx="-78" cy="0" rx="18" ry="14" fill="#451a03" stroke="#1c1917" strokeWidth="1.5" />
+                <circle cx="-78" cy="-4" r="4" fill="#78716c" opacity="0.5" />
               </g>
             </g>
             {/* Impact ripples — three expanding rings that fade out as
@@ -226,19 +237,23 @@ export function FundingCelebration() {
           animation: gongFadeIn 3.2s ease-out forwards;
         }
         /* Hammer swing — pure rotation around the SVG-positioned pivot
-            (175, 55 in viewBox units). Starts cocked back at -60° (above
-            and to the right), arcs forward through 0°, strikes the disc
-            at 60° rotation (handle horizontal, head pointing into the
-            center), then bounces back gently. Rotation only — the
-            translate is handled by the SVG <g> wrapper so the hammer
-            stays inside the viewBox. */
+            (180, 50 in viewBox units). Math:
+              • Start at +30°: head rotates from "pointing left" (180° in
+                CSS convention) to 180+30 = 210° → head ends up at upper-
+                left of pivot, around (113, 11) in viewBox. Visible in
+                the upper-left area, "cocked above the disc".
+              • Impact at -34°: head at angle 146° → world (115, 94),
+                striking the disc face just up and to the right of dead
+                center. The thick part (head) is what touches the disc.
+              • Bounce to -20°: head pulls back from the disc face but
+                stays in the visible swing-completion area. */
         @keyframes gongHammerSwing {
-          0%   { transform: rotate(-90deg); }
-          22%  { transform: rotate(-90deg); }
-          32%  { transform: rotate(60deg); }   /* impact */
-          40%  { transform: rotate(40deg); }   /* bounce */
-          48%  { transform: rotate(55deg); }
-          100% { transform: rotate(50deg); }
+          0%   { transform: rotate(30deg); }
+          22%  { transform: rotate(30deg); }
+          32%  { transform: rotate(-34deg); }  /* impact */
+          40%  { transform: rotate(-20deg); }  /* bounce */
+          48%  { transform: rotate(-26deg); }
+          100% { transform: rotate(-24deg); }
         }
         :global(.gong-hammer) {
           transform-origin: 0 0;
