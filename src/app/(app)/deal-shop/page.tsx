@@ -2151,11 +2151,13 @@ function formatIntakeMessage(
 ): string {
   const sections: string[] = [];
 
-  // 1. Recent funding — leads, per spec.
-  const validFundings = recentFundings.filter((r) => r.company.trim() && r.amount.trim());
+  // 1. Recent funding — leads, per spec. Include if ANY field is filled.
+  const validFundings = recentFundings.filter((r) => r.company.trim() || r.amount.trim() || r.date.trim() || r.rate.trim() || r.term.trim());
   if (validFundings.length > 0) {
     const lines: string[] = ['Recent Funding:'];
     for (const r of validFundings) {
+      const company = r.company.trim() || '(company)';
+      const amount = r.amount.trim() || '(amount)';
       const dateSuffix = r.date.trim() ? ` on ${r.date.trim()}` : '';
       const rateStr = (r.rate ?? '').trim();
       const termStr = (r.term ?? '').trim();
@@ -2163,25 +2165,27 @@ function formatIntakeMessage(
       if (rateStr && termStr) suffix = ` (${rateStr} / ${termStr})`;
       else if (rateStr) suffix = ` (${rateStr})`;
       else if (termStr) suffix = ` (${termStr})`;
-      lines.push(`  ${r.company.trim()} funded ${r.amount.trim()}${suffix}${dateSuffix}`);
+      lines.push(`  ${company} funded ${amount}${suffix}${dateSuffix}`);
     }
     sections.push(lines.join('\n'));
   }
 
   // 2. Open balances — including rate/term tail when present. The
   // suffix is "(rate / term)" so the funder can scan the price + length
-  // of each competing position at a glance.
-  const validBalances = openBalances.filter((r) => r.funder.trim() && r.amount.trim());
+  // of each competing position at a glance. Include if ANY field is filled.
+  const validBalances = openBalances.filter((r) => r.funder.trim() || r.amount.trim() || r.rate.trim() || r.term.trim());
   if (validBalances.length > 0) {
     const lines: string[] = ['Open Balances:'];
     for (const r of validBalances) {
+      const funder = r.funder.trim() || '(funder)';
+      const amount = r.amount.trim() || '(amount)';
       const rateStr = (r.rate ?? '').trim();
       const termStr = (r.term ?? '').trim();
       let suffix = '';
       if (rateStr && termStr) suffix = ` (${rateStr} / ${termStr})`;
       else if (rateStr) suffix = ` (${rateStr})`;
       else if (termStr) suffix = ` (${termStr})`;
-      lines.push(`  ${r.funder.trim()} ${r.amount.trim()}${suffix}`);
+      lines.push(`  ${funder} ${amount}${suffix}`);
     }
     sections.push(lines.join('\n'));
   }
