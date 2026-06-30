@@ -133,7 +133,7 @@ export default function DealShopPage() {
   // of competing positions, not just "they owe X". All four fields are
   // optional — empty ones are skipped from the formatted output.
   type OpenBal = { id: string; funder: string; amount: string; rate: string; term: string };
-  type RecentFund = { id: string; company: string; amount: string; date: string };
+  type RecentFund = { id: string; company: string; amount: string; date: string; rate: string; term: string };
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [openBalances, setOpenBalances] = useState<OpenBal[]>([]);
   const [priorHistoryMode, setPriorHistoryMode] = useState<'unset' | 'yes' | 'no'>('unset');
@@ -170,8 +170,8 @@ export default function DealShopPage() {
           setPriorHistoryDetails(intake.priorHistory.details ?? '');
         }
         if (Array.isArray(intake.recentFundings)) {
-          setRecentFundings(intake.recentFundings.map((r: { company?: string; amount?: string; date?: string }) => ({
-            id: cryptoId(), company: r.company ?? '', amount: r.amount ?? '', date: r.date ?? '',
+          setRecentFundings(intake.recentFundings.map((r: { company?: string; amount?: string; date?: string; rate?: string; term?: string }) => ({
+            id: cryptoId(), company: r.company ?? '', amount: r.amount ?? '', date: r.date ?? '', rate: r.rate ?? '', term: r.term ?? '',
           })));
         }
         // Notes is part of the same intake blob — kept separate from the
@@ -1852,12 +1852,12 @@ function SubmissionIntakeSection({
     setOpenBalances((arr) => arr.map((r) => r.id === id ? { ...r, ...patch } : r));
   }
   function addRecentFunding() {
-    setRecentFundings((arr) => [...arr, { id: cryptoId(), company: '', amount: '', date: '' }]);
+    setRecentFundings((arr) => [...arr, { id: cryptoId(), company: '', amount: '', date: '', rate: '', term: '' }]);
   }
   function removeRecentFunding(id: string) {
     setRecentFundings((arr) => arr.filter((r) => r.id !== id));
   }
-  function updateRecentFunding(id: string, patch: Partial<{ company: string; amount: string; date: string }>) {
+  function updateRecentFunding(id: string, patch: Partial<{ company: string; amount: string; date: string; rate: string; term: string }>) {
     setRecentFundings((arr) => arr.map((r) => r.id === id ? { ...r, ...patch } : r));
   }
 
@@ -1926,7 +1926,7 @@ function SubmissionIntakeSection({
                         <span>Remove</span>
                       </button>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       <div>
                         <label className="text-xs text-muted-foreground font-medium block mb-1">Company</label>
                         <input
@@ -1946,6 +1946,25 @@ function SubmissionIntakeSection({
                         />
                       </div>
                       <div>
+                        <label className="text-xs text-muted-foreground font-medium block mb-1">Rate (factor)</label>
+                        <input
+                          value={row.rate}
+                          onChange={(e) => updateRecentFunding(row.id, { rate: e.target.value })}
+                          placeholder="1.45"
+                          inputMode="decimal"
+                          className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground font-medium block mb-1">Term</label>
+                        <input
+                          value={row.term}
+                          onChange={(e) => updateRecentFunding(row.id, { term: e.target.value })}
+                          placeholder="100 days"
+                          className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm"
+                        />
+                      </div>
+                      <div className="col-span-2 sm:col-span-4">
                         <label className="text-xs text-muted-foreground font-medium block mb-1">Date</label>
                         <input
                           value={row.date}
@@ -2128,35 +2147,45 @@ function formatIntakeMessage(
   openBalances: { funder: string; amount: string; rate?: string; term?: string }[],
   priorHistoryMode: 'unset' | 'yes' | 'no',
   priorHistoryDetails: string,
-  recentFundings: { company: string; amount: string; date: string }[],
+  recentFundings: { company: string; amount: string; date: string; rate?: string; term?: string }[],
 ): string {
   const sections: string[] = [];
 
-  // 1. Recent funding — leads, per spec.
-  const validFundings = recentFundings.filter((r) => r.company.trim() && r.amount.trim());
+  // 1. Recent funding — leads, per spec. Include if ANY field is filled.
+  const validFundings = recentFundings.filter((r) => r.company.trim() || r.amount.trim() || r.date.trim() || r.rate.trim() || r.term.trim());
   if (validFundings.length > 0) {
     const lines: string[] = ['Recent Funding:'];
     for (const r of validFundings) {
+      const company = r.company.trim() || '(company)';
+      const amount = r.amount.trim() || '(amount)';
       const dateSuffix = r.date.trim() ? ` on ${r.date.trim()}` : '';
-      lines.push(`  ${r.company.trim()} funded ${r.amount.trim()}${dateSuffix}`);
-    }
-    sections.push(lines.join('\n'));
-  }
-
-  // 2. Open balances — including rate/term tail when present. The
-  // suffix is "(rate / term)" so the funder can scan the price + length
-  // of each competing position at a glance.
-  const validBalances = openBalances.filter((r) => r.funder.trim() && r.amount.trim());
-  if (validBalances.length > 0) {
-    const lines: string[] = ['Open Balances:'];
-    for (const r of validBalances) {
       const rateStr = (r.rate ?? '').trim();
       const termStr = (r.term ?? '').trim();
       let suffix = '';
       if (rateStr && termStr) suffix = ` (${rateStr} / ${termStr})`;
       else if (rateStr) suffix = ` (${rateStr})`;
       else if (termStr) suffix = ` (${termStr})`;
-      lines.push(`  ${r.funder.trim()} ${r.amount.trim()}${suffix}`);
+      lines.push(`  ${company} funded ${amount}${suffix}${dateSuffix}`);
+    }
+    sections.push(lines.join('\n'));
+  }
+
+  // 2. Open balances — including rate/term tail when present. The
+  // suffix is "(rate / term)" so the funder can scan the price + length
+  // of each competing position at a glance. Include if ANY field is filled.
+  const validBalances = openBalances.filter((r) => r.funder.trim() || r.amount.trim() || r.rate.trim() || r.term.trim());
+  if (validBalances.length > 0) {
+    const lines: string[] = ['Open Balances:'];
+    for (const r of validBalances) {
+      const funder = r.funder.trim() || '(funder)';
+      const amount = r.amount.trim() || '(amount)';
+      const rateStr = (r.rate ?? '').trim();
+      const termStr = (r.term ?? '').trim();
+      let suffix = '';
+      if (rateStr && termStr) suffix = ` (${rateStr} / ${termStr})`;
+      else if (rateStr) suffix = ` (${rateStr})`;
+      else if (termStr) suffix = ` (${termStr})`;
+      lines.push(`  ${funder} ${amount}${suffix}`);
     }
     sections.push(lines.join('\n'));
   }
@@ -2184,7 +2213,7 @@ function buildIntakePayload(
   openBalances: { funder: string; amount: string; rate: string; term: string }[],
   priorHistoryMode: 'unset' | 'yes' | 'no',
   priorHistoryDetails: string,
-  recentFundings: { company: string; amount: string; date: string }[],
+  recentFundings: { company: string; amount: string; date: string; rate: string; term: string }[],
   notes: string,
 ) {
   return {
@@ -2201,8 +2230,8 @@ function buildIntakePayload(
       details: priorHistoryMode === 'yes' ? priorHistoryDetails.trim() : '',
     },
     recentFundings: recentFundings
-      .filter((r) => r.company.trim() || r.amount.trim() || r.date.trim())
-      .map((r) => ({ company: r.company.trim(), amount: r.amount.trim(), date: r.date.trim() })),
+      .filter((r) => r.company.trim() || r.amount.trim() || r.date.trim() || r.rate.trim() || r.term.trim())
+      .map((r) => ({ company: r.company.trim(), amount: r.amount.trim(), date: r.date.trim(), rate: r.rate.trim(), term: r.term.trim() })),
     notes: notes.trim(),
   };
 }
