@@ -442,6 +442,39 @@ function SignatureCard() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  // Rich editor surface. contentEditable keeps whatever the user pastes —
+  // fonts, colors, images, layout — exactly as Gmail renders it. What you
+  // see in the box is what recipients get.
+  const editorRef = useRef<HTMLDivElement | null>(null);
+
+  /** Load a stored signature into the editor. Plain-text legacy signatures
+   *  get their newlines converted to <br> so they display correctly. */
+  function setEditorContent(stored: string) {
+    const el = editorRef.current;
+    if (!el) return;
+    if (/<[a-z][^>]*>/i.test(stored)) {
+      el.innerHTML = stored;
+    } else {
+      el.textContent = '';
+      el.innerHTML = stored
+        .split('\n')
+        .map((line) => line
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+        .join('<br>');
+    }
+  }
+
+  /** Read the editor back out. An "empty" contentEditable often contains
+   *  a stray <br> or empty div — normalize that to ''. */
+  function readEditor(): string {
+    const el = editorRef.current;
+    if (!el) return '';
+    const html = el.innerHTML.trim();
+    const textOnly = (el.textContent ?? '').trim();
+    const hasImage = /<img\b/i.test(html);
+    if (!textOnly && !hasImage) return '';
+    return html;
+  }
 
   useEffect(() => {
     fetch('/api/account/signature', { cache: 'no-store' })
@@ -453,6 +486,9 @@ function SignatureCard() {
         setText(t); setSavedText(t);
         setLogoUrl(l); setSavedLogo(l);
         setLink(k); setSavedLink(k);
+        // Editor mounts on the next paint (loading flips false) — defer the
+        // content injection until the ref exists.
+        setTimeout(() => setEditorContent(t), 0);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -487,7 +523,7 @@ function SignatureCard() {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        emailSignature: text,
+        emailSignature: readEditor(),
         signatureLogoUrl: logoUrl,
         signatureLink: link.trim(),
       }),
@@ -501,7 +537,13 @@ function SignatureCard() {
     setSavedText(j?.data?.emailSignature ?? '');
     setSavedLogo(j?.data?.signatureLogoUrl ?? '');
     setSavedLink(j?.data?.signatureLink ?? '');
+    setText(j?.data?.emailSignature ?? '');
     toast.success('Signature saved.');
+  }
+
+  function clearSignature() {
+    if (editorRef.current) editorRef.current.innerHTML = '';
+    setText('');
   }
 
   const isDirty = text !== savedText || logoUrl !== savedLogo || link !== savedLink;
@@ -515,25 +557,29 @@ function SignatureCard() {
           <PenLine className="h-4 w-4" /> Email signature
         </CardTitle>
         <CardDescription>
-          Appears at the bottom of every email you send — deal submissions and funded notifications. Supports plain text or HTML with font styling. You can paste formatted text from Gmail and fonts will be preserved.
+          One signature, used on every email you send (deal submissions and funded notifications).
+          Copy your signature in Gmail (Ctrl/Cmd-A in the signature box, then copy) and paste it below —
+          fonts, colors, and images come through exactly as they look there.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <Field label="Signature text" hint="Plain text or HTML. You can paste formatted content from Gmail — fonts and colors will be preserved.">
-          <Textarea
-            rows={5}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder={'Best,\nYour Name\nDirect: (555) 555-5555\nyour@email.com'}
+        <Field label="Signature" hint="Paste from Gmail or type directly. What you see here is what recipients see.">
+          <div
+            ref={editorRef}
+            contentEditable
+            suppressContentEditableWarning
+            onInput={() => setText(readEditor())}
+            data-placeholder={'Best,\nYour Name\nDirect: (555) 555-5555'}
+            className="min-h-[120px] w-full rounded-md border border-input bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring [&:empty]:before:content-[attr(data-placeholder)] [&:empty]:before:text-muted-foreground/60 [&:empty]:before:whitespace-pre-line"
           />
         </Field>
-        {text && text.includes('<') && text.includes('>') && (
-          <div className="text-xs text-muted-foreground bg-slate-50 border border-slate-200 rounded p-2">
-            ✓ HTML content detected — fonts and styling will be preserved in emails.
-          </div>
+        {text && (
+          <button type="button" onClick={clearSignature} className="text-xs text-muted-foreground hover:text-destructive">
+            Clear signature
+          </button>
         )}
 
-        <Field label="Logo (optional)" hint="PNG, JPG, WebP, or GIF — under 500 KB. Appears below your text in HTML inboxes.">
+        <Field label="Logo (optional)" hint="Only needed if your pasted signature doesn't already include your logo. PNG, JPG, WebP, or GIF under 500 KB — appears below your signature.">
           <div className="space-y-2">
             <div className="flex items-center gap-3">
               <Button variant="outline" type="button" onClick={() => fileRef.current?.click()}>

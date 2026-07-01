@@ -51,8 +51,11 @@ function sanitizeSignatureHtml(dirty: string): string {
 }
 
 const schema = z.object({
-  // 5000 chars is plenty for a multi-line signature. Can be plain text or HTML.
-  emailSignature: z.string().max(5000).transform(sanitizeSignatureHtml),
+  // Generous cap: a signature pasted from Gmail arrives as HTML (tables,
+  // inline styles, sometimes an inline data-URI image) and can easily run
+  // tens of KB. 300K keeps even image-bearing signatures intact while
+  // still bounding abuse.
+  emailSignature: z.string().max(300_000).transform(sanitizeSignatureHtml),
   // Data URI for the logo. SVG is intentionally disallowed (can carry scripts).
   // Capped at ~700KB base64 (~500KB binary) — emails over ~1MB attachment
   // total get bounced by some SMTP relays, so we keep the signature image small.

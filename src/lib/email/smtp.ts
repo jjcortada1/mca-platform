@@ -114,6 +114,31 @@ function htmlAutolink(escapedHtml: string): string {
  *
  * The text version intentionally does NOT include the logo (it's text-only).
  */
+/**
+ * Does this signature text look like pasted HTML (e.g. copied straight from
+ * Gmail's signature box)? If so we embed it as-is in the HTML part (it was
+ * sanitized at save time) and strip tags for the plain-text part.
+ */
+function signatureLooksHtml(text: string): boolean {
+  return /<[a-z][^>]*>/i.test(text);
+}
+
+/** Convert an HTML signature to readable plain text for the text/plain part. */
+function htmlSignatureToText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|tr|h[1-6]|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function buildPlainTextBody(
   notes: string,
   fields: StructuredField[],
@@ -134,7 +159,10 @@ function buildPlainTextBody(
   // of the message body, not as a visually separate block.
   if (signature && (signature.text?.trim() || signature.link)) {
     lines.push('');
-    if (signature.text?.trim()) lines.push(signature.text.trim());
+    if (signature.text?.trim()) {
+      const sig = signature.text.trim();
+      lines.push(signatureLooksHtml(sig) ? htmlSignatureToText(sig) : sig);
+    }
     if (signature.link) lines.push(signature.link);
   }
   return lines.join('\n');
@@ -188,14 +216,22 @@ function buildHtmlBody(
   if (signature && (signature.text?.trim() || logoCid || signature.link)) {
     parts.push('<div style="margin-top:16px; font-size:13px;">');
     if (signature.text?.trim()) {
-      // Same \n → <br> approach as notes. Anchors inside the signature get
-      // `color:inherit; text-decoration:none` so the rep's contact info
-      // doesn't render as blue links — it looks like the signature text
-      // they typed but is still clickable.
-      const sigEsc = htmlAutolink(escapeHtml(signature.text.trim()))
-        .replace(/\n/g, '<br>')
-        .replace(/<a /g, '<a style="color:inherit; text-decoration:none;" ');
-      parts.push(`<div>${sigEsc}</div>`);
+      const sig = signature.text.trim();
+      if (signatureLooksHtml(sig)) {
+        // Pasted-from-Gmail HTML signature: embed AS-IS so the exact fonts,
+        // colors, images, and layout the user pasted are what recipients
+        // see. It was sanitized (scripts/handlers stripped) at save time.
+        parts.push(`<div>${sig}</div>`);
+      } else {
+        // Plain-text signature: same \n → <br> approach as notes. Anchors
+        // get `color:inherit; text-decoration:none` so the rep's contact
+        // info doesn't render as blue links — it looks like the signature
+        // text they typed but is still clickable.
+        const sigEsc = htmlAutolink(escapeHtml(sig))
+          .replace(/\n/g, '<br>')
+          .replace(/<a /g, '<a style="color:inherit; text-decoration:none;" ');
+        parts.push(`<div>${sigEsc}</div>`);
+      }
     }
     if (logoCid) {
       const img = `<img src="cid:${logoCid}" alt="" style="max-height:60px; max-width:240px; display:block; margin:8px 0; border:0;" />`;

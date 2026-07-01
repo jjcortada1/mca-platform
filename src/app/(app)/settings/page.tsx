@@ -284,17 +284,12 @@ function BrandingSection() {
       <Card>
         <CardHeader>
           <CardTitle>Email signature</CardTitle>
-          <CardDescription>Optional default signature appended to deal submission emails.</CardDescription>
+          <CardDescription>
+            Signatures are personal — each user sets their own in one place:{' '}
+            <a href="/account" className="text-primary hover:underline">My Account → Email signature</a>.
+            Paste it straight from Gmail (fonts, logo and all) and it&apos;s used on every email that user sends.
+          </CardDescription>
         </CardHeader>
-        <CardContent>
-          <Textarea
-            rows={5}
-            value={emailSignature}
-            onChange={(e) => setEmailSignature(e.target.value)}
-            placeholder="Best,&#10;The Cortada Team&#10;cortadacapitalgroup.com"
-            maxLength={2000}
-          />
-        </CardContent>
       </Card>
 
       <div className="flex justify-end">
