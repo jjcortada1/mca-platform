@@ -1836,8 +1836,8 @@ function SubmissionIntakeSection({
   setPriorHistoryMode: React.Dispatch<React.SetStateAction<'unset' | 'yes' | 'no'>>;
   priorHistoryDetails: string;
   setPriorHistoryDetails: React.Dispatch<React.SetStateAction<string>>;
-  recentFundings: { id: string; company: string; amount: string; date: string }[];
-  setRecentFundings: React.Dispatch<React.SetStateAction<{ id: string; company: string; amount: string; date: string }[]>>;
+  recentFundings: { id: string; company: string; amount: string; date: string; rate: string; term: string }[];
+  setRecentFundings: React.Dispatch<React.SetStateAction<{ id: string; company: string; amount: string; date: string; rate: string; term: string }[]>>;
   dealId: string | null;
   notesPreview: string;
   saveState: 'idle' | 'saving' | 'saved';
