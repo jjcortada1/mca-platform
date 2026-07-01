@@ -1,24 +1,15 @@
 'use client';
-import { useState, useEffect, Suspense } from 'react';
+import { useState, Suspense } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button, Input, PasswordInput, Field } from '@/components/ui/primitives';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Lock } from 'lucide-react';
 
-interface PublicBranding {
-  productName: string;
-  displayName: string;
-  logoUrl: string | null;
-  primaryColor: string;
-}
-
-const FALLBACK: PublicBranding = {
-  productName: 'Cortada',
-  displayName: 'Cortada Capital Group',
-  logoUrl: null,
-  primaryColor: '222 47% 17%',
-};
+// The pre-login page is intentionally UNBRANDED. Company branding (logo,
+// name, colors) only appears inside the app after login, so every company
+// on the platform gets their own identity without leaking anyone's brand
+// on the shared login screen.
 
 export default function LoginPage() {
   return (
@@ -36,16 +27,8 @@ function LoginInner() {
   const [twoFACode, setTwoFACode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [branding, setBranding] = useState<PublicBranding>(FALLBACK);
   const [step, setStep] = useState<'credentials' | '2fa'>('credentials');
   const [userId, setUserId] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch('/api/branding/public')
-      .then((r) => r.json())
-      .then((b) => setBranding({ ...FALLBACK, ...b }))
-      .catch(() => {});
-  }, []);
 
   async function onCredentialsSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -180,23 +163,11 @@ function LoginInner() {
       <div aria-hidden className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-background to-transparent pointer-events-none" />
 
       <div className="relative w-full max-w-[400px] animate-fade-up">
-        {/* Brand mark — full Cortada logo with text */}
+        {/* Neutral mark — no company branding before login */}
         <div className="flex flex-col items-center mb-8">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={branding.logoUrl || '/brand/cortada-full.png'}
-            alt={branding.displayName}
-            className="h-16 sm:h-20 w-auto object-contain"
-            onError={(e) => {
-              // If the stored logo URL is broken, fall back to the bundled file.
-              const el = e.currentTarget;
-              if (el.src.endsWith('/brand/cortada-full.png')) {
-                el.style.display = 'none';
-              } else {
-                el.src = '/brand/cortada-full.png';
-              }
-            }}
-          />
+          <div className="h-12 w-12 rounded-xl border border-border bg-card flex items-center justify-center shadow-sm">
+            <Lock className="h-5 w-5 text-muted-foreground" />
+          </div>
         </div>
 
         {/* Card */}
@@ -296,7 +267,7 @@ function LoginInner() {
         </div>
 
         <p className="text-center text-xs text-muted-foreground/70 mt-6">
-          {branding.displayName}
+          Secure sign in
         </p>
       </div>
     </div>
