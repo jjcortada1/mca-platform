@@ -2,7 +2,13 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false, // don't advertise Next.js version
-  experimental: { serverActions: { bodySizeLimit: '50mb' } },
+  experimental: {
+    serverActions: { bodySizeLimit: '50mb' },
+    // Run src/instrumentation.ts at server boot — aligns the DB schema with
+    // the code (see src/lib/db/bootstrap.ts) so a code upload can't break on
+    // missing columns.
+    instrumentationHook: true,
+  },
 
   async headers() {
     return [
