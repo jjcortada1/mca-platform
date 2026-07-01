@@ -105,6 +105,9 @@ export default function SubmissionsPage() {
   const [repFilter, setRepFilter] = useState<string>('all');
   // Sort: 'recent' (default), 'rep' alphabetical by rep name.
   const [sortBy, setSortBy] = useState<'recent' | 'rep' | 'status'>('recent');
+  // Time window: 'all' or a specific 'YYYY-MM'. Buckets by the submission's
+  // most recent funder submission date (falling back to createdAt).
+  const [monthFilter, setMonthFilter] = useState<string>('all');
   // Search across deal name / merchant name / funder names.
   const [search, setSearch] = useState('');
 
@@ -327,13 +330,45 @@ export default function SubmissionsPage() {
     return { reps: list, hasUnassigned };
   }, [rows]);
 
-  // Apply rep filter, then text search, then sort.
+  // The date a submission "belongs to" for month bucketing: the most recent
+  // funder submission (that's when activity happened), else the row's
+  // createdAt as a fallback for rows with no funder timestamps.
+  function submissionMonthKey(r: SubmissionRow): string {
+    let latest = 0;
+    for (const f of r.funders) {
+      const t = new Date(f.submittedAt).getTime();
+      if (!isNaN(t) && t > latest) latest = t;
+    }
+    if (!latest) latest = new Date(r.createdAt).getTime();
+    if (isNaN(latest) || !latest) return '';
+    const d = new Date(latest);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  // Distinct months present in the data, newest first — powers the dropdown.
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) { const k = submissionMonthKey(r); if (k) set.add(k); }
+    return Array.from(set).sort().reverse();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
+
+  function monthLabel(key: string): string {
+    const [y, m] = key.split('-');
+    const d = new Date(Number(y), Number(m) - 1, 1);
+    return d.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+  }
+
+  // Apply rep filter, then month, then text search, then sort.
   const filteredRows = useMemo(() => {
     let out = rows;
     if (repFilter === 'unassigned') {
       out = out.filter((r) => !r.assignedRepId);
     } else if (repFilter !== 'all') {
       out = out.filter((r) => r.assignedRepId === repFilter);
+    }
+    if (monthFilter !== 'all') {
+      out = out.filter((r) => submissionMonthKey(r) === monthFilter);
     }
     const q = search.trim().toLowerCase();
     if (q) {
@@ -369,7 +404,8 @@ export default function SubmissionsPage() {
       });
     }
     return out;
-  }, [rows, repFilter, sortBy, search]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, repFilter, monthFilter, sortBy, search]);
 
   return (
     <div className="space-y-6 p-6">
@@ -465,8 +501,19 @@ export default function SubmissionsPage() {
             )}
           </div>
 
-          {/* Sort + search on the right */}
+          {/* Month + sort + search on the right */}
           <div className="flex items-center gap-2 sm:ml-auto">
+            <select
+              value={monthFilter}
+              onChange={(e) => setMonthFilter(e.target.value)}
+              className="h-9 rounded-md border border-input bg-card px-2 text-sm"
+              title="Filter by month"
+            >
+              <option value="all">All time</option>
+              {availableMonths.map((m) => (
+                <option key={m} value={m}>{monthLabel(m)}</option>
+              ))}
+            </select>
             <input
               type="search"
               value={search}
