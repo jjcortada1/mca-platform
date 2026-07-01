@@ -314,6 +314,71 @@ export default function DealShopPage() {
     return Array.from(set);
   }, [ccAssignedRep, assignedRepId, reps, extraCc]);
 
+  /* ========================================================================
+     DRAFT PERSISTENCE — everything typed on this page survives a refresh.
+
+     Every meaningful piece of form state is mirrored into localStorage
+     (debounced) under a per-deal key. On mount we restore it, so if a send
+     fails or the page has to be refreshed mid-entry, nothing is lost.
+     The draft is cleared only after a fully-successful send. Attachments
+     are the one thing that can't be restored (browsers don't allow
+     persisting file handles) — everything else comes back.
+     ======================================================================== */
+  const draftKey = `deal-shop-draft:v1:${dealId || 'new'}`;
+  const draftRestoredRef = useRef(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d && typeof d === 'object') {
+          // Deal name only restores for a fresh (no-dealId) form — with a
+          // deal context the name is loaded from the deal record instead.
+          if (!dealId && typeof d.dealName === 'string' && d.dealName) setDealName(d.dealName);
+          if (typeof d.notes === 'string' && d.notes) setNotes(d.notes);
+          if (Array.isArray(d.openBalances) && d.openBalances.length) setOpenBalances(d.openBalances);
+          if (d.priorHistoryMode === 'yes' || d.priorHistoryMode === 'no') setPriorHistoryMode(d.priorHistoryMode);
+          if (typeof d.priorHistoryDetails === 'string' && d.priorHistoryDetails) setPriorHistoryDetails(d.priorHistoryDetails);
+          if (Array.isArray(d.recentFundings) && d.recentFundings.length) setRecentFundings(d.recentFundings);
+          if (Array.isArray(d.selectedFunders) && d.selectedFunders.length) setSelectedFunders(new Set(d.selectedFunders));
+          if (Array.isArray(d.manualFunders) && d.manualFunders.length) setManualFunders(d.manualFunders);
+          if (Array.isArray(d.extraCc) && d.extraCc.length) setExtraCc(d.extraCc);
+          if (typeof d.ccAssignedRep === 'boolean') setCcAssignedRep(d.ccAssignedRep);
+          if (typeof d.revenueOption === 'string' && d.revenueOption) setRevenueOption(d.revenueOption);
+          if (typeof d.creditOption === 'string' && d.creditOption) setCreditOption(d.creditOption);
+          if (typeof d.position === 'string' && d.position) setPosition(d.position);
+          if (typeof d.industry === 'string' && d.industry) setIndustry(d.industry);
+          if (typeof d.state === 'string' && d.state) setState(d.state);
+          if (typeof d.dealType === 'string' && d.dealType) setDealType(d.dealType);
+          // Re-open the intake section if it had content, so the restored
+          // data is visible rather than hidden behind the collapsed header.
+          if (d.openBalances?.length || d.recentFundings?.length || d.priorHistoryDetails) setIntakeOpen(true);
+        }
+      }
+    } catch { /* corrupt draft — start clean */ }
+    const t = setTimeout(() => { draftRestoredRef.current = true; }, 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftRestoredRef.current) return;
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({
+          dealName, notes, openBalances, priorHistoryMode, priorHistoryDetails,
+          recentFundings, selectedFunders: Array.from(selectedFunders),
+          manualFunders, extraCc, ccAssignedRep,
+          revenueOption, creditOption, position, industry, state, dealType,
+        }));
+      } catch { /* storage full/unavailable — draft is best-effort */ }
+    }, 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dealName, notes, openBalances, priorHistoryMode, priorHistoryDetails,
+      recentFundings, selectedFunders, manualFunders, extraCc, ccAssignedRep,
+      revenueOption, creditOption, position, industry, state, dealType]);
+
   function addCc() {
     const v = ccInput.trim();
     if (!v || !v.includes('@')) return;
@@ -467,6 +532,10 @@ export default function DealShopPage() {
 
       const okCount = rs.filter((r: { success: boolean }) => r.success).length;
       if (okCount > 0 && rs.every((r: { success: boolean }) => r.success)) {
+        // Fully-successful send → the draft has served its purpose. Clear it
+        // so the next visit starts fresh. Partial failures keep the draft so
+        // the user can fix and retry without retyping anything.
+        try { localStorage.removeItem(draftKey); } catch { /* best-effort */ }
         // Replace the old `confirm()` browser popup with an in-page modal.
         setShowPostSendConfirm(true);
       }
@@ -1179,7 +1248,11 @@ export default function DealShopPage() {
         {/* ============ END LEFT COLUMN ============ */}
 
         {/* ============ RIGHT COLUMN — FUNDER MATCHES, ALWAYS VISIBLE ============ */}
-        <div className="lg:col-span-7 space-y-3 lg:sticky lg:top-4 lg:self-start min-w-0">
+        {/* Right column is its OWN scroll container on desktop: capped to the
+            viewport height and overflow-y-auto, so wheeling through a long
+            funder list scrolls just this panel — the page (and the intake
+            form on the left) stays put. */}
+        <div className="lg:col-span-7 space-y-3 lg:sticky lg:top-4 lg:self-start min-w-0 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
 
       {/* Results section */}
       {results && (
