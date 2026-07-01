@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { users, companies, verificationCodes } from '@/lib/db/schema';
+import { users, verificationCodes } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { generateNumericCode, sendSystemEmail, verificationCodeEmail } from '@/lib/email/system';
-import { sendGenericEmail, type SmtpConfig } from '@/lib/email/smtp';
+import { generateNumericCode, verificationCodeEmail } from '@/lib/email/system';
+import { sendAccountEmail } from '@/lib/email/account-email';
 
 /**
  * Send a 2FA verification code to a user's email.
@@ -55,49 +55,17 @@ export async function POST(req: NextRequest) {
 
     const emailData = verificationCodeEmail(user.name, code, 'log in to your account');
 
-    // 1) System email service (Resend / SYSTEM_SMTP_*)
-    let delivered = false;
-    let lastError: string | undefined;
-    const sysResult = await sendSystemEmail({
-      to: user.email,
+    // Deliver via system email, then the user's / company's own SMTP.
+    const res = await sendAccountEmail(user.id, {
       subject: emailData.subject,
       text: emailData.text,
     });
-    if (sysResult.sent) delivered = true;
-    else lastError = sysResult.error;
 
-    // 2) Fall back to the SMTP the platform already uses for deal emails —
-    //    the user's own account first, then the company shared account.
-    if (!delivered) {
-      const candidates: (SmtpConfig | null)[] = [
-        (user.smtpConfig as SmtpConfig | null) ?? null,
-      ];
-      if (user.companyId) {
-        const [company] = await db.select().from(companies)
-          .where(eq(companies.id, user.companyId)).limit(1);
-        candidates.push((company?.smtpConfig as SmtpConfig | null) ?? null);
-      }
-      for (const smtp of candidates) {
-        if (!smtp || delivered) continue;
-        const r = await sendGenericEmail({
-          smtp,
-          toEmail: user.email,
-          ccEmails: [],
-          subject: emailData.subject,
-          bodyNotes: emailData.text,
-          structuredFields: [],
-          attachments: [],
-        });
-        if (r.success) delivered = true;
-        else lastError = r.error;
-      }
-    }
-
-    if (!delivered) {
+    if (!res.delivered) {
       // No transport can reach the user. Tell the client explicitly so it
       // can let the login proceed WITHOUT the code — a security feature
       // must never turn into a lockout because email isn't set up yet.
-      console.error('[2fa-send] no email transport available:', lastError);
+      console.error('[2fa-send] no email transport available:', res.error);
       return NextResponse.json(
         {
           canSend: false,

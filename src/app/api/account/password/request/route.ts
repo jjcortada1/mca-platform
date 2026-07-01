@@ -7,7 +7,8 @@ import { eq, and } from 'drizzle-orm';
 import { requireUser } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
 import { rateLimit } from '@/lib/api/rate-limit';
-import { sendSystemEmail, generateNumericCode, verificationCodeEmail } from '@/lib/email/system';
+import { generateNumericCode, verificationCodeEmail } from '@/lib/email/system';
+import { sendAccountEmail } from '@/lib/email/account-email';
 import { z } from 'zod';
 
 export const runtime = 'nodejs';
@@ -83,10 +84,10 @@ export async function POST(req: NextRequest) {
       expiresAt,
     });
 
-    // Email the code — sent from the system account, delivered to the user's email.
-    // The user does NOT need any SMTP/App Password set up to receive this.
+    // Email the code — system service, or fall back to the user's / company's
+    // own SMTP so it still arrives when no dedicated email service exists.
     const { subject, text } = verificationCodeEmail(user.name, code, 'change your password');
-    const result = await sendSystemEmail({ to: user.email, subject, text });
+    const result = await sendAccountEmail(user.id, { subject, text });
 
     // Mask the email for display: j***@domain.com
     const masked = maskEmail(user.email);
@@ -94,13 +95,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       sentTo: masked,
-      // false when no system SMTP is configured (code printed to console instead).
-      emailConfigured: result.sent,
-      // Fallback so the flow is never a dead end before SMTP is set up: when email
-      // could NOT be sent, return the code to the already-authenticated user who is
-      // changing THEIR OWN password. This is safe (they're logged in, it's their
+      emailConfigured: result.delivered,
+      // Fallback so the flow is never a dead end before ANY email works: when
+      // nothing could deliver, return the code to the already-authenticated
+      // user changing THEIR OWN password. Safe (they're logged in, it's their
       // account) and prevents a lockout when email isn't configured yet.
-      devCode: result.sent ? undefined : code,
+      devCode: result.delivered ? undefined : code,
     });
   } catch (e) {
     return apiError(e);
