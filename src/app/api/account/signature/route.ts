@@ -29,9 +29,30 @@ export async function GET() {
   } catch (e) { return apiError(e); }
 }
 
+/**
+ * Sanitize HTML to remove dangerous tags while preserving font/style.
+ * Allows: p, br, span, div, b, i, u, strong, em, font (with color/face),
+ * and style attributes like font-family, color, font-size.
+ */
+function sanitizeSignatureHtml(dirty: string): string {
+  if (!dirty) return dirty;
+  // Remove script tags and their content
+  let clean = dirty.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  // Remove event handlers (onclick, onload, etc.)
+  clean = clean.replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, '');
+  clean = clean.replace(/\s+on\w+\s*=\s*[^\s>]*/gi, '');
+  // Remove style tags (allow inline styles only)
+  clean = clean.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+  // Remove javascript: URLs
+  clean = clean.replace(/href\s*=\s*["']?javascript:[^"'\s>]*/gi, 'href="#"');
+  // Remove data: URLs in href
+  clean = clean.replace(/href\s*=\s*["']?data:[^"'\s>]*/gi, 'href="#"');
+  return clean;
+}
+
 const schema = z.object({
-  // 5000 chars is plenty for a multi-line signature.
-  emailSignature: z.string().max(5000),
+  // 5000 chars is plenty for a multi-line signature. Can be plain text or HTML.
+  emailSignature: z.string().max(5000).transform(sanitizeSignatureHtml),
   // Data URI for the logo. SVG is intentionally disallowed (can carry scripts).
   // Capped at ~700KB base64 (~500KB binary) — emails over ~1MB attachment
   // total get bounced by some SMTP relays, so we keep the signature image small.

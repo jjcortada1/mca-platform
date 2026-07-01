@@ -22,7 +22,7 @@ import {
   Button, Input, Textarea, Field, PageHeader,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
-import { Mail, KeyRound, ShieldCheck, PenLine } from 'lucide-react';
+import { Mail, KeyRound, ShieldCheck, Shield, PenLine } from 'lucide-react';
 
 interface MeUser { id: string; name: string; email: string; role: string }
 
@@ -68,6 +68,8 @@ export default function AccountPage() {
       )}
 
       <ChangePasswordCard />
+
+      <TwoFactorAuthCard />
 
       <AlwaysCcCard />
 
@@ -182,6 +184,76 @@ function ChangePasswordCard() {
               </Button>
             </>
           )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ============================================================
+   Two-Factor Authentication — email-based OTP for login
+   ============================================================ */
+function TwoFactorAuthCard() {
+  const toast = useToast();
+  const [enabled, setEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => {
+        setEnabled(j?.user?.twoFactorEnabled ?? false);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function toggle() {
+    setSaving(true);
+    const res = await fetch('/api/auth/toggle-2fa', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !enabled }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || 'Could not update 2FA settings.');
+      return;
+    }
+    setEnabled(!enabled);
+    toast.success(!enabled ? '2FA enabled. You\'ll need to enter a code from your email on next login.' : '2FA disabled.');
+  }
+
+  if (loading) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Shield className="h-4 w-4" /> Two-factor authentication
+        </CardTitle>
+        <CardDescription>
+          Require a verification code sent to your email when signing in. This adds extra security to your account.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium">{enabled ? 'Enabled' : 'Disabled'}</p>
+            <p className="text-xs text-muted-foreground">
+              {enabled
+                ? 'You will receive a verification code via email when you sign in.'
+                : 'Add an extra layer of security to your account.'}
+            </p>
+          </div>
+          <Button
+            onClick={toggle}
+            disabled={saving}
+            variant={enabled ? 'outline' : 'default'}
+          >
+            {saving ? 'Updating…' : enabled ? 'Disable 2FA' : 'Enable 2FA'}
+          </Button>
         </div>
       </CardContent>
     </Card>
@@ -443,11 +515,11 @@ function SignatureCard() {
           <PenLine className="h-4 w-4" /> Email signature
         </CardTitle>
         <CardDescription>
-          Appears at the bottom of every email you send — deal submissions and funded notifications. The text version goes to plain-text inboxes, the logo and link to HTML inboxes.
+          Appears at the bottom of every email you send — deal submissions and funded notifications. Supports plain text or HTML with font styling. You can paste formatted text from Gmail and fonts will be preserved.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <Field label="Signature text" hint="Your name, title, phone, and email. Multiple lines OK.">
+        <Field label="Signature text" hint="Plain text or HTML. You can paste formatted content from Gmail — fonts and colors will be preserved.">
           <Textarea
             rows={5}
             value={text}
@@ -455,6 +527,11 @@ function SignatureCard() {
             placeholder={'Best,\nYour Name\nDirect: (555) 555-5555\nyour@email.com'}
           />
         </Field>
+        {text && text.includes('<') && text.includes('>') && (
+          <div className="text-xs text-muted-foreground bg-slate-50 border border-slate-200 rounded p-2">
+            ✓ HTML content detected — fonts and styling will be preserved in emails.
+          </div>
+        )}
 
         <Field label="Logo (optional)" hint="PNG, JPG, WebP, or GIF — under 500 KB. Appears below your text in HTML inboxes.">
           <div className="space-y-2">
