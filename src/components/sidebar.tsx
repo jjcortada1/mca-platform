@@ -5,7 +5,7 @@ import { signOut } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import {
   ShoppingBag, Send, Inbox, Briefcase, Users, TrendingUp, Calculator, BookOpen, FileText,
-  Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle,
+  Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle, ClipboardList,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolveIcon } from '@/lib/sidebar-icons';
@@ -53,6 +53,9 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   // bucket as Calculator + Info. No persistence; pure formatter UI.
   { href: '/doc-request',  label: 'Doc Request',    icon: FileText,    perm: 'calculator.use' },
   { href: '/info',         label: 'Info',           icon: BookOpen,    perm: 'info.view' },
+  // Tasks — company + broker to-dos with teams/leaders. Gated by the most
+  // basic permission every user has so the tab shows for everyone.
+  { href: '/tasks',        label: 'Tasks',          icon: ClipboardList, perm: 'deals.view' },
 ];
 
 /** Default categories when nothing is saved — restores the original sections. */
@@ -67,7 +70,7 @@ export const DEFAULT_CATEGORIES: { id: string; label: string; items: string[] }[
   },
   {
     id: 'resources', label: 'Resources',
-    items: ['/funders', '/calculator', '/doc-request', '/info'],
+    items: ['/funders', '/calculator', '/doc-request', '/info', '/tasks'],
   },
 ];
 

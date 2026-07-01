@@ -891,6 +891,65 @@ export const sheetSyncConfig = pgTable(
   }
 );
 
+/* ---------- Teams & Tasks ----------
+   Teams group reps under one or more leaders. Tasks are to-dos at either
+   company scope (assignedToUserId null → visible to everyone) or assigned
+   to a specific broker (visible to the broker, their team leader(s), and
+   admins). Status flow: open → handling → completed. */
+
+export const teams = pgTable(
+  'teams',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 200 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ companyIdx: index('teams_company_idx').on(t.companyId) })
+);
+
+export const teamMembers = pgTable(
+  'team_members',
+  {
+    teamId: uuid('team_id').notNull().references(() => teams.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    isLeader: boolean('is_leader').notNull().default(false),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.teamId, t.userId] }) })
+);
+
+export const tasks = pgTable(
+  'tasks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    title: varchar('title', { length: 300 }).notNull(),
+    description: text('description'),
+    // null = company-wide task (everyone sees it); set = that broker's task
+    assignedToUserId: uuid('assigned_to_user_id').references(() => users.id, { onDelete: 'set null' }),
+    // Optional team context (e.g. a task for one team's board)
+    teamId: uuid('team_id').references(() => teams.id, { onDelete: 'set null' }),
+    dueDate: timestamp('due_date', { withTimezone: true }),
+    // 'open' | 'handling' | 'completed'
+    status: varchar('status', { length: 20 }).notNull().default('open'),
+    // Who clicked "I'm handling this" — shown on the task so nobody doubles up
+    handledBy: uuid('handled_by').references(() => users.id, { onDelete: 'set null' }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    companyIdx: index('tasks_company_idx').on(t.companyId),
+    assigneeIdx: index('tasks_assignee_idx').on(t.assignedToUserId),
+  })
+);
+
+export type TeamRow = typeof teams.$inferSelect;
+export type TaskRow = typeof tasks.$inferSelect;
+
 /* ---------- Relations ---------- */
 
 export const companiesRelations = relations(companies, ({ many }) => ({
