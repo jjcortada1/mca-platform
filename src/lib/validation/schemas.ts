@@ -28,6 +28,12 @@ export const createCompanySchema = z.object({
   adminEmail: z.string().email().toLowerCase().trim(),
   adminName: z.string().min(2).max(200),
   adminPassword: passwordRequirements,
+  // How to seed the new company's funder directory:
+  //   'master' — clone the master default funders (legacy default)
+  //   'copy'   — clone another company's live funder list (copyFromCompanyId required)
+  //   'none'   — start empty; the company uploads/enters their own funders
+  funderSeedMode: z.enum(['master', 'copy', 'none']).default('master'),
+  copyFromCompanyId: z.string().uuid().optional().nullable(),
 });
 
 /* ---------- Users ---------- */

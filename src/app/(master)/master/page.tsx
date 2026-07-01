@@ -15,6 +15,12 @@ export default function MasterCompaniesPage() {
   const [showForm, setShowForm] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: '', slug: '', adminEmail: '', adminName: '', adminPassword: '' });
+  // Funder directory seeding for the new company:
+  //   'copy'   — hand them an existing company's list as their base
+  //   'none'   — start empty, they upload their own
+  //   'master' — platform default funders (legacy)
+  const [funderSeedMode, setFunderSeedMode] = useState<'master' | 'copy' | 'none'>('none');
+  const [copyFromCompanyId, setCopyFromCompanyId] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
@@ -38,16 +44,24 @@ export default function MasterCompaniesPage() {
     if (form.adminPassword.length < 10) {
       setError('Password must be at least 10 characters'); return;
     }
+    if (funderSeedMode === 'copy' && !copyFromCompanyId) {
+      setError('Pick which company to copy the funder list from.'); return;
+    }
     const slug = form.slug || autoSlug(form.name);
     setCreating(true);
     const res = await fetch('/api/companies', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...form, slug }),
+      body: JSON.stringify({
+        ...form, slug, funderSeedMode,
+        copyFromCompanyId: funderSeedMode === 'copy' ? copyFromCompanyId : null,
+      }),
     });
     setCreating(false);
     if (!res.ok) { const d = await res.json(); setError(d.error || 'Failed'); return; }
     setShowForm(false);
     setForm({ name: '', slug: '', adminEmail: '', adminName: '', adminPassword: '' });
+    setFunderSeedMode('none');
+    setCopyFromCompanyId('');
     load();
   }
 
@@ -93,8 +107,35 @@ export default function MasterCompaniesPage() {
                 <Input type="password" value={form.adminPassword} onChange={(e) => setForm({ ...form, adminPassword: e.target.value })} />
               </Field>
             </div>
-            <div className="text-xs text-muted-foreground">
-              The new company will be seeded with default funders and commission rules.
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Funder list</div>
+              <div className="space-y-1.5 text-sm">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="funderSeed" checked={funderSeedMode === 'none'} onChange={() => setFunderSeedMode('none')} />
+                  <span>Start empty — they upload or enter their own funders</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="funderSeed" checked={funderSeedMode === 'copy'} onChange={() => setFunderSeedMode('copy')} />
+                  <span>Copy an existing company&apos;s funder list as their base</span>
+                </label>
+                {funderSeedMode === 'copy' && (
+                  <select
+                    value={copyFromCompanyId}
+                    onChange={(e) => setCopyFromCompanyId(e.target.value)}
+                    className="ml-6 h-9 rounded-md border border-input bg-card px-2 text-sm"
+                  >
+                    <option value="">— pick company —</option>
+                    {companies.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.funderCount} funders)</option>)}
+                  </select>
+                )}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="funderSeed" checked={funderSeedMode === 'master'} onChange={() => setFunderSeedMode('master')} />
+                  <span>Platform default funders</span>
+                </label>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Copies are independent — their edits never touch the source list. Commission rules are always seeded.
+              </div>
             </div>
             {error && <div className="text-sm text-destructive">{error}</div>}
             <div className="flex gap-2">

@@ -86,6 +86,19 @@ export const POST = handle(async (req: NextRequest) => {
     { companyId: company.id, fieldLabel: 'Asking', fieldKey: 'asking', sortOrder: 2 },
   ]);
 
+  // Seed the funder directory per the chosen mode:
+  //   'none'   → leave empty, they bring their own list
+  //   'copy'   → clone a source company's live funders (tiers, contacts,
+  //              restrictions, submission emails — everything)
+  //   'master' → clone master default funders (legacy default)
+  if (parsed.funderSeedMode === 'copy' && parsed.copyFromCompanyId) {
+    await cloneCompanyFunders(parsed.copyFromCompanyId, company.id);
+    return created({ id: company.id, slug: company.slug });
+  }
+  if (parsed.funderSeedMode === 'none') {
+    return created({ id: company.id, slug: company.slug });
+  }
+
   // Seed funders from master defaults (if any exist)
   const masterFunders = await db.select().from(masterDefaultFunders);
   if (masterFunders.length) {
@@ -158,3 +171,74 @@ export const POST = handle(async (req: NextRequest) => {
 
   return created({ id: company.id, slug: company.slug });
 });
+
+/**
+ * Clone one company's ENTIRE live funder directory into another company:
+ * tiers (with per-tier overrides), funders, contacts, restricted states,
+ * restricted industries, and submission emails. Used when the master admin
+ * hands a new company an existing list as their starting point. The copy is
+ * independent — edits in either company never affect the other.
+ */
+async function cloneCompanyFunders(fromCompanyId: string, toCompanyId: string) {
+  const srcTiers = await db.select().from(funderTiers).where(eq(funderTiers.companyId, fromCompanyId));
+  const tierIdMap = new Map<string, string>();
+  for (const t of srcTiers) {
+    const [row] = await db.insert(funderTiers).values({
+      companyId: toCompanyId, name: t.name, sortOrder: t.sortOrder,
+    }).returning();
+    tierIdMap.set(t.id, row.id);
+  }
+
+  const srcFunders = await db.select().from(funders).where(eq(funders.companyId, fromCompanyId));
+  for (const f of srcFunders) {
+    const [row] = await db.insert(funders).values({
+      companyId: toCompanyId,
+      name: f.name,
+      submissionMethod: f.submissionMethod,
+      supportsReverseConsolidation: f.supportsReverseConsolidation,
+      minRevenue: f.minRevenue,
+      maxPositions: f.maxPositions,
+      minCreditTier: f.minCreditTier,
+      emails: f.emails,
+      phones: f.phones,
+      notes: f.notes,
+      plainSubjectOnly: f.plainSubjectOnly,
+      isActive: f.isActive,
+    }).returning();
+
+    const assignments = await db.select().from(funderTierAssignments)
+      .where(eq(funderTierAssignments.funderId, f.id));
+    const mapped = assignments
+      .filter((a) => tierIdMap.has(a.tierId))
+      .map((a) => ({
+        funderId: row.id,
+        tierId: tierIdMap.get(a.tierId)!,
+        maxPositions: a.maxPositions,
+        minRevenue: a.minRevenue,
+        minCreditTier: a.minCreditTier,
+      }));
+    if (mapped.length) await db.insert(funderTierAssignments).values(mapped);
+
+    const contacts = await db.select().from(funderContacts).where(eq(funderContacts.funderId, f.id));
+    if (contacts.length) {
+      await db.insert(funderContacts).values(contacts.map((c) => ({
+        funderId: row.id, name: c.name, role: c.role, phone: c.phone,
+        email: c.email, isPrimary: c.isPrimary, sortOrder: c.sortOrder,
+      })));
+    }
+
+    const states = await db.select().from(funderRestrictedStates).where(eq(funderRestrictedStates.funderId, f.id));
+    if (states.length) {
+      await db.insert(funderRestrictedStates).values(states.map((s) => ({
+        funderId: row.id, stateCode: s.stateCode,
+      })));
+    }
+
+    const industries = await db.select().from(funderRestrictedIndustries).where(eq(funderRestrictedIndustries.funderId, f.id));
+    if (industries.length) {
+      await db.insert(funderRestrictedIndustries).values(industries.map((i) => ({
+        funderId: row.id, industry: i.industry,
+      })));
+    }
+  }
+}
