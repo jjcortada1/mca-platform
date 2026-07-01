@@ -1,4 +1,29 @@
-# Update — July 2026
+# Update — July 2026 (round 2)
+
+## Fixed in this round
+
+- **2FA lockout** — verification codes now send through your own
+  connected email account (the same SMTP you shop deals with) when no
+  system email service is set up. And if NO email can be delivered at
+  all, login proceeds with just your password instead of locking you
+  out. Enabling 2FA now tells you exactly how codes will be delivered.
+- **Email signature — one place, Gmail-style** — My Account → Email
+  signature is now a rich editor: copy your signature inside Gmail,
+  paste it in, and it shows fonts/colors/images exactly as they'll
+  send. Logo upload and link live in the same card. The unused
+  company-wide signature box in Settings is gone (it was never used
+  when sending — that was the confusion). Also fixed the real bug where
+  pasted HTML signatures were sent as visible code instead of formatted
+  text.
+- **Companies tab now visible to you** — your admin login now sees
+  "Companies" in the sidebar's Admin section. From there you create a
+  new company, set their admin login, and choose their funder list:
+  start empty, copy YOUR list as their base, or platform defaults.
+  Admins of client companies never get access to this.
+
+---
+
+# Update — July 2026 (round 1)
 
 ## How to apply this update on Replit
 
