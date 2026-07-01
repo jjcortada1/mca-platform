@@ -2152,7 +2152,7 @@ function formatIntakeMessage(
   const sections: string[] = [];
 
   // 1. Recent funding — leads, per spec. Include if ANY field is filled.
-  const validFundings = recentFundings.filter((r) => r.company.trim() || r.amount.trim() || r.date.trim() || r.rate.trim() || r.term.trim());
+  const validFundings = recentFundings.filter((r) => r.company.trim() || r.amount.trim() || r.date.trim() || (r.rate ?? '').trim() || (r.term ?? '').trim());
   if (validFundings.length > 0) {
     const lines: string[] = ['Recent Funding:'];
     for (const r of validFundings) {
@@ -2173,7 +2173,7 @@ function formatIntakeMessage(
   // 2. Open balances — including rate/term tail when present. The
   // suffix is "(rate / term)" so the funder can scan the price + length
   // of each competing position at a glance. Include if ANY field is filled.
-  const validBalances = openBalances.filter((r) => r.funder.trim() || r.amount.trim() || r.rate.trim() || r.term.trim());
+  const validBalances = openBalances.filter((r) => r.funder.trim() || r.amount.trim() || (r.rate ?? '').trim() || (r.term ?? '').trim());
   if (validBalances.length > 0) {
     const lines: string[] = ['Open Balances:'];
     for (const r of validBalances) {
