@@ -38,6 +38,9 @@ export async function GET() {
         confettiEnabled: companies.confettiEnabled,
         celebrationSoundEnabled: companies.celebrationSoundEnabled,
         celebrationMessage: companies.celebrationMessage,
+        // Whether this is the platform-owner company — drives the
+        // "Companies" link in the sidebar for its admins. Not sensitive.
+        isPlatformOwner: companies.isPlatformOwner,
       })
       .from(companies)
       .where(eq(companies.id, ctx.companyId))

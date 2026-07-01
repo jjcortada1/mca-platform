@@ -67,19 +67,37 @@ export async function requireTenantContext(): Promise<{
 }
 
 /**
- * Requires master admin OR company admin role.
- *
- * Originally master-admin-only — relaxed to also allow company_admin since this
- * deployment is single-tenant (Cortada). Company admins can create new companies
- * and manage master default funders. The role distinction stays in the database
- * for future multi-tenant expansion, but permissions are unified at the call site.
+ * Requires the PLATFORM OPERATOR: either a true master_admin, or a
+ * company_admin of the platform-owner company (the operator's own
+ * brokerage — flagged via companies.is_platform_owner, backfilled to the
+ * oldest company). This is who can create/manage tenant companies and
+ * master default funders. Admins of CLIENT companies are rejected, so
+ * onboarding other brokerages never exposes the master surface to them.
  */
 export async function requireMasterAdmin(): Promise<SessionUser> {
   const user = await requireUser();
-  if (user.role !== 'master_admin') {
-    throw new ForbiddenError('Master admin only');
+  if (user.role === 'master_admin') return user;
+  if (user.role === 'company_admin' && user.companyId && (await isPlatformOwnerCompany(user.companyId))) {
+    return user;
   }
-  return user;
+  throw new ForbiddenError('Platform owner only');
+}
+
+/** Is this company the platform owner? Small helper shared by API + page gates. */
+async function isPlatformOwnerCompany(companyId: string): Promise<boolean> {
+  try {
+    const { db } = await import('@/lib/db/client');
+    const { companies } = await import('@/lib/db/schema');
+    const { eq } = await import('drizzle-orm');
+    const [c] = await db
+      .select({ isPlatformOwner: companies.isPlatformOwner })
+      .from(companies)
+      .where(eq(companies.id, companyId))
+      .limit(1);
+    return !!c?.isPlatformOwner;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -129,10 +147,13 @@ export async function pageRequireTenant(): Promise<{ user: SessionUser; companyI
 
 export async function pageRequireMaster(): Promise<SessionUser> {
   const user = await pageRequireUser();
-  // Master pages (multi-company control surface) are STRICTLY master_admin
-  // only. Company admins manage their own tenant via /settings, not the
-  // master surface. This is enforced both here (page) and in the
-  // /api/master-* endpoints via requireMasterAdmin.
-  if (user.role !== 'master_admin') redirect('/dashboard');
-  return user;
+  // Master pages (multi-company control surface) admit the platform
+  // operator: master_admin, or company_admin of the platform-owner
+  // company. Client-company admins manage their own tenant via /settings
+  // and are redirected away. Mirrors requireMasterAdmin (API side).
+  if (user.role === 'master_admin') return user;
+  if (user.role === 'company_admin' && user.companyId && (await isPlatformOwnerCompany(user.companyId))) {
+    return user;
+  }
+  redirect('/dashboard');
 }

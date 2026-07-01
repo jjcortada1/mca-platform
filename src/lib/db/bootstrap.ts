@@ -19,6 +19,15 @@ import { getRawSql } from './client';
 let bootstrapPromise: Promise<void> | null = null;
 
 const STATEMENTS: string[] = [
+  // ---- companies: platform-owner flag (gates /master company management
+  //      for company_admin users of the operator's own company) ----
+  `ALTER TABLE companies ADD COLUMN IF NOT EXISTS is_platform_owner boolean NOT NULL DEFAULT false`,
+  // Backfill: the FIRST company ever created is the operator's. Only runs
+  // when no owner is flagged yet, so a manual change sticks.
+  `UPDATE companies SET is_platform_owner = true
+     WHERE id = (SELECT id FROM companies ORDER BY created_at ASC LIMIT 1)
+       AND NOT EXISTS (SELECT 1 FROM companies WHERE is_platform_owner = true)`,
+
   // ---- users: signature + 2FA columns (2FA added 2026-06; the rest are
   //      older but cheap to re-assert for installs that predate them) ----
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_signature text`,

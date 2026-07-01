@@ -110,6 +110,11 @@ export const companies = pgTable('companies', {
   celebrationSoundEnabled: boolean('celebration_sound_enabled').notNull().default(false),
   // Free text — shown as a banner overlay when a deal is funded.
   celebrationMessage: varchar('celebration_message', { length: 200 }).notNull().default('Fundeddddd!!!!'),
+  // The platform-owner company (the operator's own brokerage). Its admins
+  // can manage OTHER companies (create tenants, seed funder lists) via
+  // /master — client companies' admins cannot. Backfilled to the oldest
+  // company by the startup bootstrap.
+  isPlatformOwner: boolean('is_platform_owner').notNull().default(false),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
