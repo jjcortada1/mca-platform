@@ -617,19 +617,19 @@ export default function ActiveDealsPage() {
                             {/* Merchant identity — phone/email moved here from the table */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               <LabeledInline label="Deal name">
-                                <Input defaultValue={d.name} onChange={(e) => patchDraft('name', e.target.value)} />
+                                <Input value={(draft.name ?? d.name) ?? ''} onChange={(e) => patchDraft('name', e.target.value)} />
                               </LabeledInline>
                               <LabeledInline label="Merchant first">
-                                <Input defaultValue={d.merchantFirstName ?? ''} onChange={(e) => patchDraft('merchantFirstName', e.target.value)} />
+                                <Input value={(draft.merchantFirstName ?? d.merchantFirstName) ?? ''} onChange={(e) => patchDraft('merchantFirstName', e.target.value)} />
                               </LabeledInline>
                               <LabeledInline label="Merchant last">
-                                <Input defaultValue={d.merchantLastName ?? ''} onChange={(e) => patchDraft('merchantLastName', e.target.value)} />
+                                <Input value={(draft.merchantLastName ?? d.merchantLastName) ?? ''} onChange={(e) => patchDraft('merchantLastName', e.target.value)} />
                               </LabeledInline>
                               <LabeledInline label="Merchant phone">
-                                <Input defaultValue={d.merchantPhone ?? ''} onChange={(e) => patchDraft('merchantPhone', e.target.value)} />
+                                <Input value={(draft.merchantPhone ?? d.merchantPhone) ?? ''} onChange={(e) => patchDraft('merchantPhone', e.target.value)} />
                               </LabeledInline>
                               <LabeledInline label="Merchant email">
-                                <Input type="email" defaultValue={d.merchantEmail ?? ''} onChange={(e) => patchDraft('merchantEmail', e.target.value)} />
+                                <Input type="email" value={(draft.merchantEmail ?? d.merchantEmail) ?? ''} onChange={(e) => patchDraft('merchantEmail', e.target.value)} />
                               </LabeledInline>
                             </div>
 
