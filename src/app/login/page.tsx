@@ -69,14 +69,20 @@ function LoginInner() {
 
         if (!sendRes.ok) {
           const errorData = await sendRes.json().catch(() => ({}));
-          setError(errorData.error || 'Failed to send verification code.');
+          // canSend:false = there is NO email service able to deliver the
+          // code. Never lock the user out over that — proceed with the
+          // password-only login they just passed. (2FA re-arms itself the
+          // moment an email transport is available.)
+          if (errorData.canSend !== false) {
+            setError(errorData.error || 'Failed to send verification code.');
+            setLoading(false);
+            return;
+          }
+        } else {
+          setStep('2fa');
           setLoading(false);
           return;
         }
-
-        setStep('2fa');
-        setLoading(false);
-        return;
       }
 
       // No 2FA required, sign in directly

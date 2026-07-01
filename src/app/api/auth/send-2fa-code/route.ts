@@ -1,12 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { users, verificationCodes } from '@/lib/db/schema';
+import { users, companies, verificationCodes } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { generateNumericCode, sendSystemEmail, verificationCodeEmail } from '@/lib/email/system';
+import { sendGenericEmail, type SmtpConfig } from '@/lib/email/smtp';
 
 /**
  * Send a 2FA verification code to a user's email.
  * Called after email/password validation but before session creation.
+ *
+ * Transport order:
+ *   1. System email (Resend / SYSTEM_SMTP_*) if configured
+ *   2. The user's OWN deal-sending SMTP (per-rep mode) — the code emails
+ *      from their account to their account
+ *   3. The company shared SMTP
+ *   4. Nothing available → respond canSend:false so the login page can
+ *      proceed WITHOUT the code instead of locking the user out.
  *
  * Request body:
  *   { userId: string }
@@ -44,25 +53,63 @@ export async function POST(req: NextRequest) {
       expiresAt,
     });
 
-    // Send email
     const emailData = verificationCodeEmail(user.name, code, 'log in to your account');
-    const result = await sendSystemEmail({
+
+    // 1) System email service (Resend / SYSTEM_SMTP_*)
+    let delivered = false;
+    let lastError: string | undefined;
+    const sysResult = await sendSystemEmail({
       to: user.email,
       subject: emailData.subject,
       text: emailData.text,
     });
+    if (sysResult.sent) delivered = true;
+    else lastError = sysResult.error;
 
-    if (!result.sent && !result.dev) {
+    // 2) Fall back to the SMTP the platform already uses for deal emails —
+    //    the user's own account first, then the company shared account.
+    if (!delivered) {
+      const candidates: (SmtpConfig | null)[] = [
+        (user.smtpConfig as SmtpConfig | null) ?? null,
+      ];
+      if (user.companyId) {
+        const [company] = await db.select().from(companies)
+          .where(eq(companies.id, user.companyId)).limit(1);
+        candidates.push((company?.smtpConfig as SmtpConfig | null) ?? null);
+      }
+      for (const smtp of candidates) {
+        if (!smtp || delivered) continue;
+        const r = await sendGenericEmail({
+          smtp,
+          toEmail: user.email,
+          ccEmails: [],
+          subject: emailData.subject,
+          bodyNotes: emailData.text,
+          structuredFields: [],
+          attachments: [],
+        });
+        if (r.success) delivered = true;
+        else lastError = r.error;
+      }
+    }
+
+    if (!delivered) {
+      // No transport can reach the user. Tell the client explicitly so it
+      // can let the login proceed WITHOUT the code — a security feature
+      // must never turn into a lockout because email isn't set up yet.
+      console.error('[2fa-send] no email transport available:', lastError);
       return NextResponse.json(
-        { error: `Failed to send verification code: ${result.error}` },
-        { status: 500 }
+        {
+          canSend: false,
+          error: 'No email service is configured to deliver the code.',
+        },
+        { status: 503 }
       );
     }
 
     return NextResponse.json({
       success: true,
-      devMode: result.dev,
-      message: 'Verification code sent to your email'
+      message: 'Verification code sent to your email',
     });
   } catch (err) {
     console.error('[2fa-send]', err);
