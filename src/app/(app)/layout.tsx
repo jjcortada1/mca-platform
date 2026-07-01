@@ -1,8 +1,27 @@
-import { pageRequireTenant } from '@/lib/auth/context';
+import type { Metadata } from 'next';
+import { pageRequireTenant, currentUser } from '@/lib/auth/context';
 import { AppShell } from '@/components/sidebar';
 import { getTenantBranding } from '@/lib/branding';
 import { FundingCelebration } from '@/components/funding-celebration';
 import { redirect } from 'next/navigation';
+
+/**
+ * Per-tenant browser-tab title. The root layout sets a generic (owner)
+ * title for the pre-login pages; inside the app we override it with the
+ * LOGGED-IN user's own company name, so a rep at "Acme Capital" sees
+ * "Acme Capital" in their tab — never the platform owner's brand.
+ * Next.js merges nested metadata, so this title wins over the root.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  try {
+    const user = await currentUser();
+    if (user?.companyId) {
+      const b = await getTenantBranding(user.companyId);
+      return { title: b.productName, applicationName: b.productName };
+    }
+  } catch { /* fall through to inherited title */ }
+  return {};
+}
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, companyId } = await pageRequireTenant();
