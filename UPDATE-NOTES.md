@@ -1,3 +1,26 @@
+# Update — July 2026 (round 6)
+
+## Global search
+- A **Search box** at the top of the sidebar (or press **⌘K / Ctrl-K**
+  anywhere) searches across deals, funders, people, and lead sources.
+  Results are scoped to what you're allowed to see, grouped by type, and
+  keyboard-navigable — Enter jumps straight to the item.
+
+## Teams
+- You already create teams + team leaders + reps under the **Tasks** tab
+  ("Teams" button, admin only).
+- **Team leaders now see their reps' deals and submissions** across
+  Active Deals and Submissions — but **not commissions** (each rep's pay
+  stays private to them and admins). Reassigning deals stays admin-only.
+
+---
+
+# Update — July 2026 (round 5)
+
+- Browser tab shows each company's own name after login.
+
+---
+
 # Update — July 2026 (round 4)
 
 ## Security (important)
