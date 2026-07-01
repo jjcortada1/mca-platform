@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Card, CardContent, Badge, PageHeader, Field, Input } from '@/components/ui/primitives';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { useToast } from '@/components/toast';
 import { US_STATES } from '@/lib/constants';
 import { Send, ChevronDown, ChevronRight, Mail, Phone, MapPin, Ban, FileText, Zap, Search, X, Paperclip } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -50,6 +51,7 @@ interface MatchOption {
 
 export default function DealShopPage() {
   const router = useRouter();
+  const toast = useToast();
   const searchParams = useSearchParams();
   // If the user came from /active-deals → "Shop this deal", we get a deal id
   // in the URL. Used to pull existing submissions for the deal so we can
@@ -435,11 +437,11 @@ export default function DealShopPage() {
     // At least one funder selected (directory or manual) is required.
     if (selectedFunders.size === 0 && manualFunders.length === 0) return;
     if (smtpConfigured === false) {
-      alert('Email is not configured yet. Set up SMTP first.');
+      toast.error('Email is not configured yet. Set up SMTP first.');
       return;
     }
     if (!dealName.trim() && !dealId) {
-      alert('Enter a deal name first.');
+      toast.error('Enter a deal name first.');
       return;
     }
     setSending(true);
@@ -474,7 +476,7 @@ export default function DealShopPage() {
       targets.push({ manualFunderName: m.name.trim() || trimmedEmail, toEmails: [trimmedEmail] });
     }
     if (targets.length === 0) {
-      alert('None of the selected funders have a submission email configured.');
+      toast.error('None of the selected funders have a submission email configured.');
       setSending(false);
       return;
     }
@@ -523,7 +525,7 @@ export default function DealShopPage() {
       // status. The success path is a streaming NDJSON body.
       if (!res.ok) {
         const json = await res.json().catch(() => ({ error: `Send failed (HTTP ${res.status}).` }));
-        alert(json.error || `Send failed (HTTP ${res.status}).`);
+        toast.error(json.error || `Send failed (HTTP ${res.status}).`);
         return;
       }
 
@@ -576,7 +578,7 @@ export default function DealShopPage() {
       const msg = (err as Error).name === 'AbortError'
         ? 'Send timed out after 5 minutes. The SMTP server may be slow or unreachable. Check Submissions to see what went out, then retry the rest.'
         : 'Network error: ' + (err as Error).message;
-      alert(msg);
+      toast.error(msg);
     } finally {
       clearTimeout(abortTimer);
       setSending(false);
@@ -1252,7 +1254,7 @@ export default function DealShopPage() {
                   type="button"
                   onClick={() => {
                     const email = manualEmail.trim();
-                    if (!email.includes('@')) { alert('Enter a valid email.'); return; }
+                    if (!email.includes('@')) { toast.error('Enter a valid email.'); return; }
                     setManualFunders([...manualFunders, { id: Math.random().toString(36).slice(2), name: manualName.trim(), email }]);
                     setManualName('');
                     setManualEmail('');

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, Button, Input, Field, Badge, PageHeader, CurrencyInput } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
+import { useConfirm } from '@/components/confirm-provider';
 import { formatCurrency } from '@/lib/utils';
 import { Search, Download } from 'lucide-react';
 import { exportCSV } from '@/lib/csv-export';
@@ -53,6 +54,7 @@ const fmtDate = (d: string | null) => formatCalendarDate(d);
 
 export default function AccountingPage() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [entries, setEntries] = useState<Entry[]>([]);
   const [deals, setDeals] = useState<DealOpt[]>([]);
   const [loading, setLoading] = useState(true);
@@ -172,7 +174,7 @@ export default function AccountingPage() {
   }, [entries, commissionPays]);
 
   async function remove(e: Entry) {
-    if (!confirm(`Delete ${e.entryType === 'received' ? 'received' : 'sent back'} entry of ${formatCurrency(Number(e.amount))}?`)) return;
+    if (!(await confirm({ title: `Delete this ${e.entryType === 'received' ? 'received' : 'sent back'} entry of ${formatCurrency(Number(e.amount))}?`, confirmLabel: 'Delete', destructive: true }))) return;
     const res = await fetch(`/api/accounting/${e.id}`, { method: 'DELETE' });
     if (!res.ok) { toast.error('Delete failed'); return; }
     toast.success('Removed.'); load();

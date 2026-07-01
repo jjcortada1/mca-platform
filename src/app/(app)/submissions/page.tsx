@@ -9,6 +9,8 @@ import {
 import { formatDate, cn } from '@/lib/utils';
 import { Download, Send, PlusCircle } from 'lucide-react';
 import { exportCSV } from '@/lib/csv-export';
+import { useToast } from '@/components/toast';
+import { useConfirm } from '@/components/confirm-provider';
 
 interface SubmissionFunder {
   id: string;
@@ -70,6 +72,8 @@ interface SubmissionRow {
 }
 
 export default function SubmissionsPage() {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [rows, setRows] = useState<SubmissionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -199,20 +203,20 @@ export default function SubmissionsPage() {
   }
 
   async function deleteSubmission(submissionId: string, dealName: string) {
-    if (!confirm(`Delete submission for "${dealName}"? This removes all funder rows for it. The deal itself is NOT deleted.`)) return;
+    if (!(await confirm({ title: `Delete submission for "${dealName}"?`, description: 'This removes all funder rows for it. The deal itself is NOT deleted.', confirmLabel: 'Delete', destructive: true }))) return;
     const res = await fetch(`/api/submissions/${submissionId}`, { method: 'DELETE' });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      alert(j.error || 'Delete failed.');
+      toast.error(j.error || 'Delete failed.');
       return;
     }
     load();
   }
 
   async function submitManual() {
-    if (!manualForm.dealId && !manualForm.dealName.trim()) { alert('Deal name is required.'); return; }
+    if (!manualForm.dealId && !manualForm.dealName.trim()) { toast.error('Deal name is required.'); return; }
     if (!manualForm.funderId && !manualForm.manualFunderName.trim()) {
-      alert('Pick a funder OR type a funder name.'); return;
+      toast.error('Pick a funder OR type a funder name.'); return;
     }
     setManualSaving(true);
     try {
@@ -233,7 +237,7 @@ export default function SubmissionsPage() {
         body: JSON.stringify(body),
       });
       const j = await res.json();
-      if (!res.ok) { alert(j.error || 'Failed.'); return; }
+      if (!res.ok) { toast.error(j.error || 'Failed.'); return; }
       setShowManualAdd(false);
       setManualForm({ dealName: '', dealId: '', funderId: '', manualFunderName: '', status: 'no_response', notes: '' });
       load();
@@ -303,7 +307,7 @@ export default function SubmissionsPage() {
   }
 
   async function removeFunder(sfId: string) {
-    if (!confirm('Remove this funder from the submission?')) return;
+    if (!(await confirm({ title: 'Remove this funder from the submission?', confirmLabel: 'Remove', destructive: true }))) return;
     await fetch(`/api/submission-funders/${sfId}`, { method: 'DELETE' });
     load();
   }

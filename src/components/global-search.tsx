@@ -94,10 +94,17 @@ export function GlobalSearch() {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-start justify-center p-4 pt-[12vh]" onClick={close}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-fade-in" />
+    <>
+      {/* Very light scrim — click to dismiss. Kept subtle so this reads as a
+          side panel, not a center modal. */}
+      <div className="fixed inset-0 z-[115] bg-foreground/10" onClick={close} />
+
+      {/* LEFT-DOCKED search panel. On desktop it sits flush to the right of
+          the sidebar (lg:left-60); on mobile it takes the full width. It
+          slides down from the top edge and stays on the side — never a
+          centered popup. */}
       <div
-        className="relative w-full max-w-xl bg-card rounded-xl border border-border [box-shadow:var(--shadow-xl)] animate-modal-in overflow-hidden"
+        className="fixed z-[120] top-0 left-0 right-0 lg:left-60 lg:right-auto lg:w-[420px] bg-card border-b lg:border-r border-border [box-shadow:var(--shadow-xl)] animate-fade-in flex flex-col max-h-[80vh]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 px-4 border-b border-border">
@@ -115,7 +122,7 @@ export function GlobalSearch() {
           </button>
         </div>
 
-        <div className="max-h-[50vh] overflow-y-auto">
+        <div className="overflow-y-auto">
           {q.trim().length < 2 ? (
             <div className="px-4 py-6 text-xs text-muted-foreground text-center">Type at least 2 characters to search.</div>
           ) : loading && results.length === 0 ? (
@@ -128,10 +135,10 @@ export function GlobalSearch() {
         </div>
 
         <div className="px-4 py-2 border-t border-border text-[10px] text-muted-foreground flex items-center gap-3">
-          <span>↑↓ to navigate</span><span>↵ to open</span><span>esc to close</span>
+          <span>↑↓ navigate</span><span>↵ open</span><span>esc close</span>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

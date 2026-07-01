@@ -6,12 +6,14 @@ import {
   Card, CardContent, Button, Input, Field, PageHeader,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
+import { useConfirm } from '@/components/confirm-provider';
 import { Plus, Trash2, ArrowLeft } from 'lucide-react';
 
 interface Contact { id: string; name: string; email: string; company: string | null; notes: string | null }
 
 export default function FundedContactsPage() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Partial<Contact> | null>(null);
@@ -42,7 +44,7 @@ export default function FundedContactsPage() {
   }
 
   async function remove(id: string) {
-    if (!confirm('Delete this contact?')) return;
+    if (!(await confirm({ title: 'Delete this contact?', confirmLabel: 'Delete', destructive: true }))) return;
     const res = await fetch('/api/funded-email/contacts', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, Button, Input, Field, Badge, Select, Textarea, MoneyInput } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
+import { useConfirm } from '@/components/confirm-provider';
 import { Plus, Trash2, X, Edit3 } from 'lucide-react';
 import { US_STATES, COMMON_INDUSTRIES, CREDIT_TIER_OPTIONS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
@@ -39,6 +40,7 @@ const EMPTY_FORM = {
 
 export default function MasterFundersPage() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [funders, setFunders] = useState<MasterFunder[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<MasterFunder | null>(null);
@@ -95,7 +97,7 @@ export default function MasterFundersPage() {
   }
 
   async function del(id: string) {
-    if (!confirm('Delete this default funder? Existing companies are unaffected.')) return;
+    if (!(await confirm({ title: 'Delete this default funder?', description: 'Existing companies are unaffected.', confirmLabel: 'Delete', destructive: true }))) return;
     const res = await fetch(`/api/master-funders/${id}`, { method: 'DELETE' });
     if (res.ok) toast.success('Deleted.');
     else toast.error('Delete failed.');

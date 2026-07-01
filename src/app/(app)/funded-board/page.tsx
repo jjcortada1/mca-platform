@@ -6,6 +6,7 @@ import {
   Button, Input, Field, PageHeader, EmptyState, MoneyInput,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
+import { useConfirm } from '@/components/confirm-provider';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import { Plus, X, Trash2, TrendingUp, Trophy, Download } from 'lucide-react';
 import { exportCSV } from '@/lib/csv-export';
@@ -27,6 +28,7 @@ type Range = 'mtd' | 'wtd' | 'all';
 
 export default function FundedBoardPage() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [entries, setEntries] = useState<FundedEntry[]>([]);
   const [reps, setReps] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,7 +88,7 @@ export default function FundedBoardPage() {
   }
 
   async function delEntry(id: string) {
-    if (!confirm('Delete this entry?')) return;
+    if (!(await confirm({ title: 'Delete this entry?', confirmLabel: 'Delete', destructive: true }))) return;
     const res = await fetch(`/api/funded-entries/${id}`, { method: 'DELETE' });
     if (res.ok) {
       toast.success('Entry deleted.');

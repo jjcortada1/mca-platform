@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, Button, Input, Field, Badge } from '@/components/ui/primitives';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { useConfirm } from '@/components/confirm-provider';
 import { Plus, Building2, SlidersHorizontal, Users as UsersIcon, Trash2, KeyRound } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { ALL_NAV_ITEMS } from '@/components/sidebar';
@@ -375,6 +376,7 @@ interface CompanyUserRow {
 }
 
 function CompanyUsersPanel({ companyId, companyName, onChanged }: { companyId: string; companyName: string; onChanged: () => void }) {
+  const confirmDialog = useConfirm();
   const [users, setUsers] = useState<CompanyUserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -422,7 +424,7 @@ function CompanyUsersPanel({ companyId, companyName, onChanged }: { companyId: s
   }
 
   async function deleteUser(u: CompanyUserRow) {
-    if (!confirm(`Remove ${u.name} from ${companyName}? This deletes their login.`)) return;
+    if (!(await confirmDialog({ title: `Remove ${u.name} from ${companyName}?`, description: 'This deletes their login.', confirmLabel: 'Remove', destructive: true }))) return;
     const res = await fetch(`/api/companies/${companyId}/users/${u.id}`, { method: 'DELETE' });
     if (!res.ok && res.status !== 204) { const d = await res.json().catch(() => ({})); setErr(d.error || 'Could not delete'); return; }
     load(); onChanged();

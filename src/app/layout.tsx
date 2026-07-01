@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { SessionProvider } from '@/components/session-provider';
 import { ToastProvider } from '@/components/toast';
+import { ConfirmProvider } from '@/components/confirm-provider';
 import { getPublicBranding } from '@/lib/branding';
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -101,7 +102,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           />
         )}
         <SessionProvider>
-          <ToastProvider>{children}</ToastProvider>
+          <ToastProvider>
+            <ConfirmProvider>{children}</ConfirmProvider>
+          </ToastProvider>
         </SessionProvider>
       </body>
     </html>

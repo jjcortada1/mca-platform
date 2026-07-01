@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { GlobalSearch } from '@/components/global-search';
+import { BrandMark } from '@/components/brand-mark';
 import { resolveIcon } from '@/lib/sidebar-icons';
 import type { SessionUser } from '@/lib/auth/context';
 import type { Branding } from '@/lib/branding';
@@ -201,10 +202,11 @@ export function AppShell({
           className="absolute inset-0 bg-foreground/40 backdrop-blur-sm"
           onClick={() => setOpen(false)}
         />
-        {/* Drawer */}
+        {/* Drawer — SOLID background (was translucent bg-muted/30, which made
+            the menu hard to read over page content on mobile). */}
         <div
           className={cn(
-            'absolute inset-y-0 left-0 w-[280px] max-w-[85vw] bg-muted/30 border-r border-border flex flex-col transition-transform duration-200 shadow-xl',
+            'absolute inset-y-0 left-0 w-[280px] max-w-[85vw] bg-card border-r border-border flex flex-col transition-transform duration-200 shadow-2xl',
             open ? 'translate-x-0' : '-translate-x-full'
           )}
         >
@@ -255,18 +257,7 @@ function MobileTopBar({
           <Menu className="h-5 w-5" />
         </button>
         <Link href="/dashboard" className="flex items-center gap-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={branding.logoUrl || '/brand/cortada-icon.png'}
-            alt={branding.displayName}
-            className="h-8 w-8 rounded-md object-contain bg-card border border-border p-0.5"
-            onError={(e) => {
-              const el = e.currentTarget;
-              if (!el.src.endsWith('/brand/cortada-icon.png')) {
-                el.src = '/brand/cortada-icon.png';
-              }
-            }}
-          />
+          <BrandMark logoUrl={branding.logoUrl} name={branding.productName || branding.displayName} size={32} rounded="md" />
           <div className="text-sm font-semibold tracking-tight truncate max-w-[140px]">
             {branding.productName}
           </div>
@@ -413,18 +404,7 @@ function SidebarBody({
           onClick={onNavigate}
           className="flex items-center gap-2.5 min-w-0 flex-1 hover:opacity-80 transition-opacity"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={branding.logoUrl || '/brand/cortada-icon.png'}
-            alt={branding.displayName}
-            className="h-9 w-9 rounded-lg object-contain bg-card border border-border p-1 shadow-[0_1px_2px_0_hsl(222_47%_11%/0.04)] shrink-0"
-            onError={(e) => {
-              const el = e.currentTarget;
-              if (!el.src.endsWith('/brand/cortada-icon.png')) {
-                el.src = '/brand/cortada-icon.png';
-              }
-            }}
-          />
+          <BrandMark logoUrl={branding.logoUrl} name={branding.productName || branding.displayName} size={36} rounded="lg" />
           <div className="min-w-0">
             <div className="text-sm font-semibold tracking-tight truncate leading-tight">{branding.productName}</div>
             <div className="text-[10.5px] text-muted-foreground truncate mt-0.5">{branding.displayName}</div>
