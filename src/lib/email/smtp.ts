@@ -484,7 +484,12 @@ export interface BatchSendResult {
 
 export async function sendDealEmailBatch(
   base: Omit<SendDealEmailInput, 'toEmail'>,
-  recipients: BatchRecipient[]
+  recipients: BatchRecipient[],
+  /**
+   * Fired after each recipient finishes (success or failure) with the running
+   * count — powers the live 0→100% progress bar on the send screen.
+   */
+  onProgress?: (result: BatchSendResult, done: number, total: number) => void
 ): Promise<BatchSendResult[]> {
   // One pooled transport for the whole batch.
   const password = decrypt(base.smtp.encryptedPass);
@@ -494,7 +499,10 @@ export async function sendDealEmailBatch(
     secure: base.smtp.secure ?? base.smtp.port === 465,
     auth: { user: base.smtp.user, pass: password },
     pool: true,
-    maxConnections: 1, // serialize — gentle on provider limits, predictable on Replit
+    // 3 parallel connections: ~3× faster on multi-funder sends while staying
+    // well under Gmail/Workspace connection limits. Messages on each
+    // connection are still serialized by nodemailer.
+    maxConnections: 3,
     maxMessages: Infinity,
     // EXPLICIT TIMEOUTS — nodemailer's defaults are minutes-long, which
     // means a misconfigured / unreachable SMTP server hangs the entire
@@ -511,6 +519,28 @@ export async function sendDealEmailBatch(
   });
 
   const out: BatchSendResult[] = [];
+  const total = recipients.length;
+  let done = 0;
+  const report = (res: BatchSendResult) => {
+    out.push(res);
+    done += 1;
+    try { onProgress?.(res, done, total); } catch { /* progress is best-effort */ }
+  };
+
+  // Build every message first (validation + body assembly), then fire the
+  // valid ones CONCURRENTLY — the pooled transport caps actual parallelism
+  // at maxConnections while nodemailer queues the rest. Each completion
+  // reports progress immediately, in completion order.
+  type Job = {
+    r: BatchRecipient;
+    addresses: string[];
+    ccEmails: string[];
+    subjectForSend: string;
+    text: string;
+    html: string | undefined;
+    inlineAttachments: { filename: string; content: Buffer; contentType?: string; cid: string }[];
+  };
+  const jobs: Job[] = [];
   try {
     for (const r of recipients) {
       // Normalize the recipient: accept the new toEmails array OR the legacy
@@ -529,11 +559,11 @@ export async function sendDealEmailBatch(
         if (!addresses.find((x) => x.toLowerCase() === v.toLowerCase())) addresses.push(v);
       }
       if (badAddress) {
-        out.push({ ref: r.ref, toEmails: rawList, toEmail: rawList[0] ?? '', success: false, error: badAddress });
+        report({ ref: r.ref, toEmails: rawList, toEmail: rawList[0] ?? '', success: false, error: badAddress });
         continue;
       }
       if (addresses.length === 0) {
-        out.push({ ref: r.ref, toEmails: [], toEmail: '', success: false, error: 'No recipient email provided' });
+        report({ ref: r.ref, toEmails: [], toEmail: '', success: false, error: 'No recipient email provided' });
         continue;
       }
 
@@ -586,25 +616,30 @@ export async function sendDealEmailBatch(
         html = buildHtmlBody(base.bodyNotes, base.structuredFields, sig, logoCid);
       }
 
+      jobs.push({ r, addresses, ccEmails, subjectForSend, text, html, inlineAttachments });
+    }
+
+    // Fire all valid sends; the pool throttles to maxConnections at a time.
+    await Promise.all(jobs.map(async (j) => {
       try {
         const info = await transporter.sendMail({
           from: base.smtp.from,
           // All of this funder's addresses ride on one message. nodemailer
           // accepts an array of strings here and writes them comma-joined
           // into the To: header.
-          to: addresses,
-          cc: ccEmails.length ? ccEmails : undefined,
+          to: j.addresses,
+          cc: j.ccEmails.length ? j.ccEmails : undefined,
           replyTo: base.replyTo,
-          subject: subjectForSend,
-          text,
-          html,
+          subject: j.subjectForSend,
+          text: j.text,
+          html: j.html,
           attachments: [
             ...base.attachments.map((a) => ({
               filename: a.filename,
               content: a.content,
               contentType: a.contentType,
             })),
-            ...inlineAttachments.map((a) => ({
+            ...j.inlineAttachments.map((a) => ({
               filename: a.filename,
               content: a.content,
               contentType: a.contentType,
@@ -616,11 +651,11 @@ export async function sendDealEmailBatch(
           inReplyTo: undefined,
           references: undefined,
         });
-        out.push({ ref: r.ref, toEmails: addresses, toEmail: addresses[0], success: true, messageId: info.messageId, response: info.response });
+        report({ ref: j.r.ref, toEmails: j.addresses, toEmail: j.addresses[0], success: true, messageId: info.messageId, response: info.response });
       } catch (err) {
-        out.push({ ref: r.ref, toEmails: addresses, toEmail: addresses[0], success: false, error: err instanceof Error ? err.message : String(err) });
+        report({ ref: j.r.ref, toEmails: j.addresses, toEmail: j.addresses[0], success: false, error: err instanceof Error ? err.message : String(err) });
       }
-    }
+    }));
   } finally {
     transporter.close();
   }

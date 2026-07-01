@@ -9,6 +9,8 @@ import { handle, ok, notFound } from '@/lib/api/response';
 const patchSchema = z.object({
   name: z.string().min(2).max(200).optional(),
   isActive: z.boolean().optional(),
+  // Feature access: list of nav hrefs this company may use. null = all.
+  enabledNavItems: z.array(z.string().max(100)).max(100).nullable().optional(),
 });
 
 export const GET = handle(async (_req: NextRequest, { params }: { params: { id: string } }) => {
@@ -20,6 +22,7 @@ export const GET = handle(async (_req: NextRequest, { params }: { params: { id: 
   return ok({
     id: c.id, name: c.name, slug: c.slug, isActive: c.isActive, emailMode: c.emailMode,
     createdAt: c.createdAt, userCount: u?.c ?? 0, funderCount: f?.c ?? 0,
+    enabledNavItems: (c.enabledNavItems as string[] | null) ?? null,
   });
 });
 

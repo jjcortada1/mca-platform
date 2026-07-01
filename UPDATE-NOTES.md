@@ -1,3 +1,50 @@
+# Update — July 2026 (round 3)
+
+## Sending
+- **Live progress bar** — sending a deal now shows a 0→100% bar with
+  "Sending 4 of 12" and the funder each email just went to.
+- **~3× faster sends** — emails go out over 3 parallel connections
+  instead of one at a time.
+- **Re-shopping auto-CCs the rep** — shopping a deal to more funders
+  when it's assigned to a rep and was already submitted once pre-checks
+  the rep CC (still un-tickable).
+- **"Clear all"** on Shop & Submit wipes the entire form — criteria,
+  notes, intake, selections, attachments, and the saved draft.
+- The post-send "stay here / view Submissions" prompt is still there
+  after every fully-successful send.
+
+## Security & accounts
+- **2FA is now ON for every account automatically** (one-time switch —
+  anyone can still turn theirs off in My Account). Safe because login
+  proceeds without the code when no email service can deliver one.
+- Password model confirmed: users change their own password in
+  My Account (this replaces whatever they were given); you can always
+  override it from Settings → user editor → "New password" if someone
+  is locked out.
+
+## Signature
+- Logo upload removed — paste your signature with its logo straight
+  from Gmail into the one editor. (A previously-uploaded logo still
+  shows with a Remove button.)
+- **"Send me a test email"** button — emails you a sample so you can
+  verify exactly how your signature looks in a real inbox.
+
+## Tasks
+- **Assignment notifications** — brokers see a red badge with the count
+  of their open tasks on the Tasks tab in the sidebar (refreshes every
+  minute).
+
+## Companies
+- **Per-company feature access** — on the Companies page, each company
+  row has an "Access" button: check/uncheck which features (tabs) that
+  company can use. Unchecked tabs vanish for all their users.
+- **New companies inherit your deal-profile options** — credit ranges,
+  revenue ranges, industries, positions, and deal types copy from your
+  setup (or from the company whose funder list you copy), so their
+  dropdowns work day one.
+
+---
+
 # Update — July 2026 (round 2)
 
 ## Fixed in this round

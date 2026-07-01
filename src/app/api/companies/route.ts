@@ -4,7 +4,7 @@ import { db } from '@/lib/db/client';
 import {
   companies, users, funderTiers, funders, funderTierAssignments,
   funderContacts, funderRestrictedStates, funderRestrictedIndustries,
-  commissionRules, structuredEmailFields, masterDefaultFunders,
+  commissionRules, structuredEmailFields, masterDefaultFunders, matchOptions,
 } from '@/lib/db/schema';
 import { eq, count } from 'drizzle-orm';
 import { requireMasterAdmin } from '@/lib/auth/context';
@@ -28,6 +28,8 @@ export const GET = handle(async () => {
         id: c.id, name: c.name, slug: c.slug,
         emailMode: c.emailMode, isActive: c.isActive, createdAt: c.createdAt,
         userCount: u?.c ?? 0, funderCount: f?.c ?? 0,
+        isPlatformOwner: c.isPlatformOwner,
+        enabledNavItems: (c.enabledNavItems as string[] | null) ?? null,
       };
     })
   );
@@ -85,6 +87,17 @@ export const POST = handle(async (req: NextRequest) => {
     { companyId: company.id, fieldLabel: 'Daily/Weekly', fieldKey: 'daily_weekly', sortOrder: 1 },
     { companyId: company.id, fieldLabel: 'Asking', fieldKey: 'asking', sortOrder: 2 },
   ]);
+
+  // Match options (credit ranges, revenue ranges, industries, positions,
+  // deal types) power the Shop & Submit deal-profile dropdowns. New
+  // companies inherit them so their reps aren't staring at empty dropdowns:
+  // from the copy-source company when copying funders, otherwise from the
+  // platform-owner company's configured set.
+  const optionsSource = (parsed.funderSeedMode === 'copy' && parsed.copyFromCompanyId)
+    ? parsed.copyFromCompanyId
+    : (await db.select({ id: companies.id }).from(companies)
+        .where(eq(companies.isPlatformOwner, true)).limit(1))[0]?.id ?? null;
+  if (optionsSource) await cloneMatchOptions(optionsSource, company.id);
 
   // Seed the funder directory per the chosen mode:
   //   'none'   → leave empty, they bring their own list
@@ -171,6 +184,25 @@ export const POST = handle(async (req: NextRequest) => {
 
   return created({ id: company.id, slug: company.slug });
 });
+
+/**
+ * Copy a company's match options (deal-profile dropdown values) into a new
+ * company so shopping works out of the box. Independent copy — edits in
+ * either company never affect the other.
+ */
+async function cloneMatchOptions(fromCompanyId: string, toCompanyId: string) {
+  const rows = await db.select().from(matchOptions).where(eq(matchOptions.companyId, fromCompanyId));
+  if (!rows.length) return;
+  await db.insert(matchOptions).values(rows.map((r) => ({
+    companyId: toCompanyId,
+    kind: r.kind,
+    value: r.value,
+    label: r.label,
+    sortOrder: r.sortOrder,
+    isActive: r.isActive,
+    meta: r.meta,
+  })));
+}
 
 /**
  * Clone one company's ENTIRE live funder directory into another company:

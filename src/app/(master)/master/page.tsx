@@ -1,12 +1,15 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Card, CardContent, Button, Input, Field, Badge } from '@/components/ui/primitives';
-import { Plus, Building2 } from 'lucide-react';
+import { Plus, Building2, SlidersHorizontal } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
+import { ALL_NAV_ITEMS } from '@/components/sidebar';
 
 interface Company {
   id: string; name: string; slug: string; emailMode: string;
   isActive: boolean; createdAt: string; userCount: number; funderCount: number;
+  isPlatformOwner?: boolean;
+  enabledNavItems?: string[] | null;
 }
 
 export default function MasterCompaniesPage() {
@@ -70,6 +73,35 @@ export default function MasterCompaniesPage() {
       method: 'PATCH', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ isActive: !c.isActive }),
     });
+    load();
+  }
+
+  // ---- Per-company feature access editor ----
+  // Which company's access panel is open, and its working checkbox state.
+  const [accessOpenId, setAccessOpenId] = useState<string | null>(null);
+  const [accessItems, setAccessItems] = useState<Set<string>>(new Set());
+  const [accessSaving, setAccessSaving] = useState(false);
+
+  function openAccess(c: Company) {
+    if (accessOpenId === c.id) { setAccessOpenId(null); return; }
+    // null = everything enabled → start with all boxes checked.
+    const current = c.enabledNavItems ?? ALL_NAV_ITEMS.map((i) => i.href);
+    setAccessItems(new Set(current));
+    setAccessOpenId(c.id);
+  }
+
+  async function saveAccess(c: Company) {
+    setAccessSaving(true);
+    // Everything checked → store null ("all features") so future app
+    // releases with new tabs show up without re-editing each company.
+    const allChecked = ALL_NAV_ITEMS.every((i) => accessItems.has(i.href));
+    const res = await fetch(`/api/companies/${c.id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabledNavItems: allChecked ? null : Array.from(accessItems) }),
+    });
+    setAccessSaving(false);
+    if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.error || 'Could not save access'); return; }
+    setAccessOpenId(null);
     load();
   }
 
@@ -174,20 +206,72 @@ export default function MasterCompaniesPage() {
               </thead>
               <tbody>
                 {companies.map((c) => (
-                  <tr key={c.id} className="border-t border-border hover:bg-muted/40">
-                    <td className="p-3 font-medium">{c.name}</td>
-                    <td className="p-3 text-muted-foreground tabular-nums">{c.slug}</td>
-                    <td className="p-3">{c.emailMode === 'shared' ? 'Shared' : 'Per-rep'}</td>
-                    <td className="p-3 tabular-nums">{c.userCount}</td>
-                    <td className="p-3 tabular-nums">{c.funderCount}</td>
-                    <td className="p-3">{c.isActive ? <Badge variant="success">Active</Badge> : <Badge variant="default">Suspended</Badge>}</td>
-                    <td className="p-3 text-muted-foreground">{formatDate(c.createdAt)}</td>
-                    <td className="p-3 text-right">
-                      <button onClick={() => toggleActive(c)} className="text-xs text-muted-foreground hover:text-foreground">
-                        {c.isActive ? 'Suspend' : 'Activate'}
-                      </button>
-                    </td>
-                  </tr>
+                  <>
+                    <tr key={c.id} className="border-t border-border hover:bg-muted/40">
+                      <td className="p-3 font-medium">
+                        {c.name}
+                        {c.isPlatformOwner && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 border border-violet-200 font-medium">Owner</span>}
+                      </td>
+                      <td className="p-3 text-muted-foreground tabular-nums">{c.slug}</td>
+                      <td className="p-3">{c.emailMode === 'shared' ? 'Shared' : 'Per-rep'}</td>
+                      <td className="p-3 tabular-nums">{c.userCount}</td>
+                      <td className="p-3 tabular-nums">{c.funderCount}</td>
+                      <td className="p-3">{c.isActive ? <Badge variant="success">Active</Badge> : <Badge variant="default">Suspended</Badge>}</td>
+                      <td className="p-3 text-muted-foreground">{formatDate(c.createdAt)}</td>
+                      <td className="p-3 text-right whitespace-nowrap">
+                        {!c.isPlatformOwner && (
+                          <button
+                            onClick={() => openAccess(c)}
+                            className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 mr-3"
+                            title="Choose which features this company can use"
+                          >
+                            <SlidersHorizontal className="h-3 w-3" /> Access
+                          </button>
+                        )}
+                        <button onClick={() => toggleActive(c)} className="text-xs text-muted-foreground hover:text-foreground">
+                          {c.isActive ? 'Suspend' : 'Activate'}
+                        </button>
+                      </td>
+                    </tr>
+                    {accessOpenId === c.id && (
+                      <tr className="border-t border-border bg-muted/20">
+                        <td colSpan={8} className="p-4">
+                          <div className="space-y-3 max-w-2xl">
+                            <div className="text-sm font-medium">Feature access for {c.name}</div>
+                            <p className="text-xs text-muted-foreground">
+                              Unchecked features disappear from this company&apos;s sidebar for every one of their
+                              users. Their admin still controls per-user permissions within what you allow here.
+                            </p>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                              {ALL_NAV_ITEMS.map((item) => (
+                                <label key={item.href} className="flex items-center gap-2 text-sm cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={accessItems.has(item.href)}
+                                    onChange={(e) => {
+                                      setAccessItems((prev) => {
+                                        const next = new Set(prev);
+                                        if (e.target.checked) next.add(item.href); else next.delete(item.href);
+                                        return next;
+                                      });
+                                    }}
+                                    className="h-3.5 w-3.5 rounded"
+                                  />
+                                  <span>{item.label}</span>
+                                </label>
+                              ))}
+                            </div>
+                            <div className="flex gap-2">
+                              <Button size="sm" onClick={() => saveAccess(c)} disabled={accessSaving}>
+                                {accessSaving ? 'Saving…' : 'Save access'}
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => setAccessOpenId(null)}>Cancel</Button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 ))}
               </tbody>
             </table>

@@ -104,6 +104,35 @@ const STATEMENTS: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS tasks_company_idx ON tasks (company_id)`,
   `CREATE INDEX IF NOT EXISTS tasks_assignee_idx ON tasks (assigned_to_user_id)`,
+
+  // ---- app_flags: one-time migration markers (guards backfills that must
+  //      run exactly once, unlike the idempotent statements above) ----
+  `CREATE TABLE IF NOT EXISTS app_flags (
+    key varchar(64) PRIMARY KEY,
+    value text,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+
+  // 2FA is on by default for every NEW account (login fails open when no
+  // email transport exists, so this can't lock anyone out).
+  `ALTER TABLE users ALTER COLUMN two_factor_enabled SET DEFAULT true`,
+
+  // ---- companies: per-tenant feature access (null = everything) ----
+  `ALTER TABLE companies ADD COLUMN IF NOT EXISTS enabled_nav_items jsonb`,
+];
+
+/**
+ * One-time backfills — each runs exactly once, tracked in app_flags.
+ * Unlike STATEMENTS these change DATA, so re-running them would stomp on
+ * choices users made since (e.g. someone who turned 2FA back off).
+ */
+const ONE_TIME_BACKFILLS: { flag: string; sql: string }[] = [
+  {
+    // Enable email-code 2FA for every existing account (2026-07 policy).
+    // Users can still turn it off per-account afterwards; this only runs once.
+    flag: 'two_factor_enable_all_v1',
+    sql: `UPDATE users SET two_factor_enabled = true`,
+  },
 ];
 
 /**
@@ -123,6 +152,19 @@ export function ensureSchema(): Promise<void> {
       } catch (err) {
         console.error('[db-bootstrap] statement failed (continuing):',
           stmt.slice(0, 80).replace(/\s+/g, ' '),
+          err instanceof Error ? err.message : err);
+      }
+    }
+    for (const b of ONE_TIME_BACKFILLS) {
+      try {
+        const rows = await sql`SELECT 1 FROM app_flags WHERE key = ${b.flag} LIMIT 1`;
+        if (rows.length === 0) {
+          await sql.unsafe(b.sql);
+          await sql`INSERT INTO app_flags (key, value) VALUES (${b.flag}, 'done') ON CONFLICT (key) DO NOTHING`;
+          console.log(`[db-bootstrap] backfill applied: ${b.flag}`);
+        }
+      } catch (err) {
+        console.error('[db-bootstrap] backfill failed (continuing):', b.flag,
           err instanceof Error ? err.message : err);
       }
     }

@@ -239,6 +239,9 @@ export default function DealShopPage() {
   // can release the mouse to drop.
   const [dragActive, setDragActive] = useState(false);
   const [sending, setSending] = useState(false);
+  // Live send progress — fed by the server's streaming response so the
+  // user watches the batch go 0→100% funder by funder.
+  const [sendProgress, setSendProgress] = useState<{ done: number; total: number; current?: string } | null>(null);
   const [sendResults, setSendResults] = useState<{ funderName: string; toEmails: string[]; success: boolean; message: string }[] | null>(null);
   const [smtpConfigured, setSmtpConfigured] = useState<boolean | null>(null);
   const [fromEmail, setFromEmail] = useState<string | null>(null);
@@ -302,6 +305,13 @@ export default function DealShopPage() {
   // Default OFF so the rep isn't forced onto every send — keeps the prompt's
   // "give option to cc them, don't force cc them" behavior.
   const [ccAssignedRep, setCcAssignedRep] = useState(false);
+
+  // RE-SHOPPING a deal that already went out and has an assigned rep →
+  // default the rep CC to ON, matching how the first submission went. The
+  // user can still untick it before sending.
+  useEffect(() => {
+    if (dealId && assignedRepId && alreadySubmitted.size > 0) setCcAssignedRep(true);
+  }, [dealId, assignedRepId, alreadySubmitted]);
   // Computed CC list: rep's email (if rep selected AND ccAssignedRep is on)
   // + manual entries, deduped.
   const ccList = useMemo(() => {
@@ -497,32 +507,54 @@ export default function DealShopPage() {
       fd.append(`attachment_${i}`, attachments[i]);
     }
 
+    // Generous abort (5 min) as a safety net only — the streaming progress
+    // events keep the user informed the whole time, and big batches with
+    // attachments legitimately take a while.
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), 300_000);
     try {
-      // 90-second client-side abort so the user isn't stuck staring at
-      // "Sending…" if the server hangs or the network drops. The route's
-      // own maxDuration is 60s; this gives a small buffer above that so
-      // server-level errors come through before we abort.
-      const controller = new AbortController();
-      const abortTimer = setTimeout(() => controller.abort(), 90_000);
+      const res = await fetch('/api/submissions/send', {
+        method: 'POST',
+        body: fd,
+        signal: controller.signal,
+      });
 
-      let res: Response;
-      try {
-        res = await fetch('/api/submissions/send', {
-          method: 'POST',
-          body: fd,
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(abortTimer);
-      }
-
-      const json = await res.json().catch(() => ({ error: 'Server returned an invalid response.' }));
+      // Pre-send validation errors come back as plain JSON with an error
+      // status. The success path is a streaming NDJSON body.
       if (!res.ok) {
+        const json = await res.json().catch(() => ({ error: `Send failed (HTTP ${res.status}).` }));
         alert(json.error || `Send failed (HTTP ${res.status}).`);
-        setSending(false);
         return;
       }
-      const rs = (json.results ?? []).map((r: { funderName?: string; toEmails?: string[]; toEmail?: string; success: boolean; error?: string }) => ({
+
+      // Read the progress stream: one JSON object per line.
+      //   start → arm the bar; progress → advance it; done → final results.
+      let final: { submissionId?: string; results?: unknown[] } | null = null;
+      const reader = res.body?.getReader();
+      if (reader) {
+        const decoder = new TextDecoder();
+        let buf = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let nl;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!line) continue;
+            let ev: any;
+            try { ev = JSON.parse(line); } catch { continue; }
+            if (ev.type === 'start') setSendProgress({ done: 0, total: ev.total });
+            else if (ev.type === 'progress') setSendProgress({ done: ev.done, total: ev.total, current: ev.funderName });
+            else if (ev.type === 'done') final = ev;
+            else if (ev.type === 'error') throw new Error(ev.error || 'Send failed.');
+          }
+        }
+      }
+      if (!final) throw new Error('The send was interrupted before finishing. Check Submissions to see what went out.');
+
+      const rs = (final.results ?? []).map((r: any) => ({
         funderName: r.funderName ?? (Array.isArray(r.toEmails) ? r.toEmails.join(', ') : r.toEmail ?? ''),
         toEmails: r.toEmails ?? (r.toEmail ? [r.toEmail] : []),
         success: r.success,
@@ -540,13 +572,15 @@ export default function DealShopPage() {
         setShowPostSendConfirm(true);
       }
     } catch (err) {
-      // AbortError = our 90s timeout. Anything else = network / fetch issue.
+      // AbortError = our 5-minute safety timeout. Anything else = network issue.
       const msg = (err as Error).name === 'AbortError'
-        ? 'Send timed out after 90 seconds. The SMTP server may be slow or unreachable. Check your SMTP settings and try again.'
+        ? 'Send timed out after 5 minutes. The SMTP server may be slow or unreachable. Check Submissions to see what went out, then retry the rest.'
         : 'Network error: ' + (err as Error).message;
       alert(msg);
     } finally {
+      clearTimeout(abortTimer);
       setSending(false);
+      setSendProgress(null);
     }
   }
 
@@ -796,6 +830,9 @@ export default function DealShopPage() {
     setExpanded(next);
   }
 
+  /** Clear EVERYTHING on the page — match criteria, deal name, notes,
+   *  intake, funder selections, manual funders, CCs, attachments — and
+   *  wipe the saved draft so nothing comes back on refresh. */
   function clearForm() {
     setRevenueOption('');
     setCreditOption('unknown');
@@ -805,6 +842,24 @@ export default function DealShopPage() {
     setDealType('standard_mca');
     setResults(null);
     setError(null);
+    if (!dealNameLocked) setDealName('');
+    setNotes('');
+    setOpenBalances([]);
+    setPriorHistoryMode('unset');
+    setPriorHistoryDetails('');
+    setRecentFundings([]);
+    setIntakeOpen(false);
+    setSelectedFunders(new Set());
+    setExpanded(new Set());
+    setManualFunders([]);
+    setManualName('');
+    setManualEmail('');
+    setExtraCc([]);
+    setCcInput('');
+    setCcAssignedRep(false);
+    setAttachments([]);
+    setSendResults(null);
+    try { localStorage.removeItem(draftKey); } catch { /* best-effort */ }
   }
 
   return (
@@ -907,7 +962,9 @@ export default function DealShopPage() {
             )}
 
             <div className="flex items-center justify-between pt-1">
-              <Button variant="ghost" size="sm" onClick={clearForm} type="button">Clear</Button>
+              <Button variant="ghost" size="sm" onClick={clearForm} type="button" title="Clears the whole page — criteria, notes, intake, selections, attachments">
+                Clear all
+              </Button>
               {loading && <span className="text-[11px] text-muted-foreground italic">Matching…</span>}
             </div>
           </CardContent>
@@ -1214,11 +1271,31 @@ export default function DealShopPage() {
             >
               <Send className="h-4 w-4 mr-2" />
               {sending
-                ? 'Sending…'
+                ? (sendProgress ? `Sending ${sendProgress.done} of ${sendProgress.total}…` : 'Sending…')
                 : (selectedFunders.size === 0 && manualFunders.length === 0)
                   ? 'Pick funders →'
                   : `Send to ${selectedFunders.size + manualFunders.length} funder${(selectedFunders.size + manualFunders.length) === 1 ? '' : 's'}`}
             </Button>
+
+            {/* Live 0→100% progress while the batch goes out, funder by funder */}
+            {sending && sendProgress && (
+              <div className="space-y-1.5">
+                <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all duration-300"
+                    style={{ width: `${sendProgress.total ? Math.round((sendProgress.done / sendProgress.total) * 100) : 0}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span className="truncate">
+                    {sendProgress.current ? `Sent to ${sendProgress.current}` : 'Connecting to your email account…'}
+                  </span>
+                  <span className="tabular-nums font-medium shrink-0">
+                    {sendProgress.total ? Math.round((sendProgress.done / sendProgress.total) * 100) : 0}%
+                  </span>
+                </div>
+              </div>
+            )}
 
             {sendResults && (
               <div className="space-y-1 pt-2 border-t border-border">

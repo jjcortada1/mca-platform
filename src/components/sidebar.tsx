@@ -318,12 +318,39 @@ function SidebarBody({
       .catch(() => {});
   }, [user.role]);
 
+  // Open tasks assigned to me — drives the red badge on the Tasks nav item
+  // so a broker sees at a glance that something was assigned to them.
+  // Polled every 60s; cheap endpoint, no push infra needed.
+  const [myOpenTasks, setMyOpenTasks] = useState(0);
+  useEffect(() => {
+    if (user.role === 'lead_source') return;
+    let cancelled = false;
+    const check = () => {
+      fetch('/api/tasks', { cache: 'no-store' })
+        .then((r) => r.ok ? r.json() : null)
+        .then((j) => {
+          if (cancelled || !j) return;
+          const meId = j.me?.id;
+          const count = (j.data ?? []).filter((t: { status: string; assignedToUserId: string | null }) =>
+            t.status !== 'completed' && (t.assignedToUserId === meId || t.assignedToUserId === null)
+          ).length;
+          setMyOpenTasks(count);
+        })
+        .catch(() => {});
+    };
+    check();
+    const iv = setInterval(check, 60_000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [user.role]);
+
   // Saved config from the company. Categories take precedence over the
   // flat order. Both null = default categories (Workflow/Commissions/Resources).
   const [savedOrder, setSavedOrder] = useState<string[] | null>(null);
   const [savedCategories, setSavedCategories] = useState<{ id: string; label: string; items: string[] }[] | null>(null);
   // Per-item overrides (label rename + icon swap). Map keyed by href.
   const [itemOverrides, setItemOverrides] = useState<Record<string, { label?: string; icon?: string }> | null>(null);
+  // Feature access set by the platform owner for this company. null = all.
+  const [enabledNavItems, setEnabledNavItems] = useState<string[] | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetch('/api/settings/sidebar-order', { cache: 'no-store' })
@@ -333,9 +360,11 @@ function SidebarBody({
         const o = j?.data?.order;
         const c = j?.data?.categories;
         const ov = j?.data?.itemOverrides;
+        const en = j?.data?.enabledNavItems;
         if (Array.isArray(o)) setSavedOrder(o);
         if (Array.isArray(c)) setSavedCategories(c);
         if (ov && typeof ov === 'object') setItemOverrides(ov);
+        if (Array.isArray(en)) setEnabledNavItems(en);
       })
       .catch(() => { /* fall through to default order */ });
     return () => { cancelled = true; };
@@ -363,7 +392,11 @@ function SidebarBody({
     itemsWithOverrides,
     savedCategories,
     savedOrder,
-    (item) => isAdmin || user.permissions.includes(item.perm),
+    // Visible when: the user has the permission (admins pass everything)
+    // AND the feature is enabled for this company (platform-owner control).
+    (item) =>
+      (isAdmin || user.permissions.includes(item.perm)) &&
+      (enabledNavItems === null || enabledNavItems.includes(item.href)),
   );
 
   return (
@@ -427,6 +460,11 @@ function SidebarBody({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     <span>{item.label}</span>
+                    {item.href === '/tasks' && myOpenTasks > 0 && (
+                      <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold leading-none">
+                        {myOpenTasks > 99 ? '99+' : myOpenTasks}
+                      </span>
+                    )}
                   </Link>
                 );
               })}

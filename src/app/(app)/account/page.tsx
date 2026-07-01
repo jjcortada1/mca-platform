@@ -19,7 +19,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Card, CardHeader, CardTitle, CardContent, CardDescription,
-  Button, Input, Textarea, Field, PageHeader,
+  Button, Input, Field, PageHeader,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { Mail, KeyRound, ShieldCheck, Shield, PenLine } from 'lucide-react';
@@ -441,7 +441,7 @@ function SignatureCard() {
   const [savedLink, setSavedLink] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [testing, setTesting] = useState(false);
   // Rich editor surface. contentEditable keeps whatever the user pastes —
   // fonts, colors, images, layout — exactly as Gmail renders it. What you
   // see in the box is what recipients get.
@@ -493,23 +493,18 @@ function SignatureCard() {
       .finally(() => setLoading(false));
   }, []);
 
-  function onLogoFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    e.target.value = '';
-    if (!f) return;
-    // Reject SVG explicitly even though the OS file picker may show it.
-    if (!/^image\/(png|jpe?g|webp|gif)$/.test(f.type)) {
-      toast.error('Use PNG, JPG, WebP, or GIF (no SVG).');
+  /** Email yourself a sample message so you can verify exactly how the
+   *  saved signature renders in a real inbox. */
+  async function sendTest() {
+    setTesting(true);
+    const res = await fetch('/api/account/signature/test', { method: 'POST' });
+    const j = await res.json().catch(() => ({}));
+    setTesting(false);
+    if (!res.ok) {
+      toast.error(j.error || 'Could not send the test email.');
       return;
     }
-    if (f.size > 500 * 1024) {
-      toast.error('Logo too large — keep it under 500 KB so emails don\'t get blocked.');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => { setLogoUrl(String(reader.result)); };
-    reader.onerror = () => { toast.error('Could not read the file.'); };
-    reader.readAsDataURL(f);
+    toast.success(`Test email sent to ${j.to} — check your inbox.`);
   }
 
   async function save() {
@@ -579,37 +574,24 @@ function SignatureCard() {
           </button>
         )}
 
-        <Field label="Logo (optional)" hint="Only needed if your pasted signature doesn't already include your logo. PNG, JPG, WebP, or GIF under 500 KB — appears below your signature.">
-          <div className="space-y-2">
+        {/* Legacy logo: uploads are gone (paste your signature WITH its logo
+            instead), but if one was uploaded before we keep showing it so
+            removing it stays possible. */}
+        {logoUrl && (
+          <Field label="Previously uploaded logo" hint="New signatures should just include the logo in the paste. Remove this if your pasted signature already has it.">
             <div className="flex items-center gap-3">
-              <Button variant="outline" type="button" onClick={() => fileRef.current?.click()}>
-                {logoUrl ? 'Replace logo' : 'Upload logo'}
-              </Button>
-              {logoUrl && (
-                <Button variant="ghost" type="button" onClick={() => setLogoUrl('')}>
-                  Remove
-                </Button>
-              )}
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif"
-                onChange={onLogoFileChange}
-                className="hidden"
-              />
-            </div>
-            {logoUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={logoUrl}
-                alt="Signature logo preview"
-                className="block max-h-20 max-w-[260px] rounded border border-border bg-white p-1"
+                alt="Signature logo"
+                className="block max-h-16 max-w-[200px] rounded border border-border bg-white p-1"
               />
-            )}
-          </div>
-        </Field>
+              <Button variant="ghost" type="button" onClick={() => setLogoUrl('')}>Remove</Button>
+            </div>
+          </Field>
+        )}
 
-        <Field label="Link (optional)" hint="A URL the logo will link to. If no logo is set, the link still appears as a clickable line.">
+        <Field label="Link (optional)" hint="Adds a clickable line at the bottom of your signature.">
           <Input
             type="url"
             value={link}
@@ -618,11 +600,17 @@ function SignatureCard() {
           />
         </Field>
 
-        <div>
+        <div className="flex items-center gap-2">
           <Button onClick={save} disabled={saving || !isDirty}>
             {saving ? 'Saving…' : 'Save signature'}
           </Button>
+          <Button variant="outline" onClick={sendTest} disabled={testing || isDirty || !savedText}>
+            {testing ? 'Sending test…' : 'Send me a test email'}
+          </Button>
         </div>
+        {isDirty && savedText !== text && (
+          <p className="text-[11px] text-muted-foreground">Save first, then send the test so it shows the latest version.</p>
+        )}
       </CardContent>
     </Card>
   );

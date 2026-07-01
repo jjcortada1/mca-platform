@@ -115,6 +115,10 @@ export const companies = pgTable('companies', {
   // /master — client companies' admins cannot. Backfilled to the oldest
   // company by the startup bootstrap.
   isPlatformOwner: boolean('is_platform_owner').notNull().default(false),
+  // Which app features (nav item hrefs) this company can use. NULL = all.
+  // Set by the platform owner per tenant from the /master Companies page.
+  // Hides the tabs company-wide; per-user permissions still gate the APIs.
+  enabledNavItems: jsonb('enabled_nav_items').$type<string[]>(),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -150,8 +154,10 @@ export const users = pgTable(
     // Optional URL to wrap the logo (and a "Visit" link at the bottom of
     // the signature). Validated server-side to be http(s) only.
     signatureLink: varchar('signature_link', { length: 500 }),
-    // Two-factor authentication via email OTP
-    twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
+    // Two-factor authentication via email OTP. ON by default for every
+    // account (policy decision 2026-07). Safe because login fails OPEN when
+    // no email transport can deliver a code — 2FA can't cause a lockout.
+    twoFactorEnabled: boolean('two_factor_enabled').notNull().default(true),
     isActive: boolean('is_active').notNull().default(true),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

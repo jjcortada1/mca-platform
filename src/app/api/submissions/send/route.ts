@@ -341,88 +341,127 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Send all as isolated messages over a single pooled connection.
+    // Send all as isolated messages over a pooled connection (3 at a time).
     // Each FUNDER gets its OWN email (with all of that funder's addresses in
     // the To: header so it stays one thread for them), and its own subject
     // suffix so each funder's email lands in a separate conversation on the
-    // sender's side. The signature (text + optional logo + optional link)
-    // is built into both the text and HTML versions.
-    const sendResults = toSend.length
-      ? await sendDealEmailBatch(
-          {
-            smtp,
-            ccEmails: allCc,
-            dealName: deal.name,
-            bodyNotes,
-            structuredFields: structuredFieldsInput,
-            attachments,
-            signature,
-          },
-          toSend.map((t) => ({
-            toEmails: t.addresses,
-            ref: t.ref,
-            label: t.fName,
-            // Funder-specific: skip the Unicode disambiguator so the subject
-            // is pure ASCII for CRMs that mangle zero-width characters.
-            plainSubject: t.plainSubject,
-          }))
-        )
-      : [];
-    const byRef = new Map(sendResults.map((r) => [r.ref, r]));
+    // sender's side.
+    //
+    // STREAMING RESPONSE: the route emits newline-delimited JSON events so
+    // the client can render a live 0→100% progress bar:
+    //   {type:'start', total}                     — sending begins
+    //   {type:'progress', done, total, funderName, success, error?}
+    //   {type:'done', submissionId, results}      — everything finished
+    // Pre-send validation failures above still return plain JSON errors.
+    const capturedDeal = deal;
+    const capturedSubmission = submission;
+    const fNameByRef = new Map(toSend.map((t) => [t.ref, t.fName]));
+    const encoder = new TextEncoder();
 
-    // Persist one submissionFunder + submissionEmail per FUNDER (not per
-    // address). The submissionEmail log keeps the first/primary address in
-    // its toEmail column for back-compat; the full list is joined into the
-    // ccEmails field as informational context.
-    for (const t of toSend) {
-      const sr = byRef.get(t.ref);
-      const [sf] = await db
-        .insert(submissionFunders)
-        .values({
-          submissionId: submission.id,
-          funderId: t.fi.funderId ?? null,
-          manualFunderName: t.fi.funderId ? null : t.fi.manualFunderName ?? null,
-          submittedBy: ctx.user.id,
-          status: 'no_response',
-          notes: bodyNotes || null,
-        })
-        .returning();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const emit = (obj: unknown) => {
+          try { controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n')); } catch { /* client gone */ }
+        };
+        try {
+          emit({ type: 'start', total: toSend.length });
 
-      // Primary recipient for the log row is the first address; the rest are
-      // captured as part of the audit so the full delivery target is preserved.
-      const primaryTo = t.addresses[0];
-      const extraTo = t.addresses.slice(1);
-      await db.insert(submissionEmails).values({
-        submissionFunderId: sf.id,
-        toEmail: primaryTo,
-        // Store the company-additional addresses alongside the CCs so the
-        // audit row reflects the real recipient set without losing info.
-        ccEmails: [...extraTo, ...allCc],
-        subject: `New Deal - ${deal.name}`,
-        body: bodyNotes,
-        attachmentMeta: attachments.map((a) => ({ name: a.filename, size: a.content.length })),
-        smtpMessageId: sr?.messageId,
-        smtpResponse: sr?.response,
-        success: sr?.success ?? false,
-        errorMessage: sr?.error,
-      });
+          const sendResults = toSend.length
+            ? await sendDealEmailBatch(
+                {
+                  smtp: smtp!,
+                  ccEmails: allCc,
+                  dealName: capturedDeal.name,
+                  bodyNotes,
+                  structuredFields: structuredFieldsInput,
+                  attachments,
+                  signature,
+                },
+                toSend.map((t) => ({
+                  toEmails: t.addresses,
+                  ref: t.ref,
+                  label: t.fName,
+                  // Funder-specific: skip the Unicode disambiguator so the
+                  // subject stays pure ASCII for CRMs that mangle zero-width
+                  // characters.
+                  plainSubject: t.plainSubject,
+                })),
+                (r, done, total) => emit({
+                  type: 'progress', done, total,
+                  funderName: fNameByRef.get(r.ref) ?? r.toEmail,
+                  success: r.success,
+                  error: r.error,
+                })
+              )
+            : [];
+          const byRef = new Map(sendResults.map((r) => [r.ref, r]));
 
-      results.push({
-        toEmails: t.addresses,
-        funderName: t.fName,
-        success: sr?.success ?? false,
-        error: sr?.error,
-      });
-    }
+          // Persist one submissionFunder + submissionEmail per FUNDER (not per
+          // address). The submissionEmail log keeps the first/primary address
+          // in its toEmail column for back-compat; the full list is joined
+          // into the ccEmails field as informational context.
+          for (const t of toSend) {
+            const sr = byRef.get(t.ref);
+            const [sf] = await db
+              .insert(submissionFunders)
+              .values({
+                submissionId: capturedSubmission.id,
+                funderId: t.fi.funderId ?? null,
+                manualFunderName: t.fi.funderId ? null : t.fi.manualFunderName ?? null,
+                submittedBy: ctx.user.id,
+                status: 'no_response',
+                notes: bodyNotes || null,
+              })
+              .returning();
 
-    // Bump deal status if currently shopping
-    if (deal.status === 'shopping') {
-      await db.update(deals).set({ status: 'submitted' })
-        .where(and(eq(deals.id, deal.id), eq(deals.companyId, ctx.companyId)));
-    }
+            const primaryTo = t.addresses[0];
+            const extraTo = t.addresses.slice(1);
+            await db.insert(submissionEmails).values({
+              submissionFunderId: sf.id,
+              toEmail: primaryTo,
+              ccEmails: [...extraTo, ...allCc],
+              subject: `New Deal - ${capturedDeal.name}`,
+              body: bodyNotes,
+              attachmentMeta: attachments.map((a) => ({ name: a.filename, size: a.content.length })),
+              smtpMessageId: sr?.messageId,
+              smtpResponse: sr?.response,
+              success: sr?.success ?? false,
+              errorMessage: sr?.error,
+            });
 
-    triggerSync(ctx.companyId);
-    return NextResponse.json({ submissionId: submission.id, results });
+            results.push({
+              toEmails: t.addresses,
+              funderName: t.fName,
+              success: sr?.success ?? false,
+              error: sr?.error,
+            });
+          }
+
+          // Bump deal status if currently shopping
+          if (capturedDeal.status === 'shopping') {
+            await db.update(deals).set({ status: 'submitted' })
+              .where(and(eq(deals.id, capturedDeal.id), eq(deals.companyId, ctx.companyId)));
+          }
+
+          triggerSync(ctx.companyId);
+          emit({ type: 'done', submissionId: capturedSubmission.id, results });
+        } catch (err) {
+          console.error('[submissions/send] stream error', err);
+          emit({ type: 'error', error: err instanceof Error ? err.message : 'Send failed' });
+        } finally {
+          try { controller.close(); } catch { /* already closed */ }
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'application/x-ndjson; charset=utf-8',
+        'Cache-Control': 'no-store',
+        // Disable proxy buffering so progress events reach the browser live.
+        'X-Accel-Buffering': 'no',
+      },
+    });
   } catch (e) {
     return apiError(e);
   }

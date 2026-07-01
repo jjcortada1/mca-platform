@@ -26,6 +26,7 @@ export async function GET() {
         sidebarOrder: companies.sidebarOrder,
         sidebarCategories: companies.sidebarCategories,
         sidebarItemOverrides: companies.sidebarItemOverrides,
+        enabledNavItems: companies.enabledNavItems,
       })
       .from(companies)
       .where(eq(companies.id, ctx.companyId))
@@ -35,6 +36,8 @@ export async function GET() {
         order: row?.sidebarOrder ?? null,
         categories: row?.sidebarCategories ?? null,
         itemOverrides: row?.sidebarItemOverrides ?? null,
+        // Platform-owner-controlled feature access. null = everything.
+        enabledNavItems: row?.enabledNavItems ?? null,
       },
     });
   } catch (e) { return apiError(e); }
