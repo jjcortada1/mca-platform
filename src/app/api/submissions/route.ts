@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client';
 import { submissions, submissionFunders, deals, funders, users } from '@/lib/db/schema';
 import { eq, desc, inArray, and } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
+import { visibleRepIds } from '@/lib/auth/team-scope';
 import { apiError } from '@/lib/api/errors';
 
 export async function GET() {
@@ -10,16 +11,20 @@ export async function GET() {
     const ctx = await requirePermission('submissions.view');
 
     // Non-admin scoping: reps see only submissions for deals assigned to
-    // them. Admins see everything. Lead-source accounts shouldn't reach
-    // this page (they use the lead-source portal) but they'd see nothing
-    // anyway since they're never the assignedRepId.
+    // them — plus, for team leaders, submissions for their team members'
+    // deals. Admins see everything.
     const isAdmin = ctx.user.role === 'master_admin' || ctx.user.role === 'company_admin';
     const baseConditions = [
       eq(submissions.companyId, ctx.companyId),
       eq(deals.isDeleted, false),
     ];
     if (!isAdmin) {
-      baseConditions.push(eq(deals.assignedRepId, ctx.user.id));
+      const scope = await visibleRepIds(ctx.user.id);
+      baseConditions.push(
+        scope.length === 1
+          ? eq(deals.assignedRepId, scope[0])
+          : inArray(deals.assignedRepId, scope)
+      );
     }
 
     // 1. All submissions for this company, joined to deal info

@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client';
 import { deals, users, dealCommissions, leadSourceCommissions, accountingEntries, commissionPayments } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { requireTenantContext, requirePermission } from '@/lib/auth/context';
+import { visibleRepIds } from '@/lib/auth/team-scope';
 import { upsertDealSchema } from '@/lib/validation/schemas';
 import { apiError } from '@/lib/api/errors';
 import { fromDateInput } from '@/lib/dates';
@@ -32,8 +33,14 @@ async function ensureDealAccess(
   const isAdmin = ctx.user.role === 'master_admin' || ctx.user.role === 'company_admin';
   if (isAdmin) return { ok: true };
   if (ctx.user.role === 'lead_source') return { ok: false, status: 403, error: 'Forbidden' };
-  // Non-admin: must own this deal.
+  // Non-admin: must own this deal — OR be a team leader over the rep it's
+  // assigned to (leaders manage their team's deals; reassignment stays
+  // admin-only and is enforced separately in PATCH).
   if (d.assignedRepId === ctx.user.id) return { ok: true };
+  if (d.assignedRepId) {
+    const scope = await visibleRepIds(ctx.user.id);
+    if (scope.includes(d.assignedRepId)) return { ok: true };
+  }
   // Returning 404 (not 403) on purpose — don't reveal that the deal exists
   // to someone who isn't supposed to see it.
   return { ok: false, status: 404, error: 'Not found' };

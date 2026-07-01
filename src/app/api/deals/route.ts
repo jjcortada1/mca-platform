@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
 import { deals, users } from '@/lib/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, inArray } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
+import { visibleRepIds } from '@/lib/auth/team-scope';
 import { upsertDealSchema } from '@/lib/validation/schemas';
 import { apiError } from '@/lib/api/errors';
 import { triggerSync } from '@/lib/sheets/sync';
@@ -38,8 +39,19 @@ export async function GET(req: NextRequest) {
       eq(deals.isDeleted, false),
     ];
     if (!isAdmin) {
-      // Force-scope reps and lead-source logins to their own deals.
-      conditions.push(eq(deals.assignedRepId, ctx.user.id));
+      // Non-admins see their OWN deals — plus, for team leaders, the deals of
+      // reps on the team(s) they lead. `mine=1` still narrows a leader back to
+      // just their own so the toggle works for them too.
+      if (wantMine) {
+        conditions.push(eq(deals.assignedRepId, ctx.user.id));
+      } else {
+        const scope = await visibleRepIds(ctx.user.id);
+        conditions.push(
+          scope.length === 1
+            ? eq(deals.assignedRepId, scope[0])
+            : inArray(deals.assignedRepId, scope)
+        );
+      }
     } else if (wantMine) {
       conditions.push(eq(deals.assignedRepId, ctx.user.id));
     } else if (wantRepId) {
