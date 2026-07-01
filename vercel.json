@@ -1,5 +1,4 @@
 {
-  "installCommand": "npm ci --legacy-peer-deps --no-audit --no-fund",
   "buildCommand": "npm run build",
-  "nodejs": "18.x"
+  "installCommand": "npm install"
 }
