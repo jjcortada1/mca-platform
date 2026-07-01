@@ -48,6 +48,7 @@ export const authOptions: NextAuthOptions = {
   pages: { signIn: '/login' },
   providers: [
     CredentialsProvider({
+      id: 'credentials',
       name: 'credentials',
       credentials: {
         email: { label: 'Email', type: 'email' },
@@ -74,6 +75,36 @@ export const authOptions: NextAuthOptions = {
         await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
 
         // Load permissions
+        const perms = await db
+          .select({ key: permissions.permissionKey })
+          .from(permissions)
+          .where(eq(permissions.userId, user.id));
+
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          companyId: user.companyId,
+          permissions: perms.map((p) => p.key),
+        };
+      },
+    }),
+    CredentialsProvider({
+      id: '2fa',
+      name: '2fa',
+      credentials: {
+        userId: { label: 'User ID', type: 'text' },
+      },
+      async authorize(credentials) {
+        // This provider is used after 2FA verification on the client side.
+        // The verify-2fa-code endpoint handles the actual verification.
+        // This just creates a session for an already-verified user.
+        if (!credentials?.userId) return null;
+
+        const [user] = await db.select().from(users).where(eq(users.id, credentials.userId)).limit(1);
+        if (!user || !user.isActive) return null;
+
         const perms = await db
           .select({ key: permissions.permissionKey })
           .from(permissions)

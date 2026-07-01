@@ -617,19 +617,19 @@ export default function ActiveDealsPage() {
                             {/* Merchant identity — phone/email moved here from the table */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               <LabeledInline label="Deal name">
-                                <Input defaultValue={d.name} onChange={(e) => patchDraft('name', e.target.value)} />
+                                <Input value={(draft.name ?? d.name) ?? ''} onChange={(e) => patchDraft('name', e.target.value)} />
                               </LabeledInline>
                               <LabeledInline label="Merchant first">
-                                <Input defaultValue={d.merchantFirstName ?? ''} onChange={(e) => patchDraft('merchantFirstName', e.target.value)} />
+                                <Input value={(draft.merchantFirstName ?? d.merchantFirstName) ?? ''} onChange={(e) => patchDraft('merchantFirstName', e.target.value)} />
                               </LabeledInline>
                               <LabeledInline label="Merchant last">
-                                <Input defaultValue={d.merchantLastName ?? ''} onChange={(e) => patchDraft('merchantLastName', e.target.value)} />
+                                <Input value={(draft.merchantLastName ?? d.merchantLastName) ?? ''} onChange={(e) => patchDraft('merchantLastName', e.target.value)} />
                               </LabeledInline>
                               <LabeledInline label="Merchant phone">
-                                <Input defaultValue={d.merchantPhone ?? ''} onChange={(e) => patchDraft('merchantPhone', e.target.value)} />
+                                <Input value={(draft.merchantPhone ?? d.merchantPhone) ?? ''} onChange={(e) => patchDraft('merchantPhone', e.target.value)} />
                               </LabeledInline>
                               <LabeledInline label="Merchant email">
-                                <Input type="email" defaultValue={d.merchantEmail ?? ''} onChange={(e) => patchDraft('merchantEmail', e.target.value)} />
+                                <Input type="email" value={(draft.merchantEmail ?? d.merchantEmail) ?? ''} onChange={(e) => patchDraft('merchantEmail', e.target.value)} />
                               </LabeledInline>
                             </div>
 
@@ -1318,6 +1318,7 @@ function MarkFundedModal({
 }) {
   const toast = useToast();
   const [saving, setSaving] = useState(false);
+  const [funders, setFunders] = useState<{ id: string; name: string }[]>([]);
   const [form, setForm] = useState({
     merchantFirstName: deal.merchantFirstName ?? '',
     merchantLastName: deal.merchantLastName ?? '',
@@ -1329,7 +1330,16 @@ function MarkFundedModal({
     termMode: deal.termMode ?? 'weekly',
     termCount: deal.termCount ?? '',
     fundingDate: deal.fundingDate ? String(deal.fundingDate).slice(0, 10) : '',
+    fundedWithFunderId: deal.fundedWithFunderId ?? '',
+    fundedNotes: deal.fundedNotes ?? '',
   });
+
+  useEffect(() => {
+    fetch('/api/funders', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => setFunders(j.data ?? []))
+      .catch(() => {});
+  }, []);
 
   async function save() {
     if (!form.fundedAmount || !form.fundingDate) {
@@ -1349,6 +1359,8 @@ function MarkFundedModal({
       termMode: form.termMode,
       termCount: form.termCount || null,
       fundingDate: form.fundingDate || null,
+      fundedWithFunderId: form.fundedWithFunderId || null,
+      fundedNotes: form.fundedNotes.trim() || null,
     };
     const res = await fetch(`/api/deals/${deal.id}`, {
       method: 'PATCH',
@@ -1427,7 +1439,28 @@ function MarkFundedModal({
               <Field label="# of payments">
                 <Input inputMode="numeric" value={form.termCount} onChange={(e) => setForm({ ...form, termCount: e.target.value })} placeholder="26" />
               </Field>
+              <Field label="Funded with" className="col-span-2">
+                <select
+                  value={form.fundedWithFunderId}
+                  onChange={(e) => setForm({ ...form, fundedWithFunderId: e.target.value })}
+                  className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+                >
+                  <option value="">— select funder —</option>
+                  {funders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+              </Field>
             </div>
+          </section>
+
+          <section>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground/70 mb-2">Notes</div>
+            <textarea
+              value={form.fundedNotes}
+              onChange={(e) => setForm({ ...form, fundedNotes: e.target.value })}
+              rows={3}
+              placeholder="Any notes about the funding deal — special terms, conditions, follow-up items, etc."
+              className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm resize-y"
+            />
           </section>
         </div>
       </div>
