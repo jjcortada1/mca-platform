@@ -1036,10 +1036,19 @@ function BulkImportModal({
               {/* Step 1 download */}
               <div className="rounded-lg border border-border bg-muted/30 p-4">
                 <div className="text-sm font-medium mb-1">1. Download the template</div>
-                <p className="text-xs text-muted-foreground mb-2">Includes all columns and example rows.</p>
-                <a href="/api/funders/bulk" download="funders_template.csv" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border border-border bg-card hover:bg-muted transition-colors">
-                  <Download className="h-3.5 w-3.5" /> Download template (CSV)
-                </a>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Simple = 4 columns (name, submission email, tiers, notes) — all most uploads need.
+                  Only <span className="font-medium">name</span> is required; column names are flexible
+                  (&quot;Funder&quot;, &quot;Email&quot;, &quot;Phone&quot; etc. all work).
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <a href="/api/funders/bulk" download="funders_template.csv" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border border-border bg-card hover:bg-muted transition-colors">
+                    <Download className="h-3.5 w-3.5" /> Simple template (CSV)
+                  </a>
+                  <a href="/api/funders/bulk?full=1" download="funders_template_full.csv" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium border border-border bg-card hover:bg-muted transition-colors text-muted-foreground">
+                    <Download className="h-3.5 w-3.5" /> Full template (all columns)
+                  </a>
+                </div>
               </div>
               {/* Step 2 upload */}
               <div className="rounded-lg border border-border bg-muted/30 p-4">

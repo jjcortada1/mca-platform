@@ -93,6 +93,50 @@ const rowSchema = z.object({
 
 type RawRow = z.infer<typeof rowSchema>;
 
+/**
+ * Header aliasing — people export funder lists from all kinds of tools, so
+ * we accept the obvious variants of each column name instead of forcing an
+ * exact match. "Funder Name" / "company" / "lender" all mean `name`;
+ * plain "email" means the submission email; "phone" means contact_phone; etc.
+ */
+const HEADER_ALIASES: Record<string, string> = {
+  funder: 'name',
+  funder_name: 'name',
+  company: 'name',
+  company_name: 'name',
+  lender: 'name',
+  lender_name: 'name',
+  email: 'submission_email',
+  emails: 'submission_email',
+  submission_emails: 'submission_email',
+  submissions_email: 'submission_email',
+  shopping_email: 'submission_email',
+  intake_email: 'submission_email',
+  phone: 'contact_phone',
+  phone_number: 'contact_phone',
+  contact: 'contact_name',
+  tier: 'tiers',
+  states: 'restricted_states',
+  state_restrictions: 'restricted_states',
+  industries: 'restricted_industries',
+  industry_restrictions: 'restricted_industries',
+  note: 'notes',
+  comments: 'notes',
+  rules: 'additional_rules',
+  positions: 'max_positions',
+  max_position: 'max_positions',
+  credit: 'min_credit_tier',
+  min_credit: 'min_credit_tier',
+  credit_tier: 'min_credit_tier',
+  revenue: 'min_revenue',
+  monthly_revenue: 'min_revenue',
+};
+
+function normalizeHeader(raw: string): string {
+  const h = raw.trim().toLowerCase().replace(/\s+/g, '_');
+  return HEADER_ALIASES[h] ?? h;
+}
+
 function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[]; errors: string[] } {
   const errors: string[] = [];
   // Strip BOM if present
@@ -131,7 +175,7 @@ function parseCSV(text: string): { headers: string[]; rows: Record<string, strin
 
   if (lines.length === 0) return { headers: [], rows: [], errors: ['Empty file'] };
 
-  const headers = lines[0].map((h) => h.trim().toLowerCase().replace(/\s+/g, '_'));
+  const headers = lines[0].map((h) => normalizeHeader(h));
   const rows = lines.slice(1).map((lineCols) => {
     const obj: Record<string, string> = {};
     headers.forEach((h, i) => {
@@ -494,9 +538,37 @@ export async function POST(req: NextRequest) {
 /**
  * GET — returns the CSV template as a downloadable file.
  *
- * Two-row sample: a minimal one (only required) + a full one (with advanced fields).
+ * Default = SIMPLE template: 4 columns (name, submission_email, tiers,
+ * notes) with a couple of example rows. That's all most uploads need —
+ * headers are alias-tolerant and every other column is optional.
+ *
+ * ?full=1 returns the full template with every advanced column documented.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const wantFull = new URL(req.url).searchParams.get('full') === '1';
+
+  if (!wantFull) {
+    const csv = [
+      'name,submission_email,tiers,notes',
+      'Acme Funding,submissions@acmefunding.com,A-Paper,Fast decisions',
+      'Velocity Capital,submissions@velocitycap.com;intake@velocitycap.com,A-Paper;Subprime,',
+      '',
+      '# Only "name" is required. Everything else is optional.',
+      '# - submission_email: where deals get sent when you shop. Multiple addresses',
+      '#   separated by ; all receive the deal on one email.',
+      '# - tiers: multiple separated by ; — tiers that don\'t exist are auto-created.',
+      '# - Re-uploading a name that already exists UPDATES that funder (never duplicates).',
+      '# - Need advanced fields (credit tier, states, max positions, contacts)?',
+      '#   Download the full template from the import window.',
+    ].join('\n') + '\n';
+    return new NextResponse(csv, {
+      headers: {
+        'Content-Type': 'text/csv',
+        'Content-Disposition': 'attachment; filename="funders_template.csv"',
+      },
+    });
+  }
+
   // Required cols first, then optional. Order matches JJ's spec.
   const headers = [
     // REQUIRED
@@ -603,7 +675,7 @@ export async function GET() {
   return new NextResponse(csv, {
     headers: {
       'Content-Type': 'text/csv',
-      'Content-Disposition': 'attachment; filename="funders_template.csv"',
+      'Content-Disposition': 'attachment; filename="funders_template_full.csv"',
     },
   });
 }
