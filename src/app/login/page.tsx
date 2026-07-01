@@ -33,9 +33,12 @@ function LoginInner() {
   const search = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [twoFACode, setTwoFACode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [branding, setBranding] = useState<PublicBranding>(FALLBACK);
+  const [step, setStep] = useState<'credentials' | '2fa'>('credentials');
+  const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/branding/public')
@@ -44,20 +47,121 @@ function LoginInner() {
       .catch(() => {});
   }, []);
 
-  async function onSubmit(e: React.FormEvent) {
+  async function onCredentialsSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const res = await signIn('credentials', { email, password, redirect: false });
-    setLoading(false);
-    if (res?.error) {
-      setError('Email or password is incorrect.');
+
+    try {
+      // Check credentials and see if 2FA is required
+      const checkRes = await fetch('/api/auth/check-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!checkRes.ok) {
+        const errorData = await checkRes.json().catch(() => ({}));
+        setError(errorData.error || 'Login failed. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      const userData = await checkRes.json();
+      if (!userData.success) {
+        setError(userData.error || 'Login failed. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      // Check if 2FA is enabled
+      if (userData.twoFactorEnabled) {
+        setUserId(userData.userId);
+        // Send 2FA code
+        const sendRes = await fetch('/api/auth/send-2fa-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: userData.userId }),
+        });
+
+        if (!sendRes.ok) {
+          const errorData = await sendRes.json().catch(() => ({}));
+          setError(errorData.error || 'Failed to send verification code.');
+          setLoading(false);
+          return;
+        }
+
+        setStep('2fa');
+        setLoading(false);
+        return;
+      }
+
+      // No 2FA required, sign in directly
+      const res = await signIn('credentials', { email, password, redirect: false });
+      setLoading(false);
+      if (res?.error) {
+        setError('Email or password is incorrect.');
+        return;
+      }
+      const callbackUrl = sanitizeCallbackUrl(search.get('callbackUrl'));
+      router.push(callbackUrl);
+      router.refresh();
+    } catch (err) {
+      setError('An error occurred. Please try again.');
+      setLoading(false);
+    }
+  }
+
+  async function onTwoFASubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    if (!userId) {
+      setError('Session lost. Please start over.');
+      setLoading(false);
       return;
     }
-    const callbackUrl = sanitizeCallbackUrl(search.get('callbackUrl'));
-    router.push(callbackUrl);
-    router.refresh();
+
+    try {
+      // Verify 2FA code
+      const verifyRes = await fetch('/api/auth/verify-2fa-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, code: twoFACode }),
+      });
+
+      if (!verifyRes.ok) {
+        const errorData = await verifyRes.json().catch(() => ({}));
+        setError(errorData.error || 'Verification failed.');
+        setLoading(false);
+        return;
+      }
+
+      const verifyData = await verifyRes.json();
+      if (!verifyData.valid) {
+        setError(verifyData.error || 'Invalid verification code.');
+        setLoading(false);
+        return;
+      }
+
+      // Sign in with 2FA provider
+      const res = await signIn('2fa', { userId, redirect: false });
+      setLoading(false);
+      if (res?.error) {
+        setError('Failed to create session.');
+        return;
+      }
+      const callbackUrl = sanitizeCallbackUrl(search.get('callbackUrl'));
+      router.push(callbackUrl);
+      router.refresh();
+    } catch (err) {
+      setError('An error occurred. Please try again.');
+      setLoading(false);
+    }
   }
+
+  const onSubmit = step === 'credentials' ? onCredentialsSubmit : onTwoFASubmit;
 
   return (
     <div className="relative min-h-screen flex items-center justify-center px-4 py-12 bg-background overflow-hidden">
@@ -98,32 +202,58 @@ function LoginInner() {
         {/* Card */}
         <div className="rounded-2xl border border-border bg-card p-8 shadow-[0_1px_3px_0_hsl(222_47%_11%/0.04),_0_20px_40px_-12px_hsl(222_47%_11%/0.08)]">
           <div className="mb-6">
-            <h2 className="text-lg font-semibold tracking-tight">Sign in</h2>
-            <p className="text-sm text-muted-foreground mt-1">Welcome back.</p>
+            {step === 'credentials' ? (
+              <>
+                <h2 className="text-lg font-semibold tracking-tight">Sign in</h2>
+                <p className="text-sm text-muted-foreground mt-1">Welcome back.</p>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-semibold tracking-tight">Verification code</h2>
+                <p className="text-sm text-muted-foreground mt-1">Enter the code sent to your email.</p>
+              </>
+            )}
           </div>
 
           <form onSubmit={onSubmit} className="space-y-4">
-            <Field label="Email">
-              <Input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoFocus
-                autoComplete="email"
-                placeholder="you@company.com"
-              />
-            </Field>
+            {step === 'credentials' ? (
+              <>
+                <Field label="Email">
+                  <Input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    autoFocus
+                    autoComplete="email"
+                    placeholder="you@company.com"
+                  />
+                </Field>
 
-            <Field label="Password">
-              <PasswordInput
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                autoComplete="current-password"
-                placeholder="••••••••"
-              />
-            </Field>
+                <Field label="Password">
+                  <PasswordInput
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                  />
+                </Field>
+              </>
+            ) : (
+              <Field label="6-digit code">
+                <Input
+                  type="text"
+                  value={twoFACode}
+                  onChange={(e) => setTwoFACode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  required
+                  autoFocus
+                  placeholder="000000"
+                  maxLength={6}
+                  inputMode="numeric"
+                />
+              </Field>
+            )}
 
             {error && (
               <div className="flex items-start gap-2 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-3 py-2.5">
@@ -133,18 +263,36 @@ function LoginInner() {
             )}
 
             <Button type="submit" loading={loading} className="w-full h-10 mt-2">
-              {loading ? 'Signing in…' : 'Sign in'}
+              {loading ? (step === 'credentials' ? 'Signing in…' : 'Verifying…') : (step === 'credentials' ? 'Sign in' : 'Verify')}
             </Button>
           </form>
 
-          <div className="mt-6 pt-5 border-t border-border flex items-center justify-center">
-            <Link
-              href="/forgot-password"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Forgot password?
-            </Link>
-          </div>
+          {step === 'credentials' && (
+            <div className="mt-6 pt-5 border-t border-border flex items-center justify-center">
+              <Link
+                href="/forgot-password"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Forgot password?
+              </Link>
+            </div>
+          )}
+
+          {step === '2fa' && (
+            <div className="mt-6 pt-5 border-t border-border flex items-center justify-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setStep('credentials');
+                  setError(null);
+                  setTwoFACode('');
+                }}
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Back to login
+              </button>
+            </div>
+          )}
         </div>
 
         <p className="text-center text-xs text-muted-foreground/70 mt-6">

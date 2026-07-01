@@ -145,6 +145,8 @@ export const users = pgTable(
     // Optional URL to wrap the logo (and a "Visit" link at the bottom of
     // the signature). Validated server-side to be http(s) only.
     signatureLink: varchar('signature_link', { length: 500 }),
+    // Two-factor authentication via email OTP
+    twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
     isActive: boolean('is_active').notNull().default(true),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

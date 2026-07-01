@@ -384,6 +384,7 @@ export async function POST(req: NextRequest) {
           manualFunderName: t.fi.funderId ? null : t.fi.manualFunderName ?? null,
           submittedBy: ctx.user.id,
           status: 'no_response',
+          notes: bodyNotes || null,
         })
         .returning();
 
