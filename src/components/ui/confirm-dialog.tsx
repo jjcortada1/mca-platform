@@ -35,6 +35,8 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   loading = false,
+  confirmDisabled = false,
+  children,
 }: {
   open: boolean;
   title: string;
@@ -45,6 +47,11 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
   loading?: boolean;
+  // Disable the confirm button (e.g. until a name-match is typed).
+  confirmDisabled?: boolean;
+  // Optional extra content (e.g. a confirm-by-typing input) shown between
+  // the description and the action buttons.
+  children?: React.ReactNode;
 }) {
   // Esc to cancel. Mounted only when the dialog is open so it doesn't
   // intercept Esc when the dialog isn't visible.
@@ -82,6 +89,7 @@ export function ConfirmDialog({
       >
         <div id="confirm-title" className="text-base font-semibold">{title}</div>
         {description && <div className="text-sm text-muted-foreground">{description}</div>}
+        {children}
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" size="sm" onClick={onCancel} disabled={loading}>
             {cancelLabel}
@@ -89,7 +97,7 @@ export function ConfirmDialog({
           <Button
             size="sm"
             onClick={onConfirm}
-            disabled={loading}
+            disabled={loading || confirmDisabled}
             className={cn(destructive && 'bg-destructive text-destructive-foreground hover:bg-destructive/90')}
           >
             {loading ? 'Working…' : confirmLabel}
