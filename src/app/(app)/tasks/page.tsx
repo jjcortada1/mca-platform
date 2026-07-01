@@ -6,7 +6,7 @@ import { useToast } from '@/components/toast';
 import { cn } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
-  Plus, X, ClipboardList, Users as UsersIcon, Trash2, ChevronDown, ChevronRight, Crown,
+  Plus, X, ClipboardList, Users as UsersIcon, Trash2, ChevronDown, ChevronRight,
 } from 'lucide-react';
 
 /* ============================================================
@@ -62,7 +62,6 @@ export default function TasksPage() {
   const [mineOnly, setMineOnly] = useState(false);
 
   const [showCreate, setShowCreate] = useState(false);
-  const [showTeams, setShowTeams] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<TaskItem | null>(null);
 
   async function load() {
@@ -129,9 +128,9 @@ export default function TasksPage() {
         actions={
           <div className="flex gap-2">
             {me?.isAdmin && (
-              <Button variant="outline" onClick={() => setShowTeams((v) => !v)} className="gap-1.5">
-                <UsersIcon className="h-4 w-4" /> Teams
-              </Button>
+              <a href="/settings?tab=teams" className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-border bg-card text-sm hover:bg-muted transition-colors">
+                <UsersIcon className="h-4 w-4" /> Manage teams
+              </a>
             )}
             <Button onClick={() => setShowCreate((v) => !v)} className="gap-1.5">
               <Plus className="h-4 w-4" /> New task
@@ -139,10 +138,6 @@ export default function TasksPage() {
           </div>
         }
       />
-
-      {showTeams && me?.isAdmin && (
-        <TeamsManager teams={teams} companyUsers={companyUsers} onChanged={load} onClose={() => setShowTeams(false)} />
-      )}
 
       {showCreate && (
         <CreateTaskForm
@@ -385,147 +380,3 @@ function CreateTaskForm({
   );
 }
 
-/* ---------- Teams manager (admin only) ---------- */
-
-function TeamsManager({
-  teams, companyUsers, onChanged, onClose,
-}: {
-  teams: Team[];
-  companyUsers: CompanyUser[];
-  onChanged: () => void;
-  onClose: () => void;
-}) {
-  const toast = useToast();
-  const [newName, setNewName] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [deleteTeam, setDeleteTeam] = useState<Team | null>(null);
-
-  async function createTeam() {
-    if (!newName.trim()) return;
-    setSaving(true);
-    const res = await fetch('/api/teams', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newName.trim(), members: [] }),
-    });
-    setSaving(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      toast.error(j.error || 'Could not create team.');
-      return;
-    }
-    setNewName('');
-    onChanged();
-  }
-
-  async function saveMembers(team: Team, members: { userId: string; isLeader: boolean }[]) {
-    const res = await fetch(`/api/teams/${team.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ members }),
-    });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      toast.error(j.error || 'Could not update team.');
-      return;
-    }
-    onChanged();
-  }
-
-  async function removeTeam(team: Team) {
-    const res = await fetch(`/api/teams/${team.id}`, { method: 'DELETE' });
-    if (!res.ok && res.status !== 204) {
-      toast.error('Could not delete team.');
-      return;
-    }
-    toast.success('Team deleted.');
-    onChanged();
-  }
-
-  return (
-    <Card>
-      <CardContent className="p-4 space-y-4">
-        <div className="text-sm font-semibold flex items-center justify-between">
-          <span className="flex items-center gap-2"><UsersIcon className="h-4 w-4" /> Teams</span>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1"><X className="h-4 w-4" /></button>
-        </div>
-
-        <div className="flex gap-2">
-          <Input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="New team name (e.g. East Coast)"
-            onKeyDown={(e) => { if (e.key === 'Enter') createTeam(); }}
-            className="max-w-xs"
-          />
-          <Button size="sm" onClick={createTeam} disabled={saving || !newName.trim()}>Add team</Button>
-        </div>
-
-        {teams.length === 0 ? (
-          <p className="text-xs text-muted-foreground italic">No teams yet. Create one, then check off its members below. Crown a member to make them the team leader — leaders see their members&apos; tasks.</p>
-        ) : (
-          <div className="grid gap-3 md:grid-cols-2">
-            {teams.map((team) => (
-              <div key={team.id} className="rounded-lg border border-border p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{team.name}</span>
-                  <button onClick={() => setDeleteTeam(team)} className="p-1 text-muted-foreground hover:text-destructive rounded" title="Delete team">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-                <div className="space-y-1 max-h-48 overflow-y-auto">
-                  {companyUsers.map((u) => {
-                    const m = team.members.find((x) => x.userId === u.id);
-                    return (
-                      <div key={u.id} className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={!!m}
-                          onChange={(e) => {
-                            const next = e.target.checked
-                              ? [...team.members.map((x) => ({ userId: x.userId, isLeader: x.isLeader })), { userId: u.id, isLeader: false }]
-                              : team.members.filter((x) => x.userId !== u.id).map((x) => ({ userId: x.userId, isLeader: x.isLeader }));
-                            saveMembers(team, next);
-                          }}
-                          className="h-3.5 w-3.5 rounded"
-                        />
-                        <span className="flex-1 truncate">{u.name || u.email}</span>
-                        {m && (
-                          <button
-                            onClick={() => {
-                              const next = team.members.map((x) => ({
-                                userId: x.userId,
-                                isLeader: x.userId === u.id ? !x.isLeader : x.isLeader,
-                              }));
-                              saveMembers(team, next);
-                            }}
-                            className={cn('p-1 rounded', m.isLeader ? 'text-amber-500' : 'text-muted-foreground/40 hover:text-amber-500')}
-                            title={m.isLeader ? 'Team leader — click to demote' : 'Make team leader'}
-                          >
-                            <Crown className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {deleteTeam && (
-          <ConfirmDialog
-            open
-            destructive
-            title={`Delete team "${deleteTeam.name}"?`}
-            description="Members and their tasks are kept — tasks just lose the team tag."
-            confirmLabel="Delete"
-            onCancel={() => setDeleteTeam(null)}
-            onConfirm={() => { const t = deleteTeam; setDeleteTeam(null); removeTeam(t); }}
-          />
-        )}
-      </CardContent>
-    </Card>
-  );
-}

@@ -9,10 +9,12 @@ import { useToast } from '@/components/toast';
 import {
   Palette, Mail, Send, FileText, DollarSign, Layers, ListChecks,
   Users as UsersIcon, GitBranch, Database, ShieldCheck, Menu as MenuIcon,
-  Trash2, Sparkles,
+  Trash2, Sparkles, Crown, Plus,
 } from 'lucide-react';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { cn } from '@/lib/utils';
 
-type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar' | 'celebration';
+type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar' | 'celebration' | 'teams';
 
 // Flatter, friendlier settings nav. Each entry has an icon + one-line
 // description so the user can scan and find what they want without reading
@@ -55,6 +57,7 @@ const TAB_GROUPS: {
     title: 'Team',
     tabs: [
       { key: 'users', label: 'Reps & admins', icon: UsersIcon, description: 'Invite, deactivate, permissions' },
+      { key: 'teams', label: 'Teams', icon: UsersIcon, description: 'Teams, leaders, and members' },
       { key: 'leadsources', label: 'Lead sources', icon: GitBranch, description: 'Referral partner accounts' },
     ],
   },
@@ -67,8 +70,19 @@ const TAB_GROUPS: {
   },
 ];
 
+const VALID_TABS: Tab[] = ['branding', 'email', 'smtp', 'commission', 'fields', 'users', 'tiers', 'options', 'security', 'sheets', 'leadsources', 'backup', 'funded', 'sidebar', 'celebration', 'teams'];
+
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('branding');
+
+  // Deep link: /settings?tab=teams opens that tab directly (used by global
+  // search results and cross-page links).
+  useEffect(() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get('tab');
+      if (t && (VALID_TABS as string[]).includes(t)) setTab(t as Tab);
+    } catch { /* ignore */ }
+  }, []);
 
   // Find active item for header display
   const activeItem = TAB_GROUPS.flatMap((g) => g.tabs).find((t) => t.key === tab);
@@ -134,6 +148,7 @@ export default function SettingsPage() {
           {tab === 'fields' && <StructuredFieldsSection />}
           {tab === 'funded' && <FundedTemplateSection />}
           {tab === 'users' && <UsersSection />}
+          {tab === 'teams' && <TeamsSection />}
           {tab === 'tiers' && <TiersSection />}
           {tab === 'options' && <MatchOptionsSection />}
           {tab === 'security' && <SecuritySection />}
@@ -2006,6 +2021,157 @@ interface LeadSourceItem {
   isActive: boolean;
 }
 
+/* ============================================================
+   TEAMS — create teams, crown leaders, add members. Team leaders
+   see their members' deals + submissions (not commissions).
+   ============================================================ */
+
+interface SettingsTeam {
+  id: string;
+  name: string;
+  members: { userId: string; name: string; email: string; isLeader: boolean }[];
+}
+
+function TeamsSection() {
+  const toast = useToast();
+  const [teams, setTeams] = useState<SettingsTeam[]>([]);
+  const [companyUsers, setCompanyUsers] = useState<{ id: string; name: string; email: string; role: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newName, setNewName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [deleteTeam, setDeleteTeam] = useState<SettingsTeam | null>(null);
+
+  async function load() {
+    setLoading(true);
+    const [teamRes, uRes] = await Promise.all([
+      fetch('/api/teams', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({})),
+      fetch('/api/users').then((r) => r.json()).catch(() => ({ data: [] })),
+    ]);
+    setTeams(teamRes.data ?? []);
+    setCompanyUsers(((uRes.data ?? []) as { id: string; name: string; email: string; role: string }[]).filter((u) => u.role !== 'lead_source'));
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  async function createTeam() {
+    if (!newName.trim()) return;
+    setSaving(true);
+    const res = await fetch('/api/teams', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName.trim(), members: [] }),
+    });
+    setSaving(false);
+    if (!res.ok) { const j = await res.json().catch(() => ({})); toast.error(j.error || 'Could not create team.'); return; }
+    setNewName(''); load();
+  }
+
+  async function saveMembers(team: SettingsTeam, members: { userId: string; isLeader: boolean }[]) {
+    const res = await fetch(`/api/teams/${team.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ members }),
+    });
+    if (!res.ok) { const j = await res.json().catch(() => ({})); toast.error(j.error || 'Could not update team.'); return; }
+    load();
+  }
+
+  async function removeTeam(team: SettingsTeam) {
+    const res = await fetch(`/api/teams/${team.id}`, { method: 'DELETE' });
+    if (!res.ok && res.status !== 204) { toast.error('Could not delete team.'); return; }
+    toast.success('Team deleted.'); load();
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Teams</CardTitle>
+        <CardDescription>
+          Group reps under one or more leaders. A team leader can see their members&apos; deals and
+          submissions (not commissions). Crown a member with the <Crown className="inline h-3 w-3" /> icon to
+          make them a leader.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex gap-2">
+          <Input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="New team name (e.g. East Coast)"
+            onKeyDown={(e) => { if (e.key === 'Enter') createTeam(); }}
+            className="max-w-xs"
+          />
+          <Button size="sm" onClick={createTeam} disabled={saving || !newName.trim()} className="gap-1">
+            <Plus className="h-3.5 w-3.5" /> Add team
+          </Button>
+        </div>
+
+        {loading ? (
+          <div className="text-sm text-muted-foreground">Loading…</div>
+        ) : teams.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">No teams yet. Create one above, then check off its members.</p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {teams.map((team) => (
+              <div key={team.id} className="rounded-lg border border-border p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">{team.name}</span>
+                  <button onClick={() => setDeleteTeam(team)} className="p-1 text-muted-foreground hover:text-destructive rounded" title="Delete team">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="space-y-1 max-h-56 overflow-y-auto">
+                  {companyUsers.map((u) => {
+                    const m = team.members.find((x) => x.userId === u.id);
+                    return (
+                      <div key={u.id} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={!!m}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? [...team.members.map((x) => ({ userId: x.userId, isLeader: x.isLeader })), { userId: u.id, isLeader: false }]
+                              : team.members.filter((x) => x.userId !== u.id).map((x) => ({ userId: x.userId, isLeader: x.isLeader }));
+                            saveMembers(team, next);
+                          }}
+                          className="h-3.5 w-3.5 rounded"
+                        />
+                        <span className="flex-1 truncate">{u.name || u.email}</span>
+                        {m && (
+                          <button
+                            onClick={() => {
+                              const next = team.members.map((x) => ({ userId: x.userId, isLeader: x.userId === u.id ? !x.isLeader : x.isLeader }));
+                              saveMembers(team, next);
+                            }}
+                            className={cn('p-1 rounded', m.isLeader ? 'text-amber-500' : 'text-muted-foreground/40 hover:text-amber-500')}
+                            title={m.isLeader ? 'Team leader — click to demote' : 'Make team leader'}
+                          >
+                            <Crown className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {deleteTeam && (
+          <ConfirmDialog
+            open
+            destructive
+            title={`Delete team "${deleteTeam.name}"?`}
+            description="Members and their deals are kept — they just lose the team grouping (and any leader's visibility into them via this team)."
+            confirmLabel="Delete"
+            onCancel={() => setDeleteTeam(null)}
+            onConfirm={() => { const t = deleteTeam; setDeleteTeam(null); removeTeam(t); }}
+          />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function LeadSourcesSection() {
   const toast = useToast();
   const [items, setItems] = useState<LeadSourceItem[]>([]);
@@ -2424,8 +2590,6 @@ function FundedTemplateSection() {
    ============================================================ */
 import { ALL_NAV_ITEMS, DEFAULT_CATEGORIES } from '@/components/sidebar';
 import { SIDEBAR_ICON_NAMES, resolveIcon } from '@/lib/sidebar-icons';
-import { cn } from '@/lib/utils';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { triggerFundingCelebration } from '@/components/funding-celebration';
 
 interface EditCategory { id: string; label: string; items: string[] }
