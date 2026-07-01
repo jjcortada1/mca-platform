@@ -128,14 +128,15 @@ function LoginInner() {
       }
 
       const verifyData = await verifyRes.json();
-      if (!verifyData.valid) {
+      if (!verifyData.valid || !verifyData.sessionToken) {
         setError(verifyData.error || 'Invalid verification code.');
         setLoading(false);
         return;
       }
 
-      // Sign in with 2FA provider
-      const res = await signIn('2fa', { userId, redirect: false });
+      // Sign in with the 2FA provider, passing the one-time session token that
+      // proves the code was verified server-side.
+      const res = await signIn('2fa', { userId, sessionToken: verifyData.sessionToken, redirect: false });
       setLoading(false);
       if (res?.error) {
         setError('Failed to create session.');

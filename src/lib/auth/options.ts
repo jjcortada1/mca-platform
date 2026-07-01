@@ -1,9 +1,10 @@
 import type { NextAuthOptions, DefaultSession } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { db } from '@/lib/db/client';
-import { users, permissions } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { users, permissions, verificationCodes } from '@/lib/db/schema';
+import { eq, and, isNull } from 'drizzle-orm';
 import { rateLimit } from '@/lib/api/rate-limit';
 
 declare module 'next-auth' {
@@ -95,15 +96,37 @@ export const authOptions: NextAuthOptions = {
       name: '2fa',
       credentials: {
         userId: { label: 'User ID', type: 'text' },
+        sessionToken: { label: 'Session Token', type: 'text' },
       },
       async authorize(credentials) {
-        // This provider is used after 2FA verification on the client side.
-        // The verify-2fa-code endpoint handles the actual verification.
-        // This just creates a session for an already-verified user.
-        if (!credentials?.userId) return null;
+        // Completes a 2FA login. REQUIRES the one-time sessionToken minted by
+        // /api/auth/verify-2fa-code — a userId alone is NOT enough (that would
+        // let anyone with a userId skip both password and 2FA). We look up the
+        // token's hash, confirm it's unexpired and unused, then consume it.
+        if (!credentials?.userId || !credentials?.sessionToken) return null;
+
+        const tokenHash = crypto.createHash('sha256').update(credentials.sessionToken).digest('hex');
+        const [tok] = await db
+          .select()
+          .from(verificationCodes)
+          .where(
+            and(
+              eq(verificationCodes.userId, credentials.userId),
+              eq(verificationCodes.purpose, 'login_2fa_session'),
+              eq(verificationCodes.codeHash, tokenHash),
+              isNull(verificationCodes.usedAt),
+            )
+          )
+          .limit(1);
+        if (!tok || new Date() > tok.expiresAt) return null;
+
+        // Consume it (single use) BEFORE issuing the session.
+        await db.update(verificationCodes).set({ usedAt: new Date() }).where(eq(verificationCodes.id, tok.id));
 
         const [user] = await db.select().from(users).where(eq(users.id, credentials.userId)).limit(1);
         if (!user || !user.isActive) return null;
+
+        await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
 
         const perms = await db
           .select({ key: permissions.permissionKey })
