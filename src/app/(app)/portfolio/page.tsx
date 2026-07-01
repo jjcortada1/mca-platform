@@ -1964,13 +1964,20 @@ function BreakdownPie({ breakdown }: { breakdown: BreakdownCounts }) {
   // inner cutout — a 30-unit stroke on an r=85 circle is the donut.
   const cx = 100, cy = 100, r = 85;
   const circumference = 2 * Math.PI * r;
+  // Small gap between segments so adjacent colors never touch (that seam
+  // was the "one color leaking into the other"). Only applied when there's
+  // more than one visible slice — a single 100% slice stays a solid ring.
+  const visibleCount = slices.filter((s) => breakdown[s.key] > 0).length;
+  const GAP = visibleCount > 1 ? 3 : 0; // units of circumference
   let offset = 0;
   const paths = slices.map((s) => {
     const v = breakdown[s.key];
     const pct = v / total;
     const len = circumference * pct;
-    const dasharray = `${len} ${circumference - len}`;
-    const dashoffset = -offset;
+    // Draw slightly less than the full arc, centered, leaving a clean gap.
+    const drawLen = Math.max(len - GAP, 0.5);
+    const dasharray = `${drawLen} ${circumference - drawLen}`;
+    const dashoffset = -(offset + GAP / 2);
     offset += len;
     return { ...s, value: v, pct, dasharray, dashoffset };
   });
@@ -1979,9 +1986,12 @@ function BreakdownPie({ breakdown }: { breakdown: BreakdownCounts }) {
     <div className="flex items-center gap-4">
       <div className="relative shrink-0">
         <svg viewBox="0 0 200 200" className="w-32 h-32" style={{ transform: 'rotate(-90deg)' }}>
-          {/* Underlying base ring so zero-slice statuses still show the
-              donut shape rather than an arc cut. */}
-          <circle cx={cx} cy={cy} r={r} fill="none" stroke="#f3f4f6" strokeWidth="30" />
+          {/* Underlying base ring: only when a SINGLE slice fills the donut,
+              so it never peeks through the gaps between multiple segments
+              (that gray sliver read as color bleed). */}
+          {visibleCount <= 1 && (
+            <circle cx={cx} cy={cy} r={r} fill="none" stroke="#f3f4f6" strokeWidth="30" />
+          )}
           {paths.filter((p) => p.value > 0).map((p) => (
             <circle
               key={p.key}
@@ -1989,6 +1999,7 @@ function BreakdownPie({ breakdown }: { breakdown: BreakdownCounts }) {
               fill="none"
               stroke={p.color}
               strokeWidth="30"
+              strokeLinecap="butt"
               strokeDasharray={p.dasharray}
               strokeDashoffset={p.dashoffset}
             />
@@ -2032,7 +2043,9 @@ function MonthlyVolumeBars({ monthly }: { monthly: MonthlyVolume[] }) {
 
   return (
     <div>
-      <div className="flex items-end gap-1.5 h-32">
+      {/* Extra top padding leaves room for the per-bar value label so it
+          never clips above the tallest bar. */}
+      <div className="flex items-end gap-1.5 h-32 pt-5">
         {monthly.map((m) => {
           const heightPct = (m.volume / maxVolume) * 100;
           const tooltip = m.volume > 0
@@ -2045,9 +2058,17 @@ function MonthlyVolumeBars({ monthly }: { monthly: MonthlyVolume[] }) {
           return (
             <div
               key={m.key}
-              className="flex-1 flex flex-col items-stretch justify-end h-full group"
+              className="flex-1 flex flex-col items-stretch justify-end h-full group relative"
               title={tooltip}
             >
+              {/* Value label above each bar — compact currency so numbers
+                  read at a glance ("$50k") without crowding. Hidden for
+                  empty months. */}
+              {m.volume > 0 && (
+                <div className="absolute -top-4 inset-x-0 text-center text-[9px] font-semibold tabular-nums text-foreground/70">
+                  {formatCurrency(m.volume, { compact: true })}
+                </div>
+              )}
               <div
                 className={cn(
                   'w-full rounded-t-sm transition-colors',
