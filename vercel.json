@@ -1,8 +1,5 @@
 {
-  "installCommand": "npm ci --legacy-peer-deps",
+  "installCommand": "npm ci --legacy-peer-deps --no-audit --no-fund",
   "buildCommand": "npm run build",
-  "nodejs": "20.x",
-  "env": {
-    "SKIP_ENV_VALIDATION": "true"
-  }
+  "nodejs": "18.x"
 }
