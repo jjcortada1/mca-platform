@@ -1,3 +1,44 @@
+# Update — July 2026 (round 4)
+
+## Security (important)
+- **Password reset now actually sends.** Same root cause as the 2FA
+  lockout — it only tried a system email service you don't have. All
+  security emails (reset link, 2FA code, password-change code) now fall
+  back to your connected SMTP (the account you send deals with), so they
+  arrive. If nothing can send, the reset link is written to the server
+  log as an operator backstop (never returned in the page, to stay safe).
+- **Fixed a 2FA login bug + closed a login bypass.** The code that checked
+  your 2FA code had a SQL bug that would reject every code; fixed. And the
+  final login step now requires a one-time, single-use token proving the
+  code was verified — a user ID alone can no longer create a session.
+
+## Companies (master area)
+- **Delete a company** — type-to-confirm; removes all its data. The owner
+  company can't be deleted.
+- **Manage any company's users** — a "Users" panel per company: add
+  reps/admins, set role + permissions, reset a password (for lockouts),
+  suspend, and **change who the admin is** (change a user's role to Admin).
+  Guards stop you removing a company's last admin.
+- **Lead source vs company admin**: emails are unique, so a person who is
+  both uses two logins (two emails) that each open their own portal by
+  role — no conflict.
+
+## Charts (Funded Deals)
+- Donut no longer bleeds one color into the next (clean gaps between
+  segments).
+- Monthly funding-volume bars now show the dollar amount above each bar.
+
+## Submissions
+- **Filter by month or all-time** (dropdown built from your data).
+
+## Audit notes
+- Industries / states / positions already use a single "Name" box (no
+  separate value + label) — you'll see that once this build is live.
+- Credit and revenue ranges keep a separate value because funders match
+  against it, so renaming the label never breaks matching.
+
+---
+
 # Update — July 2026 (round 3)
 
 ## Sending
