@@ -33,6 +33,7 @@ interface TaskItem {
   handledByName: string | null;
   createdBy: string | null;
   createdByName: string | null;
+  completedAt: string | null;
   createdAt: string;
 }
 

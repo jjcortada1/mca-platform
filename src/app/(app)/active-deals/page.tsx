@@ -31,6 +31,8 @@ interface Deal {
   termMode: string | null;
   termCount: string | null;
   fundingDate: string | null;
+  fundedWithFunderId: string | null;
+  fundedNotes: string | null;
   amountCollected: string | null;
   renewalNotes: string | null;
   createdAt: string;
@@ -72,7 +74,8 @@ const blankDeal = (): Deal => ({
   merchantEmail: '', merchantPhone: '', offerNotes: '', offerAmount: '',
   assignedRepId: null, status: 'submitted',
   fundedAmount: '', netAmount: '', feePct: '', factorRate: '', termMode: 'weekly', termCount: '',
-  fundingDate: '', amountCollected: '', renewalNotes: '',
+  fundingDate: '', fundedWithFunderId: null, fundedNotes: null,
+  amountCollected: '', renewalNotes: '',
   createdAt: '', updatedAt: '',
 });
 

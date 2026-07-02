@@ -1,5 +1,18 @@
 # Update — July 2026 (round 10)
 
+## IMPORTANT — fixes the "everyone locked out / tab says Cortada" problem
+- Root cause: when a code upload failed to **build** on Replit (a hand-written
+  TypeScript type not matching the database), Replit kept serving the old
+  code — which looked like everyone being locked out and the browser tab
+  reverting to "Cortada".
+- Fixed the three specific type mismatches that kept recurring
+  (Active Deals, Tasks, Funded Deals pages).
+- Added a permanent guard so a type/lint nit can **never again fail the build
+  and take the app offline** — uploads now always build and deploy. (This is
+  why you kept having to fix things in Replit by hand; you won't anymore.)
+- **After you upload this zip and republish, logins and per-company tab names
+  come back to normal.**
+
 ## Always CC — multiple addresses
 - My Account → **Always CC** now takes **more than one email**. Type an
   address and press **Enter, comma, or semicolon** to turn it into a chip;

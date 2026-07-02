@@ -655,6 +655,9 @@ function FundedDealRow({
   onUpdated: (patch: Partial<Deal>) => void;
   onRequestDelete: () => void;
 }) {
+  // Own toast handle — FundedDealRow is a separate component, so it can't see
+  // the parent PortfolioPage's `toast`; it needs its own hook call.
+  const toast = useToast();
   // Funded sub-status drives the badge instead of the broad deal.status when
   // we're on the Funded Deals page (every row here is funded by definition,
   // so showing "Funded" doesn't add information). Falls back to 'active' for
