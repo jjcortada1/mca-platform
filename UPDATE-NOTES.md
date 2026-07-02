@@ -1,3 +1,46 @@
+# Update — July 2026 (round 8)
+
+## Deal shop / intake
+- Open balances now carry only **Funder + Balance** (rate/term removed).
+- **State** dropdown lists only states that some funder actually restricts.
+- Intake form is more **compact**.
+
+## Branding
+- Each company's **accent color** now applies throughout their app (not the
+  owner's).
+- The persistent search bar was removed from the dashboard; **⌘K** still
+  works (and a search icon is in the mobile top bar).
+
+## 2FA
+- The account page now shows the **real** on/off state (was always saying
+  "disabled" even when on).
+
+## Reverse MCA calculator (upgraded engine)
+- New engine searches funding × factor × fee × term to find the closest
+  realistic MCA that reproduces your entered payment. Clean funding + common
+  factors/fees/terms score higher; optional deposit is a sanity check.
+- A **"Likely MCA structures"** panel shows the top 3–6 scenarios — each with
+  funding, factor, fee $, net to merchant, total payback, term, payment,
+  # payments, and how far its payment is from what you entered — plus a
+  confidence label (Very likely / Strong / Possible / Low) and a plain-English
+  "why this pick." The existing sliders/flow are unchanged.
+
+## Funded email
+- Optionally **attach a deal** (prefills recipient + fields) and **pick a rep**.
+- After sending, it **asks** whether to log it as a funded deal (never
+  automatic) — marks the deal funded + assigns the rep, then opens Funded
+  Deals to fill in anything missing.
+- (Lead-source filtering by commission already lives on the Commissions page.)
+
+## Bulk import
+- **Funded Deals** and **Commissions** now have **Bulk import**: download a
+  simple CSV template, upload, see a **preview** of exactly what will be
+  created (headers auto-map; reps match by name/email; commissions match to
+  deals by name), then **Confirm** to commit. Unmatched/invalid rows are
+  flagged and skipped.
+
+---
+
 # Update — July 2026 (round 7) — UX & polish
 
 ## Confirmations
