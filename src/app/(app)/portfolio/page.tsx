@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, PageHeader, Input, Button, CurrencyInput, PercentInput } from '@/components/ui/primitives';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { useToast } from '@/components/toast';
+import { useConfirm } from '@/components/confirm-provider';
 import { formatCurrency } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { Search, Trash2, Plus, LayoutGrid, List as ListIcon } from 'lucide-react';
@@ -91,6 +93,7 @@ const TONE_CLASS: Record<string, string> = {
 type SortKey = 'recent' | 'oldest' | 'pct_desc' | 'pct_asc' | 'balance_desc' | 'funded_desc';
 
 export default function PortfolioPage() {
+  const toast = useToast();
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -194,7 +197,7 @@ export default function PortfolioPage() {
       setDeleting(null);
     } else {
       const j = await res.json().catch(() => ({}));
-      alert(j.error || 'Could not delete this deal.');
+      toast.error(j.error || 'Could not delete this deal.');
     }
   }
 
@@ -713,7 +716,7 @@ function FundedDealRow({
     setRefiSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      alert(j.error || 'Could not mark deal as refinanced.');
+      toast.error(j.error || 'Could not mark deal as refinanced.');
       return;
     }
     // Optimistic local update so the row reflects the new state immediately,
@@ -2176,6 +2179,7 @@ function SyndicationsPanel({
   amountCollected: number;
   reps: { id: string; name: string }[];
 }) {
+  const confirm = useConfirm();
   const [syndications, setSyndications] = useState<Syndication[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -2231,7 +2235,7 @@ function SyndicationsPanel({
   }
 
   async function deleteSyndication(sid: string) {
-    if (!confirm('Remove this syndication?')) return;
+    if (!(await confirm({ title: 'Remove this syndication?', confirmLabel: 'Remove', destructive: true }))) return;
     const res = await fetch(`/api/deals/${dealId}/syndications/${sid}`, { method: 'DELETE' });
     if (!res.ok) return;
     load();

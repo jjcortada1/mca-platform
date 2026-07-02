@@ -12,6 +12,7 @@ import {
   Trash2, Sparkles, Crown, Plus,
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { useConfirm } from '@/components/confirm-provider';
 import { cn } from '@/lib/utils';
 
 type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar' | 'celebration' | 'teams';
@@ -1054,6 +1055,7 @@ interface Tier { id: string; name: string; sortOrder: number }
 
 function TiersSection() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tiers, setTiers] = useState<Tier[]>([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState('');
@@ -1083,7 +1085,7 @@ function TiersSection() {
   }
 
   async function remove(t: Tier) {
-    if (!confirm(`Delete "${t.name}"? Funder assignments to it will be removed.`)) return;
+    if (!(await confirm({ title: `Delete "${t.name}"?`, description: 'Funder assignments to it will be removed.', confirmLabel: 'Delete', destructive: true }))) return;
     const res = await fetch(`/api/funder-tiers/${t.id}`, { method: 'DELETE' });
     if (res.ok) toast.success('Tier deleted.');
     else toast.error('Delete failed.');
@@ -1681,6 +1683,7 @@ function SecuritySection() {
    BACKUP & EXPORT — the easy, recommended path
    ============================================================ */
 function BackupSection() {
+  const toast = useToast();
   const [downloading, setDownloading] = useState(false);
 
   async function downloadSnapshot() {
@@ -1689,7 +1692,7 @@ function BackupSection() {
       const res = await fetch('/api/settings/backup-export', { cache: 'no-store' });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        alert(j.error || 'Could not generate backup.');
+        toast.error(j.error || 'Could not generate backup.');
         return;
       }
       const blob = await res.blob();
@@ -2174,6 +2177,7 @@ function TeamsSection() {
 
 function LeadSourcesSection() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [items, setItems] = useState<LeadSourceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<(Partial<LeadSourceItem> & { id?: string }) | null>(null);
@@ -2212,7 +2216,7 @@ function LeadSourcesSection() {
   }
 
   async function remove(item: LeadSourceItem) {
-    if (!confirm(`Delete "${item.name}"? (If it has commissions, deactivate it instead.)`)) return;
+    if (!(await confirm({ title: `Delete "${item.name}"?`, description: 'If it has commissions, deactivate it instead.', confirmLabel: 'Delete', destructive: true }))) return;
     const res = await fetch(`/api/lead-sources/${item.id}`, { method: 'DELETE' });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) { toast.error(j.error || 'Delete failed'); return; }
@@ -2741,6 +2745,7 @@ function CelebrationSection() {
 
 function SidebarOrderSection() {
   const toast = useToast();
+  const confirm = useConfirm();
   // Editable categories — initial state filled from the saved config or
   // default. Each category has a stable id, a label, and a list of nav
   // item hrefs in order. Items not in any category get placed into the
@@ -2810,12 +2815,12 @@ function SidebarOrderSection() {
     const id = `cat_${Math.random().toString(36).slice(2, 8)}`;
     setCats([...cats, { id, label: 'New section', items: [] }]);
   }
-  function removeCategory(idx: number) {
+  async function removeCategory(idx: number) {
     if (cats.length === 1) {
       toast.error('Keep at least one section.');
       return;
     }
-    if (!confirm(`Delete "${cats[idx].label}"? Its items become Unassigned and will appear under "Other" until you move them.`)) return;
+    if (!(await confirm({ title: `Delete "${cats[idx].label}"?`, description: 'Its items become Unassigned and will appear under "Other" until you move them.', confirmLabel: 'Delete', destructive: true }))) return;
     setCats(cats.filter((_, i) => i !== idx));
   }
   function renameCategory(idx: number, label: string) {
@@ -2903,7 +2908,7 @@ function SidebarOrderSection() {
     toast.success('Saved. Refresh to see the new sidebar.');
   }
   async function resetToDefault() {
-    if (!confirm('Reset the sidebar to the default sections + names for everyone in your company?')) return;
+    if (!(await confirm({ title: 'Reset the sidebar to defaults?', description: 'Restores the default sections + names for everyone in your company.', confirmLabel: 'Reset' }))) return;
     setResetting(true);
     const res = await fetch('/api/settings/sidebar-order', {
       method: 'PUT',

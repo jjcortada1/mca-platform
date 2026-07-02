@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, Button, Input, Field, PageHeader, Badge, PercentInput, CurrencyInput } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
+import { useConfirm } from '@/components/confirm-provider';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { computePaydown } from '@/lib/deals/paydown';
@@ -124,6 +125,7 @@ type Tab = 'rep' | 'lead';
 
 export default function CommissionsPage() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<Tab>('rep');
   const [isAdmin, setIsAdmin] = useState(false);
   const [myUserId, setMyUserId] = useState<string | null>(null);
@@ -326,13 +328,13 @@ export default function CommissionsPage() {
     toast.success('Updated.'); load();
   }
   async function lsSoftDelete(id: string) {
-    if (!confirm('Remove this lead source commission? It will be marked deleted (kept in the backup).')) return;
+    if (!(await confirm({ title: 'Remove this lead source commission?', description: 'It will be marked deleted (kept in the backup).', confirmLabel: 'Remove', destructive: true }))) return;
     const res = await fetch(`/api/lead-source-commissions/${id}`, { method: 'DELETE' });
     if (!res.ok) { toast.error('Delete failed'); return; }
     toast.success('Removed.'); load();
   }
   async function softDelete(id: string) {
-    if (!confirm('Remove this commission? It will be marked deleted (kept in the backup).')) return;
+    if (!(await confirm({ title: 'Remove this commission?', description: 'It will be marked deleted (kept in the backup).', confirmLabel: 'Remove', destructive: true }))) return;
     const res = await fetch(`/api/commissions/${id}`, { method: 'DELETE' });
     if (!res.ok) { toast.error('Delete failed'); return; }
     toast.success('Removed.'); load();
@@ -1443,6 +1445,7 @@ function CommissionDetail({ r, isAdmin, reps, funders, onPatch, onDelete, onDeal
 /** Inline "log a payment against this commission" row. */
 function LogPaymentInline({ commissionId, repId, onLogged }: { commissionId: string; repId: string | null; onLogged: () => void }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('ach');
@@ -1478,7 +1481,7 @@ function LogPaymentInline({ commissionId, repId, onLogged }: { commissionId: str
   }
 
   async function deletePayment(id: string) {
-    if (!confirm('Delete this payment? The paid amount on this commission will be reversed.')) return;
+    if (!(await confirm({ title: 'Delete this payment?', description: 'The paid amount on this commission will be reversed.', confirmLabel: 'Delete', destructive: true }))) return;
     const res = await fetch(`/api/commission-payments/${id}`, { method: 'DELETE' });
     if (!res.ok) { toast.error('Delete failed'); return; }
     toast.success('Payment removed.');
@@ -1734,6 +1737,7 @@ function LSCommissionDetail({
 /* ---------- Inline "log a payment against this lead-source commission" ---------- */
 function LogLSPaymentInline({ lsCommissionId, onLogged }: { lsCommissionId: string; onLogged: () => void }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('ach');
@@ -1769,7 +1773,7 @@ function LogLSPaymentInline({ lsCommissionId, onLogged }: { lsCommissionId: stri
   }
 
   async function deletePayment(id: string) {
-    if (!confirm('Delete this payment? The lead source will no longer see it, and the paid amount will be reversed.')) return;
+    if (!(await confirm({ title: 'Delete this payment?', description: 'The lead source will no longer see it, and the paid amount will be reversed.', confirmLabel: 'Delete', destructive: true }))) return;
     const res = await fetch(`/api/commission-payments/${id}`, { method: 'DELETE' });
     if (!res.ok) { toast.error('Delete failed'); return; }
     toast.success('Payment removed.');
