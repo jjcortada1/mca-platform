@@ -16,13 +16,13 @@
  * on when they click "configure SMTP" from the submit screen.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   Card, CardHeader, CardTitle, CardContent, CardDescription,
   Button, Input, Field, PageHeader,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
-import { Mail, KeyRound, ShieldCheck, Shield, PenLine } from 'lucide-react';
+import { Mail, KeyRound, ShieldCheck, Shield, PenLine, X } from 'lucide-react';
 
 interface MeUser { id: string; name: string; email: string; role: string }
 
@@ -354,10 +354,27 @@ function MySmtpCard() {
    this rep sends. Stored on the rep's own user row so each
    user has their own preference. Empty clears the setting.
    ============================================================ */
+const CC_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Parse a stored/typed value into a clean, deduped list of emails. */
+function parseCcList(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of String(raw ?? '').split(/[,;\n]/)) {
+    const e = part.trim().toLowerCase();
+    if (!e || seen.has(e)) continue;
+    seen.add(e);
+    out.push(e);
+  }
+  return out;
+}
+
 function AlwaysCcCard() {
   const toast = useToast();
-  const [value, setValue] = useState('');
-  const [saved, setSaved] = useState<string | null>(null);
+  // The list of confirmed chips + whatever's being typed in the input.
+  const [emails, setEmails] = useState<string[]>([]);
+  const [draft, setDraft] = useState('');
+  const [saved, setSaved] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -365,19 +382,59 @@ function AlwaysCcCard() {
     fetch('/api/account/cc', { cache: 'no-store' })
       .then((r) => r.json())
       .then((j) => {
-        const v = j?.data?.alwaysCcEmail ?? '';
-        setValue(v);
-        setSaved(v || null);
+        const list = parseCcList(j?.data?.alwaysCcEmail ?? '');
+        setEmails(list);
+        setSaved(list);
       })
       .finally(() => setLoading(false));
   }, []);
 
+  // Commit the current draft as one or more chips. Returns false if any part
+  // was an invalid email (so we can keep it in the box for correction).
+  function commitDraft(): boolean {
+    const parts = parseCcList(draft);
+    if (!parts.length) { setDraft(''); return true; }
+    const bad = parts.find((e) => !CC_EMAIL_RE.test(e));
+    if (bad) { toast.error(`Not a valid email: ${bad}`); return false; }
+    setEmails((prev) => {
+      const merged = [...prev];
+      for (const e of parts) if (!merged.includes(e)) merged.push(e);
+      return merged;
+    });
+    setDraft('');
+    return true;
+  }
+
+  function removeEmail(e: string) {
+    setEmails((prev) => prev.filter((x) => x !== e));
+  }
+
+  function onKeyDown(ev: KeyboardEvent<HTMLInputElement>) {
+    if (ev.key === 'Enter' || ev.key === ',' || ev.key === ';') {
+      ev.preventDefault();
+      commitDraft();
+    } else if (ev.key === 'Backspace' && !draft && emails.length) {
+      // Backspace on an empty box pops the last chip for quick editing.
+      setEmails((prev) => prev.slice(0, -1));
+    }
+  }
+
+  const dirty = useMemo(() => {
+    const pending = draft.trim() ? [...emails, ...parseCcList(draft)] : emails;
+    return pending.join(', ') !== saved.join(', ');
+  }, [emails, draft, saved]);
+
   async function save() {
+    // Fold any half-typed address into the list before saving.
+    if (draft.trim() && !commitDraft()) return;
+    const list = draft.trim()
+      ? Array.from(new Set([...emails, ...parseCcList(draft)]))
+      : emails;
     setSaving(true);
     const res = await fetch('/api/account/cc', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ alwaysCcEmail: value.trim() }),
+      body: JSON.stringify({ alwaysCcEmail: list }),
     });
     const j = await res.json();
     setSaving(false);
@@ -385,10 +442,11 @@ function AlwaysCcCard() {
       toast.error(j.error || 'Could not save.');
       return;
     }
-    const newVal = j?.data?.alwaysCcEmail ?? null;
-    setSaved(newVal);
-    setValue(newVal ?? '');
-    toast.success(newVal ? 'Always CC saved.' : 'Always CC cleared.');
+    const newList = parseCcList(j?.data?.alwaysCcEmail ?? '');
+    setSaved(newList);
+    setEmails(newList);
+    setDraft('');
+    toast.success(newList.length ? 'Always CC saved.' : 'Always CC cleared.');
   }
 
   if (loading) return null;
@@ -400,25 +458,49 @@ function AlwaysCcCard() {
           <Mail className="h-4 w-4" /> Always CC
         </CardTitle>
         <CardDescription>
-          Automatically add this email address as CC on every deal you submit. Useful if you want your manager copied on outgoing submissions. Leave blank to turn off.
+          Automatically CC these addresses on every deal you submit. Add as many as you like — useful if you want your manager (or more than one person) copied on outgoing submissions. Leave empty to turn off.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Field label="CC email">
-          <Input
-            type="email"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="manager@company.com"
-          />
+        <Field label="CC emails">
+          <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1.5 focus-within:ring-2 focus-within:ring-ring">
+            {emails.map((e) => (
+              <span
+                key={e}
+                className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs font-medium"
+              >
+                <span className="font-mono">{e}</span>
+                <button
+                  type="button"
+                  onClick={() => removeEmail(e)}
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label={`Remove ${e}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+            <input
+              type="email"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onKeyDown}
+              onBlur={() => commitDraft()}
+              placeholder={emails.length ? 'Add another…' : 'manager@company.com'}
+              className="min-w-[12ch] flex-1 bg-transparent py-0.5 text-sm outline-none placeholder:text-muted-foreground"
+            />
+          </div>
         </Field>
+        <p className="text-xs text-muted-foreground">
+          Press Enter, comma, or semicolon to add each address.
+        </p>
         <div className="flex items-center gap-3">
-          <Button onClick={save} disabled={saving || value.trim() === (saved ?? '')}>
+          <Button onClick={save} disabled={saving || !dirty}>
             {saving ? 'Saving…' : 'Save'}
           </Button>
-          {saved && (
+          {saved.length > 0 && (
             <span className="text-xs text-muted-foreground">
-              Currently CCing: <span className="font-mono">{saved}</span>
+              Currently CCing {saved.length} {saved.length === 1 ? 'address' : 'addresses'}.
             </span>
           )}
         </div>

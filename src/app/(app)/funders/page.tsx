@@ -263,7 +263,8 @@ export default function FundersPage() {
       ) : (
         <Card>
           <CardContent className="p-0">
-            <table className="data-grid w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="data-grid w-full text-sm min-w-[720px]">
               <thead>
                 <tr className="border-b border-border bg-muted/30 text-left">
                   <th className="px-4 py-2 font-medium text-xs uppercase tracking-wide text-muted-foreground">Name</th>
@@ -322,6 +323,7 @@ export default function FundersPage() {
                 )}
               </tbody>
             </table>
+            </div>
           </CardContent>
         </Card>
       )}

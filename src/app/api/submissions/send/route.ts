@@ -227,7 +227,12 @@ export async function POST(req: NextRequest) {
       .from(users)
       .where(eq(users.id, ctx.user.id))
       .limit(1);
-    const senderAlwaysCc = senderRow?.alwaysCcEmail ?? null;
+    // alwaysCcEmail may hold multiple addresses (comma/semicolon-separated).
+    // Split into individual addresses so every one lands on the CC line.
+    const senderAlwaysCcList = (senderRow?.alwaysCcEmail ?? '')
+      .split(/[,;\n]/)
+      .map((e) => e.trim())
+      .filter(Boolean);
 
     // Sender's signature — pulled from the actual sender (ctx.user), not the
     // assigned rep, because the signature represents who's writing the email.
@@ -251,7 +256,7 @@ export async function POST(req: NextRequest) {
     const allCc = Array.from(new Set([
       ...ccEmails,
       ...globalCc,
-      ...(senderAlwaysCc ? [senderAlwaysCc] : []),
+      ...senderAlwaysCcList,
     ].filter(Boolean)));
 
     // Upsert submission row (one per deal, ever)

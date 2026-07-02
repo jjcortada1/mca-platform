@@ -142,7 +142,8 @@ export const users = pgTable(
     // is automatically added to CC on every outbound message. Used by reps
     // who want their manager copied on everything. Empty = no auto CC.
     // NOTE: Funded emails (different flow) intentionally do NOT honor this.
-    alwaysCcEmail: varchar('always_cc_email', { length: 255 }),
+    // May hold multiple comma-separated addresses, so use unbounded text.
+    alwaysCcEmail: text('always_cc_email'),
     // Per-rep email signature appended to outgoing emails this rep sends.
     // Plain text, multi-line. Each rep edits their own on /account; reps
     // never see or edit another rep's signature.

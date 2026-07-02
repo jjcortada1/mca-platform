@@ -1,3 +1,23 @@
+# Update — July 2026 (round 10)
+
+## Always CC — multiple addresses
+- My Account → **Always CC** now takes **more than one email**. Type an
+  address and press **Enter, comma, or semicolon** to turn it into a chip;
+  add as many as you like, and click the **×** on any chip to remove it.
+- Every address you list is automatically CC'd on the deals you submit.
+  (Still your own setting — it never applies to emails someone else sends.)
+
+## Mobile layout
+- Fixed sideways-scrolling / cramped screens on phones:
+  - Page action buttons now **wrap** onto the next line instead of running
+    off the edge.
+  - Wide tables (e.g. Funders) **scroll horizontally on their own** instead
+    of stretching the whole page.
+  - Added a global guard so a stray wide element can never drag the entire
+    page into a horizontal scroll.
+
+---
+
 # Update — July 2026 (round 9)
 
 ## Reverse consolidation commissions (draw-based)

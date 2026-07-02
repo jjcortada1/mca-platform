@@ -34,6 +34,9 @@ const STATEMENTS: string[] = [
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS signature_logo_url text`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS signature_link varchar(500)`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS always_cc_email varchar(255)`,
+  // Widen always_cc_email to hold multiple comma-separated addresses.
+  // Idempotent: re-running TYPE text on an already-text column is a no-op.
+  `ALTER TABLE users ALTER COLUMN always_cc_email TYPE text`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_enabled boolean NOT NULL DEFAULT false`,
 
   // ---- deals: funded-deal detail + intake columns ----

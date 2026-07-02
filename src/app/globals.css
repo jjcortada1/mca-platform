@@ -95,6 +95,11 @@
 
   body {
     @apply bg-background text-foreground;
+    /* Mobile safety net: never let a stray wide child drag the whole page
+       into a sideways scroll. `clip` (unlike `hidden`) doesn't break
+       position: sticky headers/sidebars. Wide tables still scroll inside
+       their own overflow-x-auto wrappers. */
+    overflow-x: clip;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
     font-feature-settings: 'cv11', 'ss01', 'ss03';
     -webkit-font-smoothing: antialiased;
