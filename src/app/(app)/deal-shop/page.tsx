@@ -491,17 +491,14 @@ export default function DealShopPage() {
     const intakeSummary = formatIntakeMessage(openBalances, priorHistoryMode, priorHistoryDetails, recentFundings);
     const composedBody = intakeSummary ? `${intakeSummary}\n\n${notes}`.trim() : notes;
     fd.append('bodyNotes', composedBody);
-    // Best-effort persist of intake on the deal so it's there next time
-    // this deal is shopped. Fire-and-forget — submission goes ahead even
-    // if the persist call hits a transient error.
-    if (dealId) {
-      const intake = buildIntakePayload(openBalances, priorHistoryMode, priorHistoryDetails, recentFundings, notes);
-      fetch(`/api/deals/${dealId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ submissionIntake: intake }),
-      }).catch(() => {});
-    }
+    // Capture the structured deal details (open balances, prior history,
+    // recent fundings, notes) WITH the deal so re-shopping to more funders
+    // pre-fills everything. Sent to the server on every submit so it's saved
+    // even for a brand-new deal (which has no dealId here yet — the server
+    // creates the deal and persists the intake onto it). Kept separate from
+    // the deal's offer notes.
+    const intake = buildIntakePayload(openBalances, priorHistoryMode, priorHistoryDetails, recentFundings, notes);
+    fd.append('submissionIntake', JSON.stringify(intake));
     fd.append('funders', JSON.stringify(targets));
     if (assignedRepId) fd.append('assignedRepId', assignedRepId);
     fd.append('ccEmails', JSON.stringify(ccList));
@@ -2311,35 +2308,39 @@ function formatIntakeMessage(
   const sections: string[] = [];
 
   // 1. Recent funding — leads, per spec. Include if ANY field is filled.
+  // No parentheses and no placeholder fillers: empty fields are simply
+  // omitted so the funder only sees real information.
   const validFundings = recentFundings.filter((r) => r.company.trim() || r.amount.trim() || r.date.trim() || (r.rate ?? '').trim() || (r.term ?? '').trim());
   if (validFundings.length > 0) {
     const lines: string[] = ['Recent Funding:'];
     for (const r of validFundings) {
-      const company = r.company.trim() || '(company)';
-      const amount = r.amount.trim() || '(amount)';
-      const dateSuffix = r.date.trim() ? ` on ${r.date.trim()}` : '';
+      const company = r.company.trim();
+      const amount = r.amount.trim();
       const rateStr = (r.rate ?? '').trim();
       const termStr = (r.term ?? '').trim();
-      let suffix = '';
-      if (rateStr && termStr) suffix = ` (${rateStr} / ${termStr})`;
-      else if (rateStr) suffix = ` (${rateStr})`;
-      else if (termStr) suffix = ` (${termStr})`;
-      lines.push(`  ${company} funded ${amount}${suffix}${dateSuffix}`);
+      const date = r.date.trim();
+      let line = '';
+      if (company && amount) line = `${company} funded ${amount}`;
+      else if (company) line = company;
+      else if (amount) line = `Funded ${amount}`;
+      const rt = [rateStr, termStr].filter(Boolean).join(' / ');
+      if (rt) line += line ? ` at ${rt}` : rt;
+      if (date) line += line ? ` on ${date}` : date;
+      if (line) lines.push(`  ${line}`);
     }
     sections.push(lines.join('\n'));
   }
 
-  // 2. Open balances — including rate/term tail when present. The
-  // suffix is "(rate / term)" so the funder can scan the price + length
-  // of each competing position at a glance. Include if ANY field is filled.
-  // Open balances now carry ONLY funder + balance (rate/term removed).
+  // 2. Open balances — funder + balance only. Empty fields omitted; no
+  // parentheses or placeholders.
   const validBalances = openBalances.filter((r) => r.funder.trim() || r.amount.trim());
   if (validBalances.length > 0) {
     const lines: string[] = ['Open Balances:'];
     for (const r of validBalances) {
-      const funder = r.funder.trim() || '(funder)';
-      const amount = r.amount.trim() || '(amount)';
-      lines.push(`  ${funder} ${amount}`);
+      const funder = r.funder.trim();
+      const amount = r.amount.trim();
+      const line = [funder, amount].filter(Boolean).join(' ');
+      if (line) lines.push(`  ${line}`);
     }
     sections.push(lines.join('\n'));
   }

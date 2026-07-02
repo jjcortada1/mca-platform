@@ -1,3 +1,23 @@
+# Update — July 2026 (round 13)
+
+## Deal details are captured again on submit (for re-shopping)
+- When you submit a deal, the **deal details** you enter in the submission
+  intake (open balances, prior history, recent fundings, and your notes) are
+  now **saved onto the deal** — even the first time you shop a brand-new deal.
+  Previously this only saved for deals that already existed, so a fresh deal's
+  details weren't captured. Now when you re-shop it to more funders, everything
+  pre-fills.
+- Your **offer notes stay separate** — the intake details are stored as the
+  deal's captured submission details, not mixed into your offer notes.
+
+## No more parentheses in the submission email
+- The intake summary in the outgoing email no longer uses parentheses or
+  placeholder text. Empty fields are simply left out, and rate/term now read
+  plainly (e.g. "ABC funded $50,000 at 1.4 / 6 months on 2026-01-15") instead
+  of being wrapped in "( )".
+
+---
+
 # Update — July 2026 (round 12) — THE data-loss fix
 
 ## Root cause found (this is the one that actually wiped data)

@@ -101,6 +101,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Malformed request payload' }, { status: 400 });
     }
 
+    // Structured deal details captured with the deal (open balances, prior
+    // history, recent fundings, notes) so re-shopping pre-fills them. Optional
+    // and parsed defensively — a malformed intake never fails the send.
+    let submissionIntakeInput: unknown = null;
+    const rawIntake = formData.get('submissionIntake') as string | null;
+    if (rawIntake) {
+      try { submissionIntakeInput = JSON.parse(rawIntake); } catch { submissionIntakeInput = null; }
+    }
+
     if (!fundersInput.length) {
       return NextResponse.json({ error: 'No funders selected' }, { status: 400 });
     }
@@ -131,14 +140,24 @@ export async function POST(req: NextRequest) {
       deal = found;
       // Propagate the chosen rep to the deal record. Now allowed for any
       // sender (no longer admin-gated) — a rep can reassign a deal to a
-      // teammate when shopping on their behalf.
+      // teammate when shopping on their behalf. Also capture the submission
+      // intake (deal details) onto the deal so re-shopping pre-fills it.
+      const updates: Record<string, unknown> = {};
       if (assignedRepIdRaw && resolvedRepId !== found.assignedRepId) {
-        await db.update(deals).set({ assignedRepId: resolvedRepId, updatedAt: new Date() })
-          .where(eq(deals.id, found.id));
-        deal = { ...found, assignedRepId: resolvedRepId };
+        updates.assignedRepId = resolvedRepId;
+      }
+      if (submissionIntakeInput != null) {
+        updates.submissionIntake = submissionIntakeInput;
+      }
+      if (Object.keys(updates).length) {
+        updates.updatedAt = new Date();
+        await db.update(deals).set(updates).where(eq(deals.id, found.id));
+        deal = { ...found, ...updates } as typeof found;
       }
     } else {
-      // Auto-create a minimal deal from dealName
+      // Auto-create a minimal deal from dealName. Capture the intake (deal
+      // details) on it immediately so the very first submission saves the
+      // details for later re-shopping.
       const [created] = await db
         .insert(deals)
         .values({
@@ -146,6 +165,7 @@ export async function POST(req: NextRequest) {
           name: dealName,
           status: 'shopping',
           assignedRepId: resolvedRepId,
+          submissionIntake: submissionIntakeInput ?? null,
           createdBy: ctx.user.id,
         })
         .returning();
