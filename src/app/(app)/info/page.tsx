@@ -6,6 +6,7 @@ import {
   Button, Input, Textarea, Field, Badge, PageHeader, EmptyState,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
+import { useConfirm } from '@/components/confirm-provider';
 import { formatDate, cn } from '@/lib/utils';
 import { Plus, Search, X, BookOpen, Hash, Trash2 } from 'lucide-react';
 
@@ -41,6 +42,7 @@ function colorFor(cat: string | null): typeof CAT_COLORS[number] {
 
 export default function InfoPage() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [entries, setEntries] = useState<InfoEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<InfoEntry | null>(null);
@@ -75,7 +77,7 @@ export default function InfoPage() {
   }
 
   async function del(id: string) {
-    if (!confirm('Delete this entry?')) return;
+    if (!(await confirm({ title: 'Delete this entry?', confirmLabel: 'Delete', destructive: true }))) return;
     const res = await fetch(`/api/info/${id}`, { method: 'DELETE' });
     if (res.ok) toast.success('Entry deleted.');
     else toast.error('Delete failed.');

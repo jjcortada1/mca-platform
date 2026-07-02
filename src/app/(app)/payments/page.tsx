@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, Button, Input, Field, Badge, PageHeader, CurrencyInput } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
+import { useConfirm } from '@/components/confirm-provider';
 import { formatCurrency } from '@/lib/utils';
 import { Search, Download } from 'lucide-react';
 import { exportCSV } from '@/lib/csv-export';
@@ -39,6 +40,7 @@ const fmtDate = (d: string | null) => formatCalendarDate(d);
 
 export default function PaymentsPage() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -81,7 +83,7 @@ export default function PaymentsPage() {
   }, [payments]);
 
   async function deletePayment(p: Payment) {
-    if (!confirm(`Delete payment of ${formatCurrency(Number(p.amount))} to ${p.payeeName}? The paid amount on any linked commission will be reversed.`)) return;
+    if (!(await confirm({ title: `Delete payment of ${formatCurrency(Number(p.amount))} to ${p.payeeName}?`, description: 'The paid amount on any linked commission will be reversed.', confirmLabel: 'Delete', destructive: true }))) return;
     const res = await fetch(`/api/commission-payments/${p.id}`, { method: 'DELETE' });
     if (!res.ok) { toast.error('Delete failed'); return; }
     toast.success('Payment removed.');

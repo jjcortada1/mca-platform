@@ -6,6 +6,7 @@ import {
   Button, Input, Textarea, Field, Badge, PageHeader, MoneyInput,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
+import { useConfirm } from '@/components/confirm-provider';
 import { US_STATES, COMMON_INDUSTRIES, CREDIT_TIER_OPTIONS } from '@/lib/constants';
 import { formatCurrency, cn } from '@/lib/utils';
 import { Upload, Plus, Search, X, Download, FileText, AlertCircle, CheckCircle2, Trash2, Eye, Phone, Mail } from 'lucide-react';
@@ -74,6 +75,7 @@ const blankFunder = (): Funder => ({
 
 export default function FundersPage() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [funders, setFunders] = useState<Funder[]>([]);
   const [tiers, setTiers] = useState<FunderTier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -154,7 +156,7 @@ export default function FundersPage() {
   }
 
   async function deleteFunder(id: string) {
-    if (!confirm('Delete this funder? This cannot be undone.')) return;
+    if (!(await confirm({ title: 'Delete this funder?', description: 'This cannot be undone.', confirmLabel: 'Delete', destructive: true }))) return;
     await fetch(`/api/funders/${id}`, { method: 'DELETE' });
     load();
   }
@@ -848,6 +850,7 @@ function BulkImportModal({
   onClose: () => void;
   onComplete: (ok: number, failed: number) => void;
 }) {
+  const toast = useToast();
   type Mode = 'manual' | 'csv';
   const [mode, setMode] = useState<Mode>('manual');
 
@@ -881,7 +884,7 @@ function BulkImportModal({
   async function saveManual() {
     const filled = rows.filter((r) => r.name.trim());
     if (!filled.length) {
-      alert('Add at least one funder name.');
+      toast.error('Add at least one funder name.');
       return;
     }
     // Build a CSV in-memory from the simple rows and reuse the import endpoint
@@ -902,7 +905,7 @@ function BulkImportModal({
     const json = await res.json();
     setSavingManual(false);
     if (!res.ok) {
-      alert(json.error || 'Save failed.');
+      toast.error(json.error || 'Save failed.');
       return;
     }
     onComplete(json.ok ?? filled.length, json.failed ?? 0);
@@ -923,7 +926,7 @@ function BulkImportModal({
     const lower = f.name.toLowerCase();
     const ok = lower.endsWith('.csv') || lower.endsWith('.xlsx') || lower.endsWith('.xls');
     if (!ok) {
-      alert('File must be .csv, .xlsx, or .xls');
+      toast.error('File must be .csv, .xlsx, or .xls');
       return;
     }
     setFile(f);

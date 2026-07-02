@@ -10,6 +10,7 @@ import { Plus, Trash2, Briefcase, Search, X, ChevronDown, ChevronRight, Download
 import { cn } from '@/lib/utils';
 import { computePaydown, buildPaymentSchedule, DEAL_STATUS_META, DEAL_STATUS_OPTIONS } from '@/lib/deals/paydown';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { useConfirm } from '@/components/confirm-provider';
 
 interface Deal {
   id: string;
@@ -858,6 +859,7 @@ const blankOffer = (): Omit<OfferRow, 'id' | 'createdAt'> => ({
  */
 function OffersManager({ dealId }: { dealId: string }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [offers, setOffers] = useState<OfferRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -912,7 +914,7 @@ function OffersManager({ dealId }: { dealId: string }) {
   }
 
   async function deleteOffer(id: string) {
-    if (!confirm('Delete this offer?')) return;
+    if (!(await confirm({ title: 'Delete this offer?', confirmLabel: 'Delete', destructive: true }))) return;
     await fetch(`/api/offers/${id}`, { method: 'DELETE' });
     load();
   }
