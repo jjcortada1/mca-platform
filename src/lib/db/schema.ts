@@ -334,6 +334,10 @@ export const deals = pgTable(
     merchantLastName: varchar('merchant_last_name', { length: 100 }),
     merchantEmail: varchar('merchant_email', { length: 255 }),
     merchantPhone: varchar('merchant_phone', { length: 50 }),
+    // 'standard_mca' | 'reverse_consolidation'. Reverse consolidations pay
+    // commission over time (draw-based), so their commission stays pending
+    // until fully drawn — see the commissions view. Default standard.
+    dealType: varchar('deal_type', { length: 30 }).notNull().default('standard_mca'),
     offerNotes: text('offer_notes'),
     // Structured numeric offer amount (separate from free-text offerNotes).
     // Nullable so legacy rows continue to work.

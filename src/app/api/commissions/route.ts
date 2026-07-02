@@ -49,6 +49,7 @@ export async function GET() {
         // show + update it from the commission detail panel.
         dealFundedWithFunderId: deals.fundedWithFunderId,
         dealFundedWithName: deals.fundedWithName,
+        dealType: deals.dealType,
         repName: users.name,
       })
       .from(dealCommissions)
@@ -62,7 +63,7 @@ export async function GET() {
       .orderBy(desc(dealCommissions.updatedAt));
 
     const now = new Date();
-    const data = rows.map(({ c, dealName, merchantFirstName, merchantLastName, merchantPhone, merchantEmail, assignedRepId, repName, dealFundingDate, dealFundedNotes, dealFundedWithFunderId, dealFundedWithName }) => {
+    const data = rows.map(({ c, dealName, merchantFirstName, merchantLastName, merchantPhone, merchantEmail, assignedRepId, repName, dealFundingDate, dealFundedNotes, dealFundedWithFunderId, dealFundedWithName, dealType }) => {
       const effectiveStatus = resolveAutoStatus(c.status, c.fundingDate, now);
       const amount = Number(c.repCommissionAmount);
       const paid = Number(c.paidAmount);
@@ -94,6 +95,10 @@ export async function GET() {
         dealFundedNotes,
         dealFundedWithFunderId,
         dealFundedWithName,
+        dealType,
+        // Reverse consolidations pay commission over time — surfaced so the
+        // UI can show the draw-based treatment (paid X of Y, stays pending).
+        isReverseConsolidation: dealType === 'reverse_consolidation',
         clearedDate: c.clearedDate,
         earlyPayoffDiscount: c.earlyPayoffDiscount,
         notes: c.notes,

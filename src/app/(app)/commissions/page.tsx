@@ -84,6 +84,8 @@ interface Commission {
   // commission detail panel; the picker patches the underlying deal.
   dealFundedWithFunderId?: string | null;
   dealFundedWithName?: string | null;
+  dealType?: string | null;
+  isReverseConsolidation?: boolean;
   clearedDate: string | null;
   earlyPayoffDiscount: string | null;
   notes: string | null;
@@ -1359,6 +1361,33 @@ function CommissionDetail({ r, isAdmin, reps, funders, onPatch, onDelete, onDeal
         funders={funders}
         onDealPatch={onDealPatch}
       />
+      {/* Reverse consolidation — commission is paid out over time (draws),
+          not upfront. Show the running paid/remaining and keep it visibly
+          "pending" until fully drawn. Admins log each draw below. */}
+      {r.isReverseConsolidation && (() => {
+        const total = Number(r.repCommissionAmount) || 0;
+        const paidSoFar = Number(r.paidAmount) || 0;
+        const remaining = Math.max(0, total - paidSoFar);
+        const pct = total > 0 ? Math.round((paidSoFar / total) * 100) : 0;
+        return (
+          <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 border border-violet-200">
+                Reverse consolidation
+              </span>
+              <span className="text-xs text-violet-900">Commission is drawn over time — stays pending until fully paid.</span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-violet-100 overflow-hidden">
+              <div className="h-full rounded-full bg-violet-500" style={{ width: `${Math.min(100, pct)}%` }} />
+            </div>
+            <div className="flex items-center justify-between text-xs tabular-nums">
+              <span className="text-violet-900">Paid {formatCurrency(paidSoFar)} of {formatCurrency(total)}</span>
+              <span className="font-semibold text-violet-900">Remaining {formatCurrency(remaining)}</span>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Admin-only Edit toggle. Default is read-only details; admin clicks
           to expose the editable forms below. Keeps view ≠ edit. */}
       {isAdmin && !editing && (

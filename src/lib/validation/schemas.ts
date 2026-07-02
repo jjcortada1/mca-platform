@@ -132,6 +132,7 @@ export const upsertDealSchema = z.object({
   merchantPhone: z.string().max(50).optional().nullable(),
   offerNotes: z.string().max(10000).optional().nullable(),
   assignedRepId: z.string().uuid().optional().nullable(),
+  dealType: z.enum(['standard_mca', 'reverse_consolidation']).optional(),
   status: z.enum([
     'shopping', 'submitted', 'active', 'not_active', 'offer', 'funded', 'dead', 'declined',
     'waiting_on_offer',

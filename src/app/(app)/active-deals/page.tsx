@@ -1334,6 +1334,7 @@ function MarkFundedModal({
     fundingDate: deal.fundingDate ? String(deal.fundingDate).slice(0, 10) : '',
     fundedWithFunderId: deal.fundedWithFunderId ?? '',
     fundedNotes: deal.fundedNotes ?? '',
+    dealType: (deal as { dealType?: string }).dealType ?? 'standard_mca',
   });
 
   useEffect(() => {
@@ -1363,6 +1364,7 @@ function MarkFundedModal({
       fundingDate: form.fundingDate || null,
       fundedWithFunderId: form.fundedWithFunderId || null,
       fundedNotes: form.fundedNotes.trim() || null,
+      dealType: form.dealType,
     };
     const res = await fetch(`/api/deals/${deal.id}`, {
       method: 'PATCH',
@@ -1449,6 +1451,16 @@ function MarkFundedModal({
                 >
                   <option value="">— select funder —</option>
                   {funders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Deal type" className="col-span-2">
+                <select
+                  value={form.dealType}
+                  onChange={(e) => setForm({ ...form, dealType: e.target.value })}
+                  className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+                >
+                  <option value="standard_mca">Standard MCA</option>
+                  <option value="reverse_consolidation">Reverse consolidation (commission paid over time)</option>
                 </select>
               </Field>
             </div>

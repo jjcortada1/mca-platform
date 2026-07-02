@@ -242,9 +242,13 @@ export const PasswordInput = React.forwardRef<HTMLInputElement, React.InputHTMLA
         />
         <button
           type="button"
+          // onMouseDown preventDefault so the button doesn't steal focus/blur
+          // from the input before the click registers (that made the toggle
+          // feel dead in some browsers). z-10 keeps it clickable above any
+          // browser/extension reveal icon that may overlap the field.
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => setShow((s) => !s)}
-          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
-          tabIndex={-1}
+          className="absolute right-2 top-1/2 -translate-y-1/2 z-10 text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded cursor-pointer"
           aria-label={show ? 'Hide password' : 'Show password'}
         >
           {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}

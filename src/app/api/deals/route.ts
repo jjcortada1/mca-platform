@@ -92,6 +92,7 @@ export async function POST(req: NextRequest) {
       merchantLastName: body.merchantLastName ? titleCaseName(body.merchantLastName) : null,
       merchantEmail: body.merchantEmail || null,
       merchantPhone: body.merchantPhone ?? null,
+      dealType: body.dealType ?? 'standard_mca',
       offerNotes: body.offerNotes ?? null,
       offerAmount: body.offerAmount != null ? String(body.offerAmount) : null,
       assignedRepId: body.assignedRepId ?? null,

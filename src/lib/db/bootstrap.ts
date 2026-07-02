@@ -45,6 +45,7 @@ const STATEMENTS: string[] = [
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS is_deleted boolean NOT NULL DEFAULT false`,
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS offer_amount numeric(14,2)`,
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS net_amount numeric(14,2)`,
+  `ALTER TABLE deals ADD COLUMN IF NOT EXISTS deal_type varchar(30) NOT NULL DEFAULT 'standard_mca'`,
 
   // ---- submission_funders: intake notes stored per funder submission ----
   `ALTER TABLE submission_funders ADD COLUMN IF NOT EXISTS notes text`,
