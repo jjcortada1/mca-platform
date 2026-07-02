@@ -1,3 +1,49 @@
+# Update — July 2026 (round 12) — THE data-loss fix
+
+## Root cause found (this is the one that actually wiped data)
+Your Replit run command is `npm run setup && npm start`. The **setup script**
+was running **`drizzle-kit push --force`** on boot — a command that force-
+rewrites the database to match the code and **can drop tables/columns and wipe
+data with no prompt** — followed by re-seeding the default "Cortada" data.
+
+It was supposed to run only once (guarded by a `.setup-complete` marker file),
+but **when you upload a new zip and delete the old files, you delete that
+marker** — so the destructive push + reseed ran again on the next boot. That's
+why data vanished, the app "went back to Cortada," and everyone was locked out.
+
+## The fix — setup can no longer touch an existing database
+- Setup now **asks the database whether it already has data** before doing
+  anything. If the database already exists, it **skips the schema push and the
+  seed entirely** and leaves your data completely untouched. The destructive
+  first-time path now runs **only against a brand-new, empty database**.
+- Removed `--force` from the `db:push` script so a forced, data-dropping push
+  can't be triggered by accident.
+- Schema changes for existing databases are handled the safe way: the app adds
+  any new columns/tables **additively** at startup (never dropping anything),
+  backed by the destructive-statement guard added last round.
+- New uploads **no longer include `.replit`**, so an upload can never overwrite
+  your Replit config or database connection.
+
+## Security: rotate your database password
+Your `.replit` had the Neon database password written in plain text inside the
+repo. We removed it (the connection should live in **Replit → Secrets**, not in
+a committed file). Because it was previously committed, please:
+1. In **Neon**, reset the database password (rotate the credentials).
+2. In **Replit → Tools → Secrets**, set `DATABASE_URL` to the new connection
+   string. Remove any `DATABASE_URL` line from `.replit`.
+
+## Where your data lives / how to never lose it again
+- Your data lives in **Neon Postgres** (a real managed database) — that's the
+  correct place for it. Keep using Neon.
+- Turn on **Neon's Point-in-Time Restore / backups** (you already used this to
+  recover — it's your strongest safety net; Neon can roll the database back to
+  any moment in its retention window).
+- Use the in-app **Settings → Data & backups** (added last round): daily
+  automatic snapshots, one-click JSON/CSV export, and an optional emailed copy
+  for an off-site backup you control.
+
+---
+
 # Update — July 2026 (round 11)
 
 ## Data safety + automatic backups

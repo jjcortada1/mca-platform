@@ -101,27 +101,50 @@ for (const k of MANAGED_KEYS) {
   if (env[k]) process.env[k] = env[k];
 }
 
-// Marker file: skip schema push + seed if they've already run cleanly
-const MARKER = path.join(ROOT, '.setup-complete');
-const skipDb = fs.existsSync(MARKER) && process.argv[2] !== '--force';
-if (skipDb) {
-  console.log('  ✓ Setup already complete (delete .setup-complete to re-run)');
-  console.log('\n  Run `npm run dev` or `npm start` to launch.\n');
+// ─────────────────────────────────────────────────────────────────────────
+// DATA-SAFETY GATE.
+//
+// The schema push + seed below are ONLY safe on a brand-new, EMPTY database.
+// On a database that already has data, a forced `drizzle-kit push` can drop
+// columns/tables and destroy data, and re-seeding re-creates the default
+// "Cortada" tenant. That is exactly how uploading a fresh build (which wipes
+// the old `.setup-complete` marker) used to wipe a live database.
+//
+// So we ask the database itself whether the core schema already exists. If it
+// does, we NEVER push or seed — the app's own self-healing bootstrap
+// (src/lib/db/bootstrap.ts, run at server boot) adds any new columns/tables
+// ADDITIVELY and non-destructively. First-time setup only runs against a truly
+// empty database.
+// ─────────────────────────────────────────────────────────────────────────
+let dbState = 'EXISTS'; // fail safe: assume populated unless proven fresh
+try {
+  const out = execSync('npx tsx src/lib/db/db-state.ts', { cwd: ROOT, env: process.env })
+    .toString().trim();
+  if (out.split('\n').pop().trim() === 'FRESH') dbState = 'FRESH';
+} catch (e) {
+  console.error('  • Could not inspect the database; assuming it already has data (will NOT push/seed).');
+  dbState = 'EXISTS';
+}
+
+if (dbState === 'EXISTS') {
+  console.log('  ✓ Existing database detected — skipping schema push and seed.');
+  console.log('    (Schema updates are applied safely and additively when the app starts.)');
+  console.log('    Your data is left untouched.\n');
   process.exit(0);
 }
 
-// ── Push schema ────────────────────────────────────────────
-console.log('\n→ Pushing database schema (drizzle-kit push)...');
+// ── First-time install on an EMPTY database only ───────────
+console.log('\n→ New database detected. Creating schema (drizzle-kit push)...');
 try {
+  // Safe here: the database is empty, so there is nothing to drop.
   execSync('npx drizzle-kit push --force', { stdio: 'inherit', cwd: ROOT, env: process.env });
 } catch (e) {
-  console.error('\n  ✗ Schema push failed.');
+  console.error('\n  ✗ Schema creation failed.');
   console.error('     Check that DATABASE_URL points to a reachable Postgres database.\n');
   process.exit(1);
 }
 
-// ── Seed ───────────────────────────────────────────────────
-console.log('\n→ Seeding database...');
+console.log('\n→ Seeding initial admin + defaults...');
 try {
   execSync('npx tsx src/lib/db/seed.ts', { stdio: 'inherit', cwd: ROOT, env: process.env });
 } catch (e) {
@@ -129,7 +152,8 @@ try {
   process.exit(1);
 }
 
-// Write marker so subsequent boots skip setup
-fs.writeFileSync(MARKER, new Date().toISOString() + '\n');
+// Marker is a courtesy fast-path only; the DB-state check above is the real
+// guard, so deleting this file can no longer cause a destructive re-run.
+fs.writeFileSync(path.join(ROOT, '.setup-complete'), new Date().toISOString() + '\n');
 
-console.log('\n  ✓ Setup complete. Run `npm run dev` to start the app.\n');
+console.log('\n  ✓ First-time setup complete.\n');

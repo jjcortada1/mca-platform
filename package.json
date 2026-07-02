@@ -9,7 +9,7 @@
     "lint": "next lint",
     "setup": "node scripts/setup.js",
     "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push --force",
+    "db:push": "drizzle-kit push",
     "db:migrate": "tsx src/lib/db/migrate.ts",
     "db:seed": "tsx src/lib/db/seed.ts",
     "db:studio": "drizzle-kit studio"

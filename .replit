@@ -46,7 +46,8 @@ waitForPort = 5000
 [workflows.workflow.metadata]
 outputType = "webview"
 
-[userenv]
-
-[userenv.shared]
-DATABASE_URL = "postgresql://neondb_owner:npg_FW1vXyfVH9Aw@ep-fancy-smoke-ad0s02jq-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+# DATABASE_URL is intentionally NOT stored here. Keep it in Replit → Secrets
+# (Tools → Secrets) so the database connection is never committed to the repo
+# and never overwritten by a code upload. A leaked connection string can let
+# anyone read/delete the database, and an overwritten one points the app at the
+# wrong database (which looks exactly like "all my data disappeared").
