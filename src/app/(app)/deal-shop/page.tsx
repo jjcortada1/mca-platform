@@ -814,6 +814,24 @@ export default function DealShopPage() {
       .sort((a, b) => a.tier.localeCompare(b.tier));
   }, [results, funderMap]);
 
+  /**
+   * State options for the deal profile = the union of states that ANY funder
+   * lists as a restriction. A state that no funder cares about never affects
+   * matching, so it's left out of the dropdown to keep it short + relevant.
+   */
+  const restrictedStateOptions = useMemo(() => {
+    const codes = new Set<string>();
+    for (const f of funderMap.values()) {
+      for (const s of (f.restrictedStates ?? [])) {
+        if (s) codes.add(s.toUpperCase());
+      }
+    }
+    const nameByCode = new Map(US_STATES.map((s) => [s.code, s.name]));
+    return Array.from(codes)
+      .sort()
+      .map((code) => ({ value: code, label: nameByCode.has(code) ? `${code} · ${nameByCode.get(code)}` : code }));
+  }, [funderMap]);
+
   const filteredManualGroups = useMemo(() => {
     const base = activeManualTier === 'all' ? manualTierGroups : manualTierGroups.filter((g) => g.tier === activeManualTier);
     if (!funderSearchQ) return base;
@@ -924,13 +942,19 @@ export default function DealShopPage() {
                 ]} />
               </Field>
 
-              {/* State */}
+              {/* State — only show states that at least one funder actually
+                  restricts. If a state isn't a restriction anywhere, it's
+                  irrelevant to matching, so we don't clutter the dropdown
+                  with it. Falls back to the admin's configured state options,
+                  then all US states, only when no funder restrictions exist. */}
               <Field label="State" className="col-span-2">
                 <Select value={state} onChange={setState} options={[
                   { value: 'other', label: 'Other / N/A' },
-                  ...(stateOptions.length > 0
-                    ? stateOptions.map((s) => ({ value: s.value, label: s.label }))
-                    : US_STATES.map((s) => ({ value: s.code, label: `${s.code} · ${s.name}` }))
+                  ...(restrictedStateOptions.length > 0
+                    ? restrictedStateOptions
+                    : stateOptions.length > 0
+                      ? stateOptions.map((s) => ({ value: s.value, label: s.label }))
+                      : US_STATES.map((s) => ({ value: s.code, label: `${s.code} · ${s.name}` }))
                   ),
                 ]} />
               </Field>
@@ -2164,7 +2188,9 @@ function SubmissionIntakeSection({
                         <span>Remove</span>
                       </button>
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {/* Open positions carry only funder + balance — rate and
+                        term were removed per spec (too much detail here). */}
+                    <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="text-xs text-muted-foreground font-medium block mb-1">Funder</label>
                         <input
@@ -2175,30 +2201,11 @@ function SubmissionIntakeSection({
                         />
                       </div>
                       <div>
-                        <label className="text-xs text-muted-foreground font-medium block mb-1">Amount</label>
+                        <label className="text-xs text-muted-foreground font-medium block mb-1">Balance</label>
                         <input
                           value={row.amount}
                           onChange={(e) => updateOpenBalance(row.id, { amount: e.target.value })}
                           placeholder="$50K"
-                          className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground font-medium block mb-1">Rate (factor)</label>
-                        <input
-                          value={row.rate}
-                          onChange={(e) => updateOpenBalance(row.id, { rate: e.target.value })}
-                          placeholder="1.45"
-                          inputMode="decimal"
-                          className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground font-medium block mb-1">Term</label>
-                        <input
-                          value={row.term}
-                          onChange={(e) => updateOpenBalance(row.id, { term: e.target.value })}
-                          placeholder="100 days"
                           className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm"
                         />
                       </div>
@@ -2325,19 +2332,14 @@ function formatIntakeMessage(
   // 2. Open balances — including rate/term tail when present. The
   // suffix is "(rate / term)" so the funder can scan the price + length
   // of each competing position at a glance. Include if ANY field is filled.
-  const validBalances = openBalances.filter((r) => r.funder.trim() || r.amount.trim() || (r.rate ?? '').trim() || (r.term ?? '').trim());
+  // Open balances now carry ONLY funder + balance (rate/term removed).
+  const validBalances = openBalances.filter((r) => r.funder.trim() || r.amount.trim());
   if (validBalances.length > 0) {
     const lines: string[] = ['Open Balances:'];
     for (const r of validBalances) {
       const funder = r.funder.trim() || '(funder)';
       const amount = r.amount.trim() || '(amount)';
-      const rateStr = (r.rate ?? '').trim();
-      const termStr = (r.term ?? '').trim();
-      let suffix = '';
-      if (rateStr && termStr) suffix = ` (${rateStr} / ${termStr})`;
-      else if (rateStr) suffix = ` (${rateStr})`;
-      else if (termStr) suffix = ` (${termStr})`;
-      lines.push(`  ${funder} ${amount}${suffix}`);
+      lines.push(`  ${funder} ${amount}`);
     }
     sections.push(lines.join('\n'));
   }

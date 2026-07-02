@@ -262,8 +262,17 @@ function MobileTopBar({
             {branding.productName}
           </div>
         </Link>
-        <div className="h-8 w-8 rounded-lg bg-foreground text-background flex items-center justify-center text-xs font-semibold">
-          {userInitial}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => window.dispatchEvent(new Event('mca:open-search'))}
+            aria-label="Search"
+            className="p-2 rounded-md hover:bg-muted transition-colors"
+          >
+            <Search className="h-5 w-5" />
+          </button>
+          <div className="h-8 w-8 rounded-lg bg-foreground text-background flex items-center justify-center text-xs font-semibold">
+            {userInitial}
+          </div>
         </div>
       </div>
     </header>
@@ -419,18 +428,6 @@ function SidebarBody({
             <X className="h-4 w-4" />
           </button>
         )}
-      </div>
-
-      {/* Global search launcher — opens the ⌘K palette. */}
-      <div className="px-3 pt-3">
-        <button
-          onClick={() => { onNavigate?.(); window.dispatchEvent(new Event('mca:open-search')); }}
-          className="w-full flex items-center gap-2 px-3 h-9 rounded-md border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
-        >
-          <Search className="h-4 w-4 shrink-0" />
-          <span className="flex-1 text-left">Search…</span>
-          <kbd className="hidden lg:inline text-[10px] font-mono px-1.5 py-0.5 rounded bg-muted border border-border">⌘K</kbd>
-        </button>
       </div>
 
       {/* Nav — categorized sections, order + labels controlled by

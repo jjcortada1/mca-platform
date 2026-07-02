@@ -18,6 +18,28 @@ export const DEFAULT_BRANDING: Branding = {
   emailSignature: null,
 };
 
+/**
+ * Conservative CSS color sanitizer for a tenant primary color injected into
+ * a <style> tag at request time. Accepts only shapes that look like valid
+ * color values so the branding store can't inject arbitrary CSS. Shared by
+ * the root (public) layout and the (app) tenant layout so each company's
+ * color is applied individually and safely.
+ */
+export function sanitizeCssColor(input: string | null | undefined): string | null {
+  if (!input) return null;
+  const v = String(input).trim();
+  if (!v || v.length > 80) return null;
+  if (/[{};"'<>\\]/.test(v)) return null;
+  const shapes: RegExp[] = [
+    /^\d{1,3}\s+\d{1,3}(?:\.\d+)?%\s+\d{1,3}(?:\.\d+)?%$/,  // HSL triple "222 47% 17%"
+    /^#[0-9a-fA-F]{3,8}$/,                                   // hex
+    /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/,
+    /^hsla?\(\s*\d{1,3}\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/,
+    /^[a-zA-Z]{1,30}$/,
+  ];
+  return shapes.some((re) => re.test(v)) ? v : null;
+}
+
 function fromCompany(c: typeof companies.$inferSelect): Branding {
   // Normalize logoUrl: treat empty / whitespace-only as null so consumers can
   // confidently use `branding.logoUrl || fallback`.
