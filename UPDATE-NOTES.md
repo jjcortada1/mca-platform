@@ -1,3 +1,35 @@
+# Update — July 2026 (round 7) — UX & polish
+
+## Confirmations
+- Every "are you sure?" now appears as a **centered dialog** (or a toast for
+  errors) — nothing pops at the top of the browser anymore. Covers deletes
+  and confirms across the whole app.
+
+## Mobile
+- The side menu is now **solid white** (was see-through and hard to read).
+- Smoother transitions; reduced-motion is respected.
+
+## Logos
+- Logos now show reliably: if a company hasn't uploaded one (or it fails to
+  load), a clean **lettermark** (their initial on the brand color) shows
+  instead of a broken image.
+
+## Search
+- The search opens as a **side-docked panel** flush to the sidebar, not a
+  box in the middle of the screen.
+
+## Names & forms
+- First/last names are auto-capitalized (John, not john / JOHN) everywhere
+  they're saved. Emails are left exactly as typed.
+- **Clear all** button added to the Funded Email form (Shop & Submit already
+  had one).
+
+## Feel
+- Smooth in-page scrolling and subtle, consistent button/press animations
+  for a more premium feel.
+
+---
+
 # Update — July 2026 (round 6)
 
 ## Global search
