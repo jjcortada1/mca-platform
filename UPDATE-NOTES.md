@@ -1,3 +1,36 @@
+# Update — July 2026 (round 11)
+
+## Data safety + automatic backups
+- **Updates never wipe data.** Schema changes are strictly add-only, and a
+  built-in guard now **blocks any destructive database operation** (drop /
+  truncate / delete / clear) from ever running at startup. Your users, deals,
+  commissions, funders, submissions, and settings are preserved across every
+  update. DATABASE_URL is never changed and no new database is created.
+- **Automatic daily backups.** A full snapshot of your company's data is
+  saved automatically once a day (kept as the most recent 14 restore points).
+  Nothing is overwritten — it's an extra safety net.
+- **Settings → Data & backups** (admins) now has:
+  - **Back up now** — take a snapshot on demand.
+  - **Backup history** — download any recent snapshot as a JSON file.
+  - **Download full backup (JSON)** — one file with everything.
+  - **Export to CSV** — one click per dataset (Deals, Commissions, Funders,
+    Users, Submissions, Lead sources, Tasks) for Google Sheets / Excel.
+  - **Email a copy** (optional) — each automatic backup is emailed to an
+    address you set, for off-site safety (uses your connected sending email).
+  - A toggle to turn automatic backups on/off.
+- Backups **redact passwords and SMTP credentials** so a downloaded/emailed
+  file can't leak secrets.
+
+## Protecting your data on upload (important)
+- The one thing that protects your data during a Replit upload is the
+  **`.env`** file — it holds your database connection. **Never delete or
+  replace `.env`** when uploading a new build. If data ever looks "gone"
+  after an upload, it almost always means the connection changed, not that
+  the data was deleted — don't re-enter anything; the original data is still
+  in your database.
+
+---
+
 # Update — July 2026 (round 10)
 
 ## IMPORTANT — fixes the "everyone locked out / tab says Cortada" problem

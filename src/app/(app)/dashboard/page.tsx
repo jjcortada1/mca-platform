@@ -10,6 +10,13 @@ import PortfolioDashboard from '@/components/portfolio-dashboard';
 export default async function DashboardPage() {
   const { user, companyId } = await pageRequireTenant();
 
+  // Opportunistic automatic backup: when the first person from a company opens
+  // the dashboard on a new day, take a daily data snapshot. Cheap no-op the
+  // rest of the day (one small SELECT) and never throws, so it can't affect
+  // the page render.
+  const { ensureAutoBackup } = await import('@/lib/backup/snapshot');
+  await ensureAutoBackup(companyId);
+
   const monthStart = new Date();
   monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
 

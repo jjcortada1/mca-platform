@@ -123,7 +123,40 @@ const STATEMENTS: string[] = [
 
   // ---- companies: per-tenant feature access (null = everything) ----
   `ALTER TABLE companies ADD COLUMN IF NOT EXISTS enabled_nav_items jsonb`,
+
+  // ---- companies: automatic backup settings (additive) ----
+  `ALTER TABLE companies ADD COLUMN IF NOT EXISTS auto_backup_enabled boolean NOT NULL DEFAULT true`,
+  `ALTER TABLE companies ADD COLUMN IF NOT EXISTS backup_email varchar(320)`,
+  `ALTER TABLE companies ADD COLUMN IF NOT EXISTS last_backup_at timestamptz`,
+
+  // ---- data_backups: point-in-time JSON snapshots (additive safety net) ----
+  `CREATE TABLE IF NOT EXISTS data_backups (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    kind varchar(12) NOT NULL DEFAULT 'auto',
+    content text NOT NULL,
+    byte_size integer NOT NULL DEFAULT 0,
+    row_counts jsonb,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS data_backups_company_idx ON data_backups (company_id)`,
 ];
+
+/**
+ * DATA-SAFETY GUARD.
+ *
+ * Every bootstrap statement MUST be additive (ADD COLUMN / CREATE TABLE /
+ * CREATE INDEX / SET DEFAULT / a guarded flag UPDATE) and never destroy data.
+ * This guard scans the statement list at boot and refuses to run anything
+ * that looks destructive — DROP TABLE, DROP COLUMN, TRUNCATE, DELETE, etc.
+ * If one ever slips in (e.g. a future edit), it's skipped and loudly logged
+ * instead of silently wiping data. Preserving existing users/deals/funders/
+ * commissions/submissions/settings takes priority over any schema change.
+ */
+const DESTRUCTIVE = /\b(drop\s+table|drop\s+column|drop\s+database|drop\s+schema|truncate|delete\s+from)\b/i;
+function isDestructive(stmt: string): boolean {
+  return DESTRUCTIVE.test(stmt);
+}
 
 /**
  * One-time backfills — each runs exactly once, tracked in app_flags.
@@ -151,6 +184,13 @@ export function ensureSchema(): Promise<void> {
     if (!process.env.DATABASE_URL) return; // build-time: no DB, nothing to do
     const sql = getRawSql();
     for (const stmt of STATEMENTS) {
+      // Safety: never run a destructive statement, even if one was added by
+      // mistake. Additive-only is a hard rule — data is never dropped/cleared.
+      if (isDestructive(stmt)) {
+        console.error('[db-bootstrap] BLOCKED destructive statement (not run):',
+          stmt.slice(0, 80).replace(/\s+/g, ' '));
+        continue;
+      }
       try {
         await sql.unsafe(stmt);
       } catch (err) {

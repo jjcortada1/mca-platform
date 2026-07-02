@@ -119,6 +119,15 @@ export const companies = pgTable('companies', {
   // Set by the platform owner per tenant from the /master Companies page.
   // Hides the tabs company-wide; per-user permissions still gate the APIs.
   enabledNavItems: jsonb('enabled_nav_items').$type<string[]>(),
+  // ---- Automatic data backups ----
+  // On by default: a daily JSON snapshot of this company's data is stored
+  // (and pruned to the most recent few) so nothing is ever silently lost.
+  autoBackupEnabled: boolean('auto_backup_enabled').notNull().default(true),
+  // Optional: email a copy of each automatic backup to this address (off-site
+  // safety). Blank = keep backups in-app only.
+  backupEmail: varchar('backup_email', { length: 320 }),
+  // When the last snapshot was taken (drives the once-a-day gate).
+  lastBackupAt: timestamp('last_backup_at', { withTimezone: true }),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -905,6 +914,29 @@ export const sheetSyncConfig = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   }
+);
+
+/* ---------- Data backups ----------
+   Point-in-time JSON snapshots of a company's data, created automatically
+   (daily, opportunistically) and on demand. Purely additive — a safety net
+   so data can be restored/exported; nothing here ever deletes source data.
+   Old snapshots are pruned to the most recent N per company. */
+export const dataBackups = pgTable(
+  'data_backups',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    // 'auto' (scheduled) | 'manual' (admin clicked Back up now)
+    kind: varchar('kind', { length: 12 }).notNull().default('auto'),
+    // Full snapshot payload (JSON string). Secrets (password hashes, SMTP
+    // passwords) are redacted before storage.
+    content: text('content').notNull(),
+    byteSize: integer('byte_size').notNull().default(0),
+    // { datasetKey: rowCount } — shown in the UI without parsing content.
+    rowCounts: jsonb('row_counts'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ companyIdx: index('data_backups_company_idx').on(t.companyId) })
 );
 
 /* ---------- Teams & Tasks ----------

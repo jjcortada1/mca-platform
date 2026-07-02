@@ -1682,70 +1682,220 @@ function SecuritySection() {
 /* ============================================================
    BACKUP & EXPORT — the easy, recommended path
    ============================================================ */
+interface SnapshotRow {
+  id: string;
+  kind: string;
+  byteSize: number;
+  rowCounts: Record<string, number> | null;
+  createdAt: string;
+}
+interface BackupSettings {
+  autoBackupEnabled: boolean;
+  backupEmail: string | null;
+  lastBackupAt: string | null;
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+function fmtWhen(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
 function BackupSection() {
   const toast = useToast();
-  const [downloading, setDownloading] = useState(false);
+  const [snapshots, setSnapshots] = useState<SnapshotRow[]>([]);
+  const [datasets, setDatasets] = useState<{ key: string; label: string }[]>([]);
+  const [settings, setSettings] = useState<BackupSettings | null>(null);
+  const [emailDraft, setEmailDraft] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [backingUp, setBackingUp] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
 
-  async function downloadSnapshot() {
-    setDownloading(true);
+  async function load() {
     try {
-      const res = await fetch('/api/settings/backup-export', { cache: 'no-store' });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        toast.error(j.error || 'Could not generate backup.');
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const dateStr = new Date().toISOString().slice(0, 10);
-      a.download = `cortada-backup-${dateStr}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      const res = await fetch('/api/backup?list=1', { cache: 'no-store' });
+      const j = await res.json();
+      if (!res.ok) { toast.error(j.error || 'Could not load backups.'); return; }
+      setSnapshots(j.data ?? []);
+      setDatasets(j.datasets ?? []);
+      setSettings(j.settings ?? null);
+      setEmailDraft(j.settings?.backupEmail ?? '');
     } finally {
-      setDownloading(false);
+      setLoading(false);
+    }
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  async function backupNow() {
+    setBackingUp(true);
+    try {
+      const res = await fetch('/api/backup', { method: 'POST' });
+      const j = await res.json();
+      if (!res.ok) { toast.error(j.error || 'Backup failed.'); return; }
+      toast.success(j.data?.emailed ? 'Backup created and emailed.' : 'Backup created.');
+      load();
+    } finally {
+      setBackingUp(false);
     }
   }
 
+  async function saveSettings(patch: Partial<BackupSettings>) {
+    setSavingSettings(true);
+    try {
+      const res = await fetch('/api/backup', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const j = await res.json();
+      if (!res.ok) { toast.error(j.error || 'Could not save.'); return; }
+      toast.success('Saved.');
+      load();
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
+  if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
+
   return (
     <div className="space-y-5 max-w-2xl">
+      {/* Automatic backups */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Recommended: download a full backup</CardTitle>
+          <CardTitle className="text-base">Automatic backups</CardTitle>
           <CardDescription>
-            One click downloads a complete JSON snapshot of your CRM — every deal, funder, contact, submission, commission, payment, and accounting entry. Save it to your computer, Dropbox, or anywhere safe. If your CRM ever gets wiped, this file has everything.
+            A complete snapshot of your data is saved automatically once a day and kept as restore points. Nothing is ever deleted or overwritten by an update — this is an extra safety net on top.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <Button onClick={downloadSnapshot} disabled={downloading}>
-            {downloading ? 'Preparing your backup…' : 'Download backup now'}
-          </Button>
-          <div className="text-xs text-muted-foreground space-y-1 pt-2">
-            <div>• Includes every record visible in the CRM, plus historical/audit data.</div>
-            <div>• Excludes passwords and SMTP credentials (security).</div>
-            <div>• Plain JSON — opens in any text editor, viewer, or import tool.</div>
-            <div>• Recommended cadence: download once a week. Bookmark this page for one-click access.</div>
+        <CardContent className="space-y-4">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings?.autoBackupEnabled ?? true}
+              onChange={(e) => saveSettings({ autoBackupEnabled: e.target.checked })}
+              disabled={savingSettings}
+              className="h-4 w-4"
+            />
+            <span className="text-sm">Keep daily automatic backups (recommended)</span>
+          </label>
+
+          <div className="text-xs text-muted-foreground">
+            {settings?.lastBackupAt
+              ? <>Last backup: <strong>{fmtWhen(settings.lastBackupAt)}</strong>.</>
+              : <>No automatic backup yet — one will be created shortly.</>}
+          </div>
+
+          <div className="pt-1">
+            <Field label="Email a copy to (optional, off-site safety)">
+              <div className="flex items-center gap-2">
+                <Input
+                  type="email"
+                  value={emailDraft}
+                  onChange={(e) => setEmailDraft(e.target.value)}
+                  placeholder="you@company.com"
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => saveSettings({ backupEmail: emailDraft.trim() })}
+                  disabled={savingSettings || emailDraft.trim() === (settings?.backupEmail ?? '')}
+                >
+                  Save
+                </Button>
+              </div>
+            </Field>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              When set, each backup is emailed to you as a JSON attachment (needs your sending email connected under SMTP setup).
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 pt-1">
+            <Button onClick={backupNow} disabled={backingUp}>
+              {backingUp ? 'Backing up…' : 'Back up now'}
+            </Button>
+            <a
+              href="/api/backup?format=json"
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Download full backup (JSON)
+            </a>
           </div>
         </CardContent>
       </Card>
 
+      {/* Restore points / history */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Already automatic: Point-in-Time Recovery</CardTitle>
+          <CardTitle className="text-base">Backup history</CardTitle>
           <CardDescription>
-            Your database (Neon Postgres) automatically saves continuous restore points. If something gets accidentally deleted or corrupted, the database can be rolled back to any second within the last 7 days at no extra cost — even if you don&apos;t have a manual backup. Contact support to use this.
+            The most recent snapshots. Click any one to download it. Older snapshots beyond the last 14 are pruned automatically.
           </CardDescription>
         </CardHeader>
+        <CardContent>
+          {snapshots.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No snapshots yet.</div>
+          ) : (
+            <div className="divide-y divide-border">
+              {snapshots.map((s) => {
+                const total = s.rowCounts ? Object.values(s.rowCounts).reduce((a, b) => a + b, 0) : 0;
+                return (
+                  <div key={s.id} className="flex items-center justify-between py-2 gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">
+                        {fmtWhen(s.createdAt)}
+                        <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">{s.kind}</span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {total.toLocaleString()} records · {fmtBytes(s.byteSize)}
+                      </div>
+                    </div>
+                    <a
+                      href={`/api/backup?snapshot=${s.id}`}
+                      className="text-xs font-medium text-primary hover:underline shrink-0"
+                    >
+                      Download
+                    </a>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
       </Card>
 
+      {/* CSV exports for Google Sheets / Excel */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Per-page CSV exports</CardTitle>
+          <CardTitle className="text-base">Export to CSV (Google Sheets / Excel)</CardTitle>
           <CardDescription>
-            For lighter, spreadsheet-friendly exports, click <strong>Export CSV</strong> on any list page (Funders, Submissions, Commissions, Payments, Accounting, Active Deals, Funded Board). Useful for pulling one specific dataset into Excel for analysis.
+            Download any dataset as a CSV file, then import it into Google Sheets (File → Import) or open it in Excel.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-2">
+            {datasets.map((d) => (
+              <a
+                key={d.key}
+                href={`/api/backup?format=csv&dataset=${d.key}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border text-sm font-medium hover:bg-muted transition-colors"
+              >
+                <Database className="h-3.5 w-3.5" /> {d.label}
+              </a>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Safety note */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Your data is safe across updates</CardTitle>
+          <CardDescription>
+            Updates never reset, drop, or clear the database — schema changes are add-only and a built-in guard blocks any destructive operation. The one thing that protects your data during a Replit upload is the <strong>.env</strong> file (it holds your database connection): never delete or replace it when uploading a new build.
           </CardDescription>
         </CardHeader>
       </Card>
