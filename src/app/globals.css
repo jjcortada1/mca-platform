@@ -146,6 +146,29 @@
     outline-offset: 2px;
     border-radius: 4px;
   }
+
+  /* ---- Premium micro-interactions (safe, global defaults) ----
+     Smooth in-page scrolling and subtle, consistent transitions on the
+     things users click, so the whole app feels responsive and polished
+     rather than snappy/janky. Respect reduced-motion preferences. */
+  html { scroll-behavior: smooth; }
+
+  button, a, [role='button'] {
+    transition: color 150ms ease, background-color 150ms ease,
+      border-color 150ms ease, box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 120ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease;
+  }
+  /* A gentle press feedback on primary actions — feels tactile without
+     being distracting. Only applies to real buttons, not links. */
+  button:active:not(:disabled) { transform: translateY(0.5px) scale(0.996); }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
 }
 
 @layer components {
