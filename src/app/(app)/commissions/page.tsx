@@ -8,6 +8,7 @@ import { formatCurrency, formatDate } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { computePaydown } from '@/lib/deals/paydown';
 import { exportCSV } from '@/lib/csv-export';
+import { BulkImportModal } from '@/components/bulk-import-modal';
 import { Download } from 'lucide-react';
 import { formatCalendarDate, toDateInput } from '@/lib/dates';
 import { SearchableDealSelect } from '@/components/ui/searchable-deal-select';
@@ -145,6 +146,7 @@ export default function CommissionsPage() {
   const [filter, setFilter] = useState<'all' | 'active' | 'refi' | 'funded' | 'declined' | 'pending' | 'paid'>('all');
 
   const [showAdd, setShowAdd] = useState(false);
+  const [showBulk, setShowBulk] = useState(false);
   const [showLSAdd, setShowLSAdd] = useState(false);
   const [showNewLS, setShowNewLS] = useState(false);
   const [showDraw, setShowDraw] = useState(false);
@@ -379,6 +381,7 @@ export default function CommissionsPage() {
                 >
                   <Download className="h-4 w-4" /> Export CSV
                 </Button>
+                <Button variant="outline" onClick={() => setShowBulk(true)}>Bulk import</Button>
                 <Button variant="outline" onClick={() => setShowDraw(true)}>+ Log draw</Button>
                 <Button onClick={() => setShowAdd(true)}>+ Add commission</Button>
               </div>
@@ -774,6 +777,23 @@ export default function CommissionsPage() {
         </>
       )}
 
+      {showBulk && (
+        <BulkImportModal
+          title="Bulk import commissions"
+          endpoint="/api/commissions/bulk"
+          templateUrl="/api/commissions/bulk"
+          columns={[
+            { key: 'deal', label: 'Deal' },
+            { key: 'matched', label: 'Match' },
+            { key: 'repLabel', label: 'Rep' },
+            { key: 'fundedAmount', label: 'Funded' },
+            { key: 'grossCommission', label: 'Gross' },
+            { key: 'repCommissionAmount', label: 'Rep comm.' },
+          ]}
+          onClose={() => setShowBulk(false)}
+          onComplete={() => { setShowBulk(false); load(); }}
+        />
+      )}
       {showAdd && <AddCommissionModal deals={deals} reps={reps} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
       {showNewLS && <NewLeadSourceModal onClose={() => setShowNewLS(false)} onSaved={() => { setShowNewLS(false); load(); }} />}
       {showLSAdd && <AssignLeadSourceModal deals={deals} leadSources={leadSources} onClose={() => setShowLSAdd(false)} onSaved={() => { setShowLSAdd(false); load(); }} />}

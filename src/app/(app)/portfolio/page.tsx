@@ -8,7 +8,8 @@ import { useToast } from '@/components/toast';
 import { useConfirm } from '@/components/confirm-provider';
 import { formatCurrency } from '@/lib/utils';
 import { cn } from '@/lib/utils';
-import { Search, Trash2, Plus, LayoutGrid, List as ListIcon } from 'lucide-react';
+import { Search, Trash2, Plus, LayoutGrid, List as ListIcon, Upload } from 'lucide-react';
+import { BulkImportModal } from '@/components/bulk-import-modal';
 import { computePaydown } from '@/lib/deals/paydown';
 import { formatCalendarDate, toDateInput } from '@/lib/dates';
 
@@ -121,6 +122,7 @@ export default function PortfolioPage() {
   // "Add funded deal" drawer state. Lives in this top-level component so the
   // drawer survives table re-renders.
   const [showAdd, setShowAdd] = useState(false);
+  const [showBulk, setShowBulk] = useState(false);
 
   // List vs Card layout. Defaults to 'list' — the existing table view that
   // admins have been using since the beginning. Card view is opt-in and
@@ -352,12 +354,37 @@ export default function PortfolioPage() {
         title="Funded Deals"
         description="Live view of every funded deal — balance, paydown, and renewal status update automatically."
         actions={
-          <Button size="sm" onClick={() => setShowAdd(true)} className="gap-1">
-            <Plus className="h-4 w-4" />
-            Add funded deal
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => setShowBulk(true)} className="gap-1">
+              <Upload className="h-4 w-4" />
+              Bulk import
+            </Button>
+            <Button size="sm" onClick={() => setShowAdd(true)} className="gap-1">
+              <Plus className="h-4 w-4" />
+              Add funded deal
+            </Button>
+          </div>
         }
       />
+
+      {showBulk && (
+        <BulkImportModal
+          title="Bulk import funded deals"
+          endpoint="/api/deals/bulk"
+          templateUrl="/api/deals/bulk"
+          columns={[
+            { key: 'name', label: 'Deal' },
+            { key: 'merchantFirstName', label: 'First' },
+            { key: 'merchantLastName', label: 'Last' },
+            { key: 'fundedAmount', label: 'Funded' },
+            { key: 'factorRate', label: 'Factor' },
+            { key: 'termCount', label: 'Term' },
+            { key: 'repLabel', label: 'Rep' },
+          ]}
+          onClose={() => setShowBulk(false)}
+          onComplete={() => { setShowBulk(false); load(); }}
+        />
+      )}
 
       {/* Portfolio totals */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
