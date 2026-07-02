@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, Button, Input, Field, PageHeader, Badge, MoneyInput } from '@/components/ui/primitives';
 import { formatCurrency, cn } from '@/lib/utils';
 import { Calculator, RotateCcw, Sparkles, Lock, Unlock } from 'lucide-react';
+import { reverseCalculate, type ReverseCandidate } from '@/lib/calculator/reverse';
 
 type Tab = 'fwd' | 'rev';
 type Freq = 'daily' | 'weekly';
@@ -303,6 +304,15 @@ function ReverseCalc() {
   }, [dep, pmt, predictedPaymentAmount, estFunded]);
 
   const cleanScore = matchDetail?.score ?? null;
+
+  // Engine-driven likely structures — searches funding × factor × fee × term
+  // for the closest realistic MCA that reproduces the entered payment, ranked
+  // with clean/common values scored higher. Driven ONLY by payment + freq
+  // (deposit is an optional sanity input). Recomputes as the user types.
+  const likelyStructures = useMemo<ReverseCandidate[]>(() => {
+    if (!pmt || pmt <= 0) return [];
+    return reverseCalculate({ payment: pmt, paymentFrequency: freq, deposit: dep || undefined });
+  }, [pmt, freq, dep]);
 
   // When user changes deposit/payment, solve for the EXACT term that makes
   // the predicted payment match the observed payment to the penny. Given
@@ -610,6 +620,64 @@ function ReverseCalc() {
 
       {/* Results panel */}
       <div className="lg:col-span-3 space-y-4">
+        {/* Likely MCA structures — ranked by the reverse engine. Top result
+            first with a "why", then alternatives to compare. */}
+        {likelyStructures.length > 0 && (
+          <Card>
+            <CardContent className="p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <div className="text-sm font-semibold">Likely MCA structures</div>
+                <span className="text-xs text-muted-foreground">ranked by accuracy</span>
+              </div>
+              {likelyStructures.map((c, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    'rounded-lg border p-3',
+                    i === 0 ? 'border-primary/40 bg-primary/[0.03]' : 'border-border'
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold tabular-nums">{formatCurrency(c.fundingAmount)}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {c.factorRate.toFixed(2)} · {c.termWeeks} wks · {c.feePct}% fee
+                      </span>
+                    </div>
+                    <span className={cn(
+                      'text-[10px] font-semibold px-1.5 py-0.5 rounded border',
+                      c.confidence === 'very_likely' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' :
+                      c.confidence === 'strong' ? 'bg-teal-100 text-teal-800 border-teal-200' :
+                      c.confidence === 'possible' ? 'bg-amber-100 text-amber-800 border-amber-200' :
+                      'bg-gray-100 text-gray-700 border-gray-200'
+                    )}>
+                      {c.confidenceLabel} · {c.accuracy}%
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1 mt-2 text-[11px]">
+                    <MiniStat label="Net to merchant" value={formatCurrency(c.netToMerchant)} />
+                    <MiniStat label="Fee $" value={formatCurrency(c.feeAmount)} />
+                    <MiniStat label="Total payback" value={formatCurrency(c.totalPayback)} />
+                    <MiniStat label={`Payment / ${freq === 'daily' ? 'day' : 'wk'}`} value={formatCurrency(c.computedPayment)} />
+                    <MiniStat label="# payments" value={String(c.numberOfPayments)} />
+                    <MiniStat
+                      label="vs entered"
+                      value={c.paymentDiff === 0 ? 'exact' : `${c.paymentDiff > 0 ? '+' : ''}${formatCurrency(c.paymentDiff)}`}
+                    />
+                  </div>
+                  {i === 0 && c.reasons.length > 0 && (
+                    <div className="mt-2 text-[11px] text-muted-foreground">
+                      <span className="font-medium text-foreground/70">Why this pick: </span>
+                      {c.reasons.slice(0, 4).join(' · ')}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
         {/* Match quality + key estimates */}
         <div className="grid grid-cols-3 gap-3">
           <Kpi label="Estimated funded" value={fmt(estFunded)} primary />
@@ -736,6 +804,15 @@ function Kpi({
         tone === 'warning' && 'text-amber-700',
         tone === 'danger' && 'text-rose-700',
       )}>{value}</div>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-muted-foreground">{label}</div>
+      <div className="font-medium tabular-nums text-foreground">{value}</div>
     </div>
   );
 }
