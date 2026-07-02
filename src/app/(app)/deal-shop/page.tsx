@@ -2068,7 +2068,7 @@ function SubmissionIntakeSection({
       </button>
 
       {expanded && (
-        <div className="px-4 pb-4 pt-2 space-y-5 border-t border-border">
+        <div className="px-4 pb-4 pt-2 space-y-4 border-t border-border [&_input]:h-9 [&_.h-10]:h-9">
 
           {/* Recent funding — FIRST per user's preferred ordering. The
               funder cares most about what other funders have just put in
