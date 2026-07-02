@@ -7,6 +7,7 @@ import { requireTenantContext, requireCompanyAdmin } from '@/lib/auth/context';
 import { createUserSchema } from '@/lib/validation/schemas';
 import { ALL_REP_PERMISSIONS } from '@/lib/db/schema';
 import { apiError } from '@/lib/api/errors';
+import { titleCaseName } from '@/lib/utils';
 
 /**
  * GET — list users in current company.
@@ -88,7 +89,7 @@ export async function POST(req: NextRequest) {
     const [u] = await db.insert(users).values({
       companyId: ctx.companyId,
       email: body.email,
-      name: body.name,
+      name: titleCaseName(body.name),
       passwordHash: hash,
       role: body.role,
     }).returning();

@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { requireCompanyAdmin } from '@/lib/auth/context';
 import { updateUserSchema } from '@/lib/validation/schemas';
 import { apiError } from '@/lib/api/errors';
+import { titleCaseName } from '@/lib/utils';
 
 /**
  * Safety: company_admin must NOT be able to modify or delete a master_admin.
@@ -63,7 +64,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
 
     const updates: Record<string, unknown> = {};
-    if (body.name !== undefined) updates.name = body.name;
+    if (body.name !== undefined) updates.name = titleCaseName(body.name);
     if (body.isActive !== undefined) updates.isActive = body.isActive;
     if (Object.keys(updates).length) {
       updates.updatedAt = new Date();
@@ -154,7 +155,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     }
 
     const updates: Record<string, unknown> = {};
-    if (body.name !== undefined) updates.name = body.name;
+    if (body.name !== undefined) updates.name = titleCaseName(body.name);
     if (body.email !== undefined) updates.email = body.email;
     if (body.role !== undefined) updates.role = body.role;
     if (body.isActive !== undefined) updates.isActive = body.isActive;

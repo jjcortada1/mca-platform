@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { requireMasterAdmin } from '@/lib/auth/context';
 import { handle, ok, created, badRequest, notFound } from '@/lib/api/response';
 import { ALL_REP_PERMISSIONS } from '@/lib/db/schema';
+import { titleCaseName } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -79,7 +80,7 @@ export const POST = handle(async (req: NextRequest, { params }: { params: { id: 
   const [u] = await db.insert(users).values({
     companyId: company.id,
     email: body.email,
-    name: body.name,
+    name: titleCaseName(body.name),
     passwordHash: hash,
     role: body.role,
   }).returning();

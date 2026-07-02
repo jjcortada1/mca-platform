@@ -6,6 +6,7 @@ import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import { visibleRepIds } from '@/lib/auth/team-scope';
 import { upsertDealSchema } from '@/lib/validation/schemas';
 import { apiError } from '@/lib/api/errors';
+import { titleCaseName } from '@/lib/utils';
 import { triggerSync } from '@/lib/sheets/sync';
 
 // Deal edits / deletions must reflect immediately in every dropdown across
@@ -84,8 +85,11 @@ export async function POST(req: NextRequest) {
     const [d] = await db.insert(deals).values({
       companyId: ctx.companyId,
       name: body.name,
-      merchantFirstName: body.merchantFirstName ?? null,
-      merchantLastName: body.merchantLastName ?? null,
+      // Names are normalized to title case (first letter of each name part
+      // capitalized) so "john" / "JOHN" both store as "John" — consistent
+      // everywhere regardless of how the rep typed it.
+      merchantFirstName: body.merchantFirstName ? titleCaseName(body.merchantFirstName) : null,
+      merchantLastName: body.merchantLastName ? titleCaseName(body.merchantLastName) : null,
       merchantEmail: body.merchantEmail || null,
       merchantPhone: body.merchantPhone ?? null,
       offerNotes: body.offerNotes ?? null,

@@ -6,6 +6,7 @@ import { eq, and, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireMasterAdmin } from '@/lib/auth/context';
 import { handle, ok, badRequest, notFound, noContent } from '@/lib/api/response';
+import { titleCaseName } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,7 +37,7 @@ export const PATCH = handle(async (req: NextRequest, { params }: { params: { id:
   const body = patchSchema.parse(await req.json());
 
   const set: Record<string, unknown> = { updatedAt: new Date() };
-  if (body.name !== undefined) set.name = body.name;
+  if (body.name !== undefined) set.name = titleCaseName(body.name);
   if (body.role !== undefined) set.role = body.role;
   if (body.isActive !== undefined) set.isActive = body.isActive;
   if (body.password) set.passwordHash = await bcrypt.hash(body.password, 12);

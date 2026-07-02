@@ -11,6 +11,7 @@ import { requireMasterAdmin } from '@/lib/auth/context';
 import { createCompanySchema } from '@/lib/validation/schemas';
 import { handle, ok, created, badRequest } from '@/lib/api/response';
 import { DEFAULT_COMMISSION_RULES } from '@/lib/calculator/mca';
+import { titleCaseName } from '@/lib/utils';
 
 /**
  * GET — list all companies (master admin only).
@@ -66,7 +67,7 @@ export const POST = handle(async (req: NextRequest) => {
   await db.insert(users).values({
     companyId: company.id,
     email: parsed.adminEmail,
-    name: parsed.adminName,
+    name: titleCaseName(parsed.adminName),
     passwordHash,
     role: 'company_admin',
   });

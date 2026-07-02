@@ -4,6 +4,7 @@ import { deals, users, dealCommissions, leadSourceCommissions, accountingEntries
 import { and, eq } from 'drizzle-orm';
 import { requireTenantContext, requirePermission } from '@/lib/auth/context';
 import { visibleRepIds } from '@/lib/auth/team-scope';
+import { titleCaseName } from '@/lib/utils';
 import { upsertDealSchema } from '@/lib/validation/schemas';
 import { apiError } from '@/lib/api/errors';
 import { fromDateInput } from '@/lib/dates';
@@ -82,6 +83,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     const updates: any = { ...body, updatedAt: new Date() };
     if (updates.merchantEmail === '') updates.merchantEmail = null;
+    // Normalize names to title case on edit too (see POST for rationale).
+    if (typeof updates.merchantFirstName === 'string' && updates.merchantFirstName) updates.merchantFirstName = titleCaseName(updates.merchantFirstName);
+    if (typeof updates.merchantLastName === 'string' && updates.merchantLastName) updates.merchantLastName = titleCaseName(updates.merchantLastName);
 
     // Numeric columns: '' → null, numbers → string (Drizzle numeric wants string).
     for (const k of ['offerAmount', 'fundedAmount', 'netAmount', 'feePct', 'factorRate', 'termCount', 'amountCollected'] as const) {

@@ -111,6 +111,17 @@ export default function FundedEmailPage() {
     [files]
   );
 
+  /** Clear the whole funded-email form back to empty. */
+  function clearAll() {
+    setToEmail('');
+    setCcInput('');
+    setCcEmails([]);
+    setValues({});
+    setNotes('');
+    setFiles([]);
+    setSubject(tmpl?.subject ?? '');
+  }
+
   async function send() {
     if (!toEmail.trim()) { toast.error('Recipient email required.'); return; }
     if (!subject.trim()) { toast.error('Subject required.'); return; }
@@ -363,7 +374,10 @@ export default function FundedEmailPage() {
         </CardContent>
       </Card>
 
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" onClick={clearAll} disabled={sending} title="Clear the whole form">
+          Clear all
+        </Button>
         <Button onClick={send} disabled={sending || !toEmail.trim() || !subject.trim()}>
           <Send className="h-4 w-4 mr-1.5" />
           {sending ? 'Sending…' : 'Send funded email'}

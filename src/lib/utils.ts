@@ -5,6 +5,29 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Title-case a person / business name: capitalize the first letter of each
+ * word. Handles hyphenated (Anne-Marie) and apostrophe (O'Brien) names, and
+ * leaves the rest of each word as typed (so "McDonald" isn't wrecked — we
+ * only force the FIRST letter up, never lowercase the rest).
+ * Used on first/last name fields.
+ */
+export function titleCaseName(s: string): string {
+  if (!s) return s;
+  return s.replace(/(^|[\s\-'’])([a-z])/g, (_m, sep, ch) => sep + ch.toUpperCase());
+}
+
+/**
+ * Sentence-case a line of prose: capitalize the first letter of the string
+ * (and after sentence-ending punctuation). Does NOT touch the rest, so names
+ * and acronyms mid-sentence stay as typed. Used for notes / message fields —
+ * NOT for emails or anything case-sensitive.
+ */
+export function sentenceCase(s: string): string {
+  if (!s) return s;
+  return s.replace(/(^\s*|[.!?]\s+)([a-z])/g, (_m, sep, ch) => sep + ch.toUpperCase());
+}
+
 export function formatCurrency(n: number | string | null | undefined, opts?: { compact?: boolean }): string {
   if (n == null || n === '') return '$0';
   const num = typeof n === 'string' ? parseFloat(n) : n;
