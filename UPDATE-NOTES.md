@@ -1,3 +1,21 @@
+# Update — July 2026 (round 9)
+
+## Reverse consolidation commissions (draw-based)
+- When you Move a deal to funded, pick **Deal type: Reverse consolidation**.
+- That deal's broker commission is treated as **paid over time**: it stays
+  **pending** and shows a panel with **Paid $X of $Y**, **Remaining $Z**, and
+  a progress bar — it doesn't get paid upfront.
+- Each week when the broker draws against it, log a payment on that deal's
+  commission (Log payment). Paid goes up, Remaining goes down, and it stays
+  pending until it's fully drawn. Example: $10K total, log a $1K draw →
+  shows Paid $1,000 / Remaining $9,000, still pending.
+
+## Login
+- Fixed the **show/hide password** eye on the sign-in screen (it could be
+  blocked by focus-steal or a browser's own reveal icon).
+
+---
+
 # Update — July 2026 (round 8)
 
 ## Deal shop / intake
