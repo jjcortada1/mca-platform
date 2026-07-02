@@ -26,7 +26,18 @@ import {
   Button, Input, Textarea, Field, PageHeader,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
+import { useConfirm } from '@/components/confirm-provider';
+import { useRouter } from 'next/navigation';
 import { Plus, X, Send, Paperclip, BookOpen } from 'lucide-react';
+
+interface DealOpt {
+  id: string; name: string;
+  merchantFirstName?: string | null; merchantLastName?: string | null;
+  merchantEmail?: string | null; businessName?: string | null;
+  fundedAmount?: string | null; factorRate?: string | null;
+  termCount?: string | null; termMode?: string | null; assignedRepId?: string | null;
+  status?: string;
+}
 
 interface TemplateField { id?: string; label: string; hint?: string; type?: 'text' | 'date' }
 interface FundedTemplate { subject: string; fields: TemplateField[]; attachmentNote?: string | null }
@@ -52,10 +63,18 @@ interface SavedContact { id: string; name: string; email: string; company: strin
 
 export default function FundedEmailPage() {
   const toast = useToast();
+  const confirm = useConfirm();
+  const router = useRouter();
   const [tmpl, setTmpl] = useState<FundedTemplate | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [contacts, setContacts] = useState<SavedContact[]>([]);
   const [showContacts, setShowContacts] = useState(false);
+  // Optional: attach this email to a deal + rep. Selecting a deal prefills
+  // the recipient / fields from whatever the deal already has.
+  const [deals, setDeals] = useState<DealOpt[]>([]);
+  const [reps, setReps] = useState<{ id: string; name: string }[]>([]);
+  const [dealId, setDealId] = useState('');
+  const [repId, setRepId] = useState('');
 
   const [toEmail, setToEmail] = useState('');
   const [ccInput, setCcInput] = useState('');
@@ -71,7 +90,9 @@ export default function FundedEmailPage() {
     Promise.all([
       fetch('/api/settings/funded-email-template', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({})),
       fetch('/api/funded-email/contacts', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({})),
-    ]).then(([t, c]) => {
+      fetch('/api/deals', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({})),
+      fetch('/api/users').then((r) => r.json()).catch(() => ({})),
+    ]).then(([t, c, dRes, uRes]) => {
       const d = t?.data ?? null;
       if (d && typeof d === 'object') {
         setTmpl({
@@ -82,6 +103,9 @@ export default function FundedEmailPage() {
         setSubject(d.subject ?? '');
       }
       setContacts(c?.data ?? []);
+      setDeals((dRes?.data ?? dRes?.deals ?? []) as DealOpt[]);
+      setReps(((uRes?.data ?? []) as { id: string; name: string; role: string }[])
+        .filter((u) => u.role !== 'lead_source').map((u) => ({ id: u.id, name: u.name })));
       setLoaded(true);
     });
   }, []);
@@ -89,6 +113,36 @@ export default function FundedEmailPage() {
   function pickContact(c: SavedContact) {
     setToEmail(c.email);
     setShowContacts(false);
+  }
+
+  /**
+   * Attaching a deal prefills whatever that deal already has: the merchant
+   * email into the recipient (if empty), the rep, and any template field
+   * whose label matches a known deal value. Nothing is overwritten if the
+   * user already typed it.
+   */
+  function selectDeal(id: string) {
+    setDealId(id);
+    const d = deals.find((x) => x.id === id);
+    if (!d) return;
+    if (d.assignedRepId) setRepId(d.assignedRepId);
+    if (!toEmail && d.merchantEmail) setToEmail(d.merchantEmail);
+    const merchant = [d.merchantFirstName, d.merchantLastName].filter(Boolean).join(' ');
+    // Fill template fields by fuzzy label match.
+    setValues((prev) => {
+      const next = { ...prev };
+      (tmpl?.fields ?? []).forEach((f, i) => {
+        if (next[i]) return; // don't clobber typed values
+        const label = (f.label || '').toLowerCase();
+        if (/merchant|owner|name/.test(label) && merchant) next[i] = merchant;
+        else if (/business|company|dba/.test(label) && d.businessName) next[i] = d.businessName;
+        else if (/fund|advance|amount/.test(label) && d.fundedAmount) next[i] = d.fundedAmount;
+        else if (/factor|rate/.test(label) && d.factorRate) next[i] = d.factorRate;
+        else if (/term/.test(label) && d.termCount) next[i] = `${d.termCount} ${d.termMode ?? ''}`.trim();
+      });
+      return next;
+    });
+    toast.success('Deal info pulled in.');
   }
 
   function addCc() {
@@ -120,6 +174,7 @@ export default function FundedEmailPage() {
     setNotes('');
     setFiles([]);
     setSubject(tmpl?.subject ?? '');
+    setDealId(''); setRepId('');
   }
 
   async function send() {
@@ -155,8 +210,40 @@ export default function FundedEmailPage() {
       return;
     }
     toast.success('Funded email sent.');
+
+    // Offer to log this as a funded deal — never automatic; always asks.
+    // If a deal is attached, mark it funded (+ assign rep + pull any amounts
+    // we have); otherwise offer to create one to fill in.
+    const wantLog = await confirm({
+      title: 'Log this as a funded deal?',
+      description: dealId
+        ? 'Marks the selected deal as funded and assigns the rep. You can fill in any missing details on the Funded Deals page.'
+        : 'Opens Funded Deals so you can add this as a new funded deal.',
+      confirmLabel: 'Yes, log it',
+      cancelLabel: 'No thanks',
+    });
+
     setToEmail(''); setCcEmails([]); setCcInput('');
     setValues({}); setNotes(''); setFiles([]);
+
+    if (wantLog) {
+      if (dealId) {
+        const body: Record<string, unknown> = { status: 'funded' };
+        if (repId) body.assignedRepId = repId;
+        const r = await fetch(`/api/deals/${dealId}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        if (r.ok) {
+          toast.success('Logged as a funded deal.');
+          router.push(`/portfolio?deal=${dealId}`);
+        } else {
+          toast.error('Could not log the deal — open Funded Deals to add it manually.');
+        }
+      } else {
+        router.push('/portfolio');
+      }
+    }
+    setDealId(''); setRepId('');
   }
 
   if (!loaded) return <div className="text-sm text-muted-foreground">Loading…</div>;
@@ -193,8 +280,33 @@ export default function FundedEmailPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Recipient</CardTitle>
+          <CardDescription>Optionally attach a deal to pull its info in, and pick the rep.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/* Attach a deal + rep — optional. Selecting a deal prefills fields. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Attach to deal (optional)">
+              <select
+                value={dealId}
+                onChange={(e) => selectDeal(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm"
+              >
+                <option value="">— none —</option>
+                {deals.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Rep (optional)">
+              <select
+                value={repId}
+                onChange={(e) => setRepId(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm"
+              >
+                <option value="">— none —</option>
+                {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </Field>
+          </div>
+
           <div className="flex items-end gap-2">
             <div className="flex-1">
               <Field label="To">
