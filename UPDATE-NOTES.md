@@ -1,3 +1,29 @@
+# Update — July 2026 (round 16)
+
+## Syndication
+- **Available amount**: when posting a deal, set how much is open for
+  syndication — a **dollar amount or a percent** of the funding (toggle $/%).
+  Entries are **capped**: once it's filled, the deal shows "Full" and no one
+  can over-commit (you get "Only $X still available" if you try).
+- **Collapsed by default**: each deal is a slim row (name, funding,
+  available, committed) that **expands** for the full terms, entries, and
+  the add-me-in form.
+- **Compact entries**: company and amount sit side by side on one tight line
+  (rep name in small text), with a total row.
+- **Copy**: one line per entry — `Company $Amount`. No dashes.
+- **Early payoff** field now just says "Early payoff" — tick it and it says
+  "Yes — describe below" with the details box.
+
+## Reverse consolidation marking
+- **Offers** (Active Deals → offers): each offer has a **Reverse
+  consolidation** checkbox (and shows a violet RC badge). Toggleable on
+  existing offers too.
+- **Funded Deals**: the deal editor now has a **Deal type** selector
+  (Standard MCA / Reverse consolidation) — marking it RC switches the deal's
+  commission to the draw-based treatment.
+
+---
+
 # Update — July 2026 (round 15) — refinements
 
 ## Syndication

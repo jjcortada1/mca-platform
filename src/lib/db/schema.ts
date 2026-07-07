@@ -498,6 +498,9 @@ export const dealOffers = pgTable(
     paymentAmount: numeric('payment_amount', { precision: 14, scale: 2 }),
     // Free-text per-offer notes (e.g. "Yellowstone, $5k commission, 2nd position OK")
     notes: text('notes'),
+    // Reverse consolidation offers get different commission treatment
+    // downstream (paid over time), so they're flagged at the offer level too.
+    isReverseConsolidation: boolean('is_reverse_consolidation').notNull().default(false),
     // Which funder sent this offer (optional — may be entered before tagging)
     funderId: uuid('funder_id').references(() => funders.id, { onDelete: 'set null' }),
     // The rep can mark one offer as accepted. The deal's legacy offer fields
@@ -1011,6 +1014,11 @@ export const syndicationDeals = pgTable(
     dealId: uuid('deal_id').references(() => deals.id, { onDelete: 'set null' }),
     dealName: varchar('deal_name', { length: 300 }).notNull(),
     fundingAmount: numeric('funding_amount', { precision: 14, scale: 2 }),
+    // How much of the deal is OPEN for syndication — set as a flat dollar
+    // amount OR a percent of the funding amount (one or the other). Entries
+    // are capped so total committed never exceeds the available amount.
+    availableAmount: numeric('available_amount', { precision: 14, scale: 2 }),
+    availablePct: numeric('available_pct', { precision: 6, scale: 2 }),
     term: varchar('term', { length: 120 }),
     rate: varchar('rate', { length: 60 }),
     commission: varchar('commission', { length: 120 }),

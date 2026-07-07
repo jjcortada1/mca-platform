@@ -1,22 +1,26 @@
 'use client';
 /**
- * Syndication board — deals open for syndication, posted with full terms.
+ * Syndication board.
  *
- * Layout: one CARD per deal with every term visible (no expanding rows).
- * Reps pick their name from the saved rep↔company directory (company
- * auto-fills), type the amount (commas as they type), and hit "Add me in".
- * Copy on a deal copies ONLY the syndication lines: each rep's company and
- * how much they're putting in.
+ * Each deal is a COLLAPSED row — deal name + the numbers that matter
+ * (funding, available, committed) — that expands for full terms, the
+ * syndication entries, and the add-me-in form.
+ *
+ * The poster marks how much is AVAILABLE for syndication (a dollar amount or
+ * a percent of the funding amount); entries are capped server-side so the
+ * board can never oversell a deal.
+ *
+ * Copy = one line per entry: "Company $Amount". Nothing else.
  */
 import { useEffect, useMemo, useState } from 'react';
 import {
   PageHeader, Card, CardContent, Button, Input, Textarea, Field, Badge, EmptyState,
-  CurrencyInput, Select,
+  CurrencyInput, PercentInput, Select,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { useConfirm } from '@/components/confirm-provider';
 import { formatCurrency, cn } from '@/lib/utils';
-import { Handshake, Copy, Plus, Trash2, Lock, Unlock } from 'lucide-react';
+import { Handshake, Copy, Plus, Trash2, Lock, Unlock, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface Entry {
   id: string;
@@ -30,6 +34,9 @@ interface SynDeal {
   id: string;
   dealName: string;
   fundingAmount: string | null;
+  availableAmount: string | null;
+  availablePct: string | null;
+  availableCap: number | null;
   term: string | null;
   rate: string | null;
   commission: string | null;
@@ -52,14 +59,16 @@ interface DirectoryRep {
 }
 
 const BLANK_FORM = {
-  dealName: '', fundingAmount: '', term: '', rate: '', commission: '', fee: '',
+  dealName: '', fundingAmount: '', availableMode: 'amount' as 'amount' | 'pct',
+  availableAmount: '', availablePct: '',
+  term: '', rate: '', commission: '', fee: '',
   hasEarlyPayoff: false, earlyPayoffDetails: '', funderName: '', positionNumber: '', notes: '',
 };
 
-/** Copy text = ONLY the syndication lines: rep's company + amount. */
+/** Copy = "Company $Amount" per line. Falls back to rep name if no company. */
 function buildCopyText(d: SynDeal): string {
   return d.entries
-    .map((e) => `${e.companyName || e.repName} — ${formatCurrency(e.amount)}`)
+    .map((e) => `${e.companyName || e.repName} ${formatCurrency(e.amount)}`)
     .join('\n');
 }
 
@@ -73,11 +82,10 @@ export default function SyndicationPage() {
   const [directory, setDirectory] = useState<DirectoryRep[]>([]);
   const [loading, setLoading] = useState(true);
   const [showClosed, setShowClosed] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showPost, setShowPost] = useState(false);
   const [form, setForm] = useState({ ...BLANK_FORM });
   const [posting, setPosting] = useState(false);
-  // Per-deal "my entry" drafts. repId '' = nothing picked; '__new' = typing a
-  // new rep + company manually (which saves to the directory on submit).
   const [drafts, setDrafts] = useState<Record<string, { repId: string; newName: string; newCompany: string; amount: string }>>({});
 
   async function load() {
@@ -101,6 +109,14 @@ export default function SyndicationPage() {
     [dealsList, showClosed]
   );
 
+  function toggle(id: string) {
+    setExpanded((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }
+
   function draftFor(dealId: string) {
     return drafts[dealId] ?? { repId: '', newName: '', newCompany: '', amount: '' };
   }
@@ -116,8 +132,14 @@ export default function SyndicationPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...form,
+          dealName: form.dealName,
           fundingAmount: form.fundingAmount ? Number(form.fundingAmount) : null,
+          availableAmount: form.availableMode === 'amount' && form.availableAmount ? Number(form.availableAmount) : null,
+          availablePct: form.availableMode === 'pct' && form.availablePct ? Number(form.availablePct) : null,
+          term: form.term, rate: form.rate, commission: form.commission, fee: form.fee,
+          hasEarlyPayoff: form.hasEarlyPayoff,
+          earlyPayoffDetails: form.earlyPayoffDetails,
+          funderName: form.funderName, positionNumber: form.positionNumber, notes: form.notes,
         }),
       });
       const j = await res.json();
@@ -155,7 +177,7 @@ export default function SyndicationPage() {
   async function removeEntry(entry: Entry) {
     const ok = await confirm({
       title: 'Remove this entry?',
-      description: `${entry.repName}${entry.companyName ? ` (${entry.companyName})` : ''} — ${formatCurrency(entry.amount)}`,
+      description: `${entry.companyName || entry.repName} ${formatCurrency(entry.amount)}`,
       confirmLabel: 'Remove',
       destructive: true,
     });
@@ -184,14 +206,13 @@ export default function SyndicationPage() {
     if (!ok) return;
     const res = await fetch(`/api/syndication/${deal.id}`, { method: 'DELETE' });
     if (res.ok) { toast.success('Removed from the board.'); load(); }
-    else { const j = await res.json().catch(() => ({})); toast.error(j.error || 'Could not remove.'); }
   }
 
   async function copyDeal(d: SynDeal) {
     if (!d.entries.length) { toast.error('No syndication entries to copy yet.'); return; }
     try {
       await navigator.clipboard.writeText(buildCopyText(d));
-      toast.success('Copied — each company and their amount.');
+      toast.success('Copied.');
     } catch {
       toast.error('Could not copy to clipboard.');
     }
@@ -201,7 +222,7 @@ export default function SyndicationPage() {
     <div className="space-y-5">
       <PageHeader
         title="Syndication"
-        description="Deals open for syndication. Pick your name, put your amount in, done. Copy grabs each company + amount."
+        description="Deals open for syndication — expand a deal for the full terms, pick your name, and put your amount in."
         actions={
           <Button onClick={() => setShowPost((v) => !v)}>
             <Plus className="h-4 w-4" /> Post a deal
@@ -219,6 +240,30 @@ export default function SyndicationPage() {
               </Field>
               <Field label="Funding amount">
                 <CurrencyInput value={form.fundingAmount} onChange={(v) => setForm({ ...form, fundingAmount: v })} placeholder="150,000" />
+              </Field>
+              <Field label="Available for syndication">
+                <div className="flex items-center gap-1.5">
+                  {form.availableMode === 'amount' ? (
+                    <CurrencyInput value={form.availableAmount} onChange={(v) => setForm({ ...form, availableAmount: v })} placeholder="75,000" className="flex-1" />
+                  ) : (
+                    <PercentInput value={form.availablePct} onChange={(v) => setForm({ ...form, availablePct: v })} placeholder="50" className="flex-1" />
+                  )}
+                  <div className="flex rounded-lg border border-input overflow-hidden shrink-0">
+                    {(['amount', 'pct'] as const).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setForm({ ...form, availableMode: m })}
+                        className={cn(
+                          'h-10 px-2.5 text-xs font-semibold transition-colors',
+                          form.availableMode === m ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        {m === 'amount' ? '$' : '%'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </Field>
               <Field label="Term">
                 <Input value={form.term} onChange={(e) => setForm({ ...form, term: e.target.value })} placeholder="e.g. 120 business days" />
@@ -238,7 +283,7 @@ export default function SyndicationPage() {
               <Field label="Position #">
                 <Input value={form.positionNumber} onChange={(e) => setForm({ ...form, positionNumber: e.target.value })} placeholder="e.g. 2nd" />
               </Field>
-              <Field label="Early payoff?">
+              <Field label="Early payoff">
                 <label className="flex items-center gap-2 h-10 cursor-pointer">
                   <input
                     type="checkbox"
@@ -246,7 +291,7 @@ export default function SyndicationPage() {
                     checked={form.hasEarlyPayoff}
                     onChange={(e) => setForm({ ...form, hasEarlyPayoff: e.target.checked })}
                   />
-                  <span className="text-sm">{form.hasEarlyPayoff ? 'Yes — describe below' : 'No early payoff'}</span>
+                  {form.hasEarlyPayoff && <span className="text-sm">Yes — describe below</span>}
                 </label>
               </Field>
             </div>
@@ -282,148 +327,152 @@ export default function SyndicationPage() {
           description="Post a deal to open it up for syndication — reps can then put in the amount they want."
         />
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-2">
           {visible.map((d) => {
-            const target = Number(d.fundingAmount || 0);
-            const pct = target > 0 ? Math.min(100, Math.round((d.committedTotal / target) * 100)) : null;
+            const isOpen = expanded.has(d.id);
+            const cap = d.availableCap;
+            const remaining = cap != null ? Math.max(0, cap - d.committedTotal) : null;
+            const pctFilled = cap != null && cap > 0 ? Math.min(100, Math.round((d.committedTotal / cap) * 100)) : null;
             const canManage = isAdmin || d.createdBy === me?.id;
             const draft = draftFor(d.id);
             const isNewRep = draft.repId === '__new';
+            const full = remaining != null && remaining <= 0;
             return (
-              <Card key={d.id} className={cn(d.status !== 'open' && 'opacity-70')}>
-                <CardContent className="p-4 sm:p-5 space-y-4">
-                  {/* Header: name + status + committed + actions */}
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                    <div className="text-base font-semibold">{d.dealName}</div>
-                    <Badge className={cn(d.status === 'open' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-gray-100 text-gray-600 border-gray-200')}>
-                      {d.status === 'open' ? 'Open' : 'Closed'}
-                    </Badge>
-                    <div className="ml-auto flex items-center gap-1.5">
-                      <Button size="sm" variant="outline" onClick={() => copyDeal(d)} title="Copy each company + amount">
-                        <Copy className="h-3.5 w-3.5" /> Copy
-                      </Button>
-                      {canManage && (
-                        d.status === 'open'
-                          ? <Button size="sm" variant="ghost" onClick={() => setStatus(d, 'closed')} title="Close syndication"><Lock className="h-3.5 w-3.5" /></Button>
-                          : <Button size="sm" variant="ghost" onClick={() => setStatus(d, 'open')} title="Reopen"><Unlock className="h-3.5 w-3.5" /></Button>
-                      )}
-                      {canManage && (
-                        <Button size="sm" variant="ghost" onClick={() => removeDeal(d)} title="Remove from board">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
+              <div key={d.id} className={cn('rounded-xl border border-border bg-card overflow-hidden', d.status !== 'open' && 'opacity-70')}>
+                {/* Collapsed row */}
+                <button
+                  type="button"
+                  onClick={() => toggle(d.id)}
+                  className={cn('w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-muted/40 transition-colors', isOpen && 'bg-muted/30')}
+                >
+                  {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
+                  <span className="font-semibold text-sm truncate">{d.dealName}</span>
+                  <Badge className={cn('shrink-0', d.status === 'open'
+                    ? (full ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-emerald-100 text-emerald-800 border-emerald-200')
+                    : 'bg-gray-100 text-gray-600 border-gray-200')}>
+                    {d.status !== 'open' ? 'Closed' : full ? 'Full' : 'Open'}
+                  </Badge>
+                  <span className="ml-auto hidden sm:flex items-center gap-4 text-[13px] shrink-0">
+                    {d.fundingAmount && (
+                      <span className="text-muted-foreground">Funding <span className="text-foreground font-medium tabular-nums">{formatCurrency(d.fundingAmount)}</span></span>
+                    )}
+                    {cap != null && (
+                      <span className="text-muted-foreground">Available <span className="text-foreground font-medium tabular-nums">{formatCurrency(remaining ?? cap)}</span></span>
+                    )}
+                    <span className="text-muted-foreground">In <span className="text-foreground font-medium tabular-nums">{formatCurrency(d.committedTotal)}</span>{pctFilled !== null && <span className="text-muted-foreground/70"> ({pctFilled}%)</span>}</span>
+                  </span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); copyDeal(d); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); copyDeal(d); } }}
+                    title="Copy: company + amount per entry"
+                    className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </span>
+                </button>
 
-                  {/* All deal terms — visible up front, no expanding */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-2 rounded-lg border border-border bg-muted/20 px-4 py-3">
-                    <TermStat label="Funding" value={d.fundingAmount ? formatCurrency(d.fundingAmount) : null} strong />
-                    <TermStat label="Term" value={d.term} />
-                    <TermStat label="Rate" value={d.rate} />
-                    <TermStat label="Commission" value={d.commission} />
-                    <TermStat label="Fee" value={d.fee} />
-                    <TermStat label="Funder" value={d.funderName} />
-                    <TermStat label="Position" value={d.positionNumber} />
-                    <TermStat label="Early payoff" value={d.hasEarlyPayoff ? (d.earlyPayoffDetails || 'Yes') : 'No'} />
-                    {pct !== null && <TermStat label="Committed" value={`${formatCurrency(d.committedTotal)} (${pct}%)`} strong />}
-                    {pct === null && d.committedTotal > 0 && <TermStat label="Committed" value={formatCurrency(d.committedTotal)} strong />}
-                  </div>
-                  {d.notes && <p className="text-[13px] text-muted-foreground whitespace-pre-wrap">{d.notes}</p>}
-
-                  {/* Progress bar toward the funding amount */}
-                  {pct !== null && (
-                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${pct}%` }} />
+                {/* Expanded body */}
+                {isOpen && (
+                  <div className="border-t border-border px-4 py-3.5 space-y-3.5">
+                    {/* Terms — one tight line-wrapped strip */}
+                    <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-[13px]">
+                      <TermInline label="Funding" value={d.fundingAmount ? formatCurrency(d.fundingAmount) : null} />
+                      <TermInline label="Available" value={cap != null ? `${formatCurrency(cap)}${d.availablePct != null && d.availableAmount == null ? ` (${Number(d.availablePct)}%)` : ''}` : null} />
+                      <TermInline label="Term" value={d.term} />
+                      <TermInline label="Rate" value={d.rate} />
+                      <TermInline label="Commission" value={d.commission} />
+                      <TermInline label="Fee" value={d.fee} />
+                      <TermInline label="Funder" value={d.funderName} />
+                      <TermInline label="Position" value={d.positionNumber} />
+                      {d.hasEarlyPayoff && <TermInline label="Early payoff" value={d.earlyPayoffDetails || 'Yes'} />}
                     </div>
-                  )}
+                    {d.notes && <p className="text-[13px] text-muted-foreground whitespace-pre-wrap">{d.notes}</p>}
 
-                  {/* Entries */}
-                  <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
-                      Syndication {d.entries.length > 0 && `(${d.entries.length})`}
-                    </div>
-                    {d.entries.length === 0 ? (
-                      <div className="text-[13px] text-muted-foreground">No one has put in yet — be first.</div>
-                    ) : (
-                      <div className="rounded-lg border border-border overflow-hidden">
-                        <table className="w-full text-[13px]">
-                          <thead>
-                            <tr className="bg-muted/40 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-                              <th className="px-3 py-1.5 font-medium">Rep</th>
-                              <th className="px-3 py-1.5 font-medium">Company</th>
-                              <th className="px-3 py-1.5 font-medium text-right">Amount</th>
-                              <th className="w-8"></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {d.entries.map((e) => (
-                              <tr key={e.id} className="border-t border-border/60">
-                                <td className="px-3 py-1.5 font-medium">{e.repName}</td>
-                                <td className="px-3 py-1.5 text-muted-foreground">{e.companyName || '—'}</td>
-                                <td className="px-3 py-1.5 text-right tabular-nums font-medium">{formatCurrency(e.amount)}</td>
-                                <td className="px-1 py-1.5">
-                                  {(isAdmin || e.userId === me?.id) && (
-                                    <button onClick={() => removeEntry(e)} className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-rose-500" title="Remove entry">
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
-                                </td>
-                              </tr>
+                    {/* Fill bar toward the available cap */}
+                    {pctFilled !== null && (
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-1.5 flex-1 max-w-[280px] rounded-full bg-muted overflow-hidden">
+                          <div className={cn('h-full rounded-full transition-all', full ? 'bg-amber-500' : 'bg-primary')} style={{ width: `${pctFilled}%` }} />
+                        </div>
+                        <span className="text-[11px] text-muted-foreground tabular-nums">
+                          {formatCurrency(d.committedTotal)} of {formatCurrency(cap!)} · {formatCurrency(remaining!)} left
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Entries — compact: company + amount side by side */}
+                    {d.entries.length > 0 && (
+                      <div className="max-w-md rounded-lg border border-border divide-y divide-border/60 overflow-hidden">
+                        {d.entries.map((e) => (
+                          <div key={e.id} className="flex items-center gap-2 px-3 py-1.5 text-[13px]">
+                            <span className="font-medium">{e.companyName || e.repName}</span>
+                            {e.companyName && <span className="text-[11px] text-muted-foreground">({e.repName})</span>}
+                            <span className="ml-auto tabular-nums font-semibold">{formatCurrency(e.amount)}</span>
+                            {(isAdmin || e.userId === me?.id) && (
+                              <button onClick={() => removeEntry(e)} className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-rose-500" title="Remove entry">
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                        <div className="flex items-center gap-2 px-3 py-1.5 text-[13px] bg-muted/30">
+                          <span className="font-semibold">Total</span>
+                          <span className="ml-auto tabular-nums font-semibold">{formatCurrency(d.committedTotal)}</span>
+                          {(isAdmin || d.entries.some((e) => e.userId === me?.id)) && <span className="w-[18px]" />}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Add my entry */}
+                    {d.status === 'open' && !full && (
+                      <div className="flex flex-wrap items-end gap-2">
+                        <Field label="I am" className="w-[180px]">
+                          <Select className="h-9" value={draft.repId} onChange={(e) => setDraft(d.id, { repId: e.target.value })}>
+                            <option value="">Select rep…</option>
+                            {directory.map((r) => (
+                              <option key={r.id} value={r.id}>
+                                {r.repName}{r.repCompanyName ? ` — ${r.repCompanyName}` : ''}
+                              </option>
                             ))}
-                            <tr className="border-t border-border bg-muted/30">
-                              <td className="px-3 py-1.5 font-semibold" colSpan={2}>Total committed</td>
-                              <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{formatCurrency(d.committedTotal)}</td>
-                              <td></td>
-                            </tr>
-                          </tbody>
-                        </table>
+                            <option value="__new">+ New rep…</option>
+                          </Select>
+                        </Field>
+                        {isNewRep && (
+                          <>
+                            <Field label="Rep name" className="flex-1 min-w-[120px]">
+                              <Input className="h-9" value={draft.newName} onChange={(e) => setDraft(d.id, { newName: e.target.value })} placeholder="Your name" />
+                            </Field>
+                            <Field label="Company" className="flex-1 min-w-[120px]">
+                              <Input className="h-9" value={draft.newCompany} onChange={(e) => setDraft(d.id, { newCompany: e.target.value })} placeholder="Your company" />
+                            </Field>
+                          </>
+                        )}
+                        <Field label="Amount" className="w-[140px]">
+                          <CurrencyInput className="h-9" value={draft.amount} onChange={(v) => setDraft(d.id, { amount: v })} placeholder="25,000" />
+                        </Field>
+                        <Button size="sm" onClick={() => addEntry(d)} className="h-9">
+                          <Plus className="h-3.5 w-3.5" /> Add me in
+                        </Button>
+                      </div>
+                    )}
+                    {d.status === 'open' && full && (
+                      <div className="text-[13px] text-amber-700 dark:text-amber-400 font-medium">Fully committed — nothing left available.</div>
+                    )}
+
+                    {/* Manage */}
+                    {canManage && (
+                      <div className="flex items-center gap-2 pt-1 border-t border-border/60">
+                        {d.status === 'open'
+                          ? <Button size="sm" variant="ghost" onClick={() => setStatus(d, 'closed')}><Lock className="h-3.5 w-3.5" /> Close</Button>
+                          : <Button size="sm" variant="ghost" onClick={() => setStatus(d, 'open')}><Unlock className="h-3.5 w-3.5" /> Reopen</Button>}
+                        <Button size="sm" variant="ghost" onClick={() => removeDeal(d)}><Trash2 className="h-3.5 w-3.5" /> Remove</Button>
                       </div>
                     )}
                   </div>
-
-                  {/* Add my entry — directory-driven */}
-                  {d.status === 'open' && (
-                    <div className="flex flex-wrap items-end gap-2 rounded-lg border border-dashed border-border px-3 py-2.5">
-                      <Field label="I am" className="w-[190px]">
-                        <Select
-                          className="h-9"
-                          value={draft.repId}
-                          onChange={(e) => setDraft(d.id, { repId: e.target.value })}
-                        >
-                          <option value="">Select rep…</option>
-                          {directory.map((r) => (
-                            <option key={r.id} value={r.id}>
-                              {r.repName}{r.repCompanyName ? ` — ${r.repCompanyName}` : ''}
-                            </option>
-                          ))}
-                          <option value="__new">+ New rep…</option>
-                        </Select>
-                      </Field>
-                      {isNewRep && (
-                        <>
-                          <Field label="Rep name" className="flex-1 min-w-[130px]">
-                            <Input className="h-9" value={draft.newName} onChange={(e) => setDraft(d.id, { newName: e.target.value })} placeholder="Your name" />
-                          </Field>
-                          <Field label="Company" className="flex-1 min-w-[130px]">
-                            <Input className="h-9" value={draft.newCompany} onChange={(e) => setDraft(d.id, { newCompany: e.target.value })} placeholder="Your company" />
-                          </Field>
-                        </>
-                      )}
-                      {!isNewRep && draft.repId && (
-                        <div className="pb-2 text-[13px] text-muted-foreground">
-                          {directory.find((r) => r.id === draft.repId)?.repCompanyName || 'No company on file'}
-                        </div>
-                      )}
-                      <Field label="Amount" className="w-[150px]">
-                        <CurrencyInput className="h-9" value={draft.amount} onChange={(v) => setDraft(d.id, { amount: v })} placeholder="25,000" />
-                      </Field>
-                      <Button size="sm" onClick={() => addEntry(d)} className="h-9">
-                        <Plus className="h-3.5 w-3.5" /> Add me in
-                      </Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                )}
+              </div>
             );
           })}
         </div>
@@ -432,12 +481,12 @@ export default function SyndicationPage() {
   );
 }
 
-function TermStat({ label, value, strong }: { label: string; value: string | null; strong?: boolean }) {
+function TermInline({ label, value }: { label: string; value: string | null }) {
   if (!value) return null;
   return (
-    <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className={cn('text-[13px] truncate', strong ? 'font-semibold tabular-nums' : 'font-medium')} title={value}>{value}</div>
-    </div>
+    <span className="whitespace-nowrap">
+      <span className="text-muted-foreground">{label}:</span>{' '}
+      <span className="font-medium">{value}</span>
+    </span>
   );
 }

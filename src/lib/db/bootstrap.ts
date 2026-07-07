@@ -182,6 +182,11 @@ const STATEMENTS: string[] = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS syndication_reps_company_idx ON syndication_reps (company_id)`,
+  // Available-for-syndication cap (dollar OR percent of funding amount).
+  `ALTER TABLE syndication_deals ADD COLUMN IF NOT EXISTS available_amount numeric(14,2)`,
+  `ALTER TABLE syndication_deals ADD COLUMN IF NOT EXISTS available_pct numeric(6,2)`,
+  // Offers can be flagged as reverse consolidations.
+  `ALTER TABLE deal_offers ADD COLUMN IF NOT EXISTS is_reverse_consolidation boolean NOT NULL DEFAULT false`,
 
   // ---- funder bonuses (additive) ----
   `CREATE TABLE IF NOT EXISTS funder_bonuses (

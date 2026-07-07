@@ -48,6 +48,9 @@ interface Deal {
   // General-purpose notes on this funded deal — surfaced here AND in the
   // rep commission view so reps have deal context alongside their pay.
   fundedNotes?: string | null;
+  // 'standard_mca' | 'reverse_consolidation' — RC deals get draw-based
+  // commission treatment, so they're markable right from the editor here.
+  dealType?: string | null;
   // Paid-off tracking (schema fields). When the deal has been closed out
   // — either by payoff or by being rolled into a refi — paidOff is true.
   // paidOffAmount captures the actual settled amount, which can differ
@@ -805,6 +808,7 @@ function FundedDealRow({
     assignedRepId: string;
     fundedWithFunderId: string | null;
     fundedNotes: string;
+    dealType: string;
   }>({
     fundedAmount: deal.fundedAmount ?? '',
     feePct: deal.feePct ?? '',
@@ -824,6 +828,7 @@ function FundedDealRow({
     // deals row, exposed in commissions for reps.
     fundedWithFunderId: deal.fundedWithFunderId ?? null,
     fundedNotes: deal.fundedNotes ?? '',
+    dealType: deal.dealType ?? 'standard_mca',
   });
 
   // Pending-confirm state — when set, a ConfirmDialog asks the user
@@ -1264,6 +1269,19 @@ function FundedDealRow({
                       >
                         <option value="">— pick a funder —</option>
                         {funders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                      </select>
+                    </Field>
+                    {/* Deal type — mark a funded deal as a reverse
+                        consolidation so its commission is treated as
+                        draw-based (paid over time, stays pending). */}
+                    <Field label="Deal type">
+                      <select
+                        value={draft.dealType}
+                        onChange={(e) => setDraft({ ...draft, dealType: e.target.value })}
+                        className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+                      >
+                        <option value="standard_mca">Standard MCA</option>
+                        <option value="reverse_consolidation">Reverse consolidation</option>
                       </select>
                     </Field>
                   </div>

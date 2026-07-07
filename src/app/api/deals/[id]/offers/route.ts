@@ -38,6 +38,7 @@ const createSchema = z.object({
   notes: z.string().max(2000).optional().nullable(),
   funderId: z.string().uuid().optional().nullable(),
   isAccepted: z.boolean().optional(),
+  isReverseConsolidation: z.boolean().optional(),
 });
 
 /** Coerce numeric input (which may be '' from a blank field) into the numeric|null
@@ -90,6 +91,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       notes: body.notes ?? null,
       funderId: body.funderId ?? null,
       isAccepted: body.isAccepted ?? false,
+      isReverseConsolidation: body.isReverseConsolidation ?? false,
     }).returning();
 
     // Mirror an accepted offer onto the deal's legacy single-offer columns

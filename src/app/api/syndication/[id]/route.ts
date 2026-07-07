@@ -21,6 +21,8 @@ async function getDeal(companyId: string, id: string) {
 const patchSchema = z.object({
   dealName: z.string().min(1).max(300).optional(),
   fundingAmount: z.coerce.number().nonnegative().optional().nullable(),
+  availableAmount: z.coerce.number().nonnegative().optional().nullable(),
+  availablePct: z.coerce.number().min(0).max(100).optional().nullable(),
   term: z.string().max(120).optional().nullable(),
   rate: z.string().max(60).optional().nullable(),
   commission: z.string().max(120).optional().nullable(),
@@ -46,6 +48,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (body.dealName !== undefined) updates.dealName = body.dealName.trim();
     if (body.fundingAmount !== undefined) updates.fundingAmount = body.fundingAmount != null ? String(body.fundingAmount) : null;
+    if (body.availableAmount !== undefined) updates.availableAmount = body.availableAmount != null ? String(body.availableAmount) : null;
+    if (body.availablePct !== undefined) updates.availablePct = body.availablePct != null ? String(body.availablePct) : null;
     for (const k of ['term', 'rate', 'commission', 'fee', 'funderName', 'positionNumber', 'notes', 'earlyPayoffDetails'] as const) {
       if (body[k] !== undefined) updates[k] = body[k]?.trim() || null;
     }
@@ -96,6 +100,31 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return NextResponse.json({ error: 'This syndication is closed.' }, { status: 400 });
     }
     const body = entrySchema.parse(await req.json());
+
+    // Cap enforcement: entries can only fill up to the AVAILABLE amount
+    // (flat dollar, or percent of the funding amount). No cap set = no limit.
+    const cap = deal.availableAmount != null
+      ? Number(deal.availableAmount)
+      : (deal.availablePct != null && deal.fundingAmount != null
+          ? (Number(deal.fundingAmount) * Number(deal.availablePct)) / 100
+          : null);
+    if (cap != null) {
+      const existing = await db.select().from(syndicationEntries)
+        .where(eq(syndicationEntries.syndicationDealId, deal.id));
+      const committed = existing.reduce((s, e) => s + Number(e.amount || 0), 0);
+      const remaining = Math.max(0, cap - committed);
+      if (body.amount > remaining + 0.005) {
+        return NextResponse.json(
+          {
+            error: remaining <= 0
+              ? 'This syndication is fully committed — nothing left available.'
+              : `Only $${remaining.toLocaleString(undefined, { maximumFractionDigits: 0 })} is still available on this deal.`,
+          },
+          { status: 400 }
+        );
+      }
+    }
+
     const repName = body.repName.trim();
     const companyName = body.companyName?.trim() || null;
     const [row] = await db.insert(syndicationEntries).values({

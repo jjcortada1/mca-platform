@@ -38,7 +38,13 @@ export async function GET() {
     const data = rows.map((r) => {
       const es = (byDeal.get(r.id) ?? []).sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
       const committed = es.reduce((s, e) => s + Number(e.amount || 0), 0);
-      return { ...r, entries: es, committedTotal: committed };
+      // Resolved dollar cap: flat amount wins; else percent of funding.
+      const cap = r.availableAmount != null
+        ? Number(r.availableAmount)
+        : (r.availablePct != null && r.fundingAmount != null
+            ? (Number(r.fundingAmount) * Number(r.availablePct)) / 100
+            : null);
+      return { ...r, entries: es, committedTotal: committed, availableCap: cap };
     });
     return NextResponse.json({ data });
   } catch (e) { return apiError(e); }
@@ -48,6 +54,10 @@ const createSchema = z.object({
   dealId: z.string().uuid().optional().nullable(),
   dealName: z.string().min(1).max(300),
   fundingAmount: z.coerce.number().nonnegative().optional().nullable(),
+  // How much is open for syndication — a flat dollar amount OR a percent of
+  // the funding amount. If both are sent, the dollar amount wins.
+  availableAmount: z.coerce.number().nonnegative().optional().nullable(),
+  availablePct: z.coerce.number().min(0).max(100).optional().nullable(),
   term: z.string().max(120).optional().nullable(),
   rate: z.string().max(60).optional().nullable(),
   commission: z.string().max(120).optional().nullable(),
@@ -75,6 +85,8 @@ export async function POST(req: NextRequest) {
       dealId: body.dealId ?? null,
       dealName: body.dealName.trim(),
       fundingAmount: body.fundingAmount != null ? String(body.fundingAmount) : null,
+      availableAmount: body.availableAmount != null ? String(body.availableAmount) : null,
+      availablePct: body.availableAmount == null && body.availablePct != null ? String(body.availablePct) : null,
       term: body.term?.trim() || null,
       rate: body.rate?.trim() || null,
       commission: body.commission?.trim() || null,

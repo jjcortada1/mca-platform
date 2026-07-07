@@ -42,6 +42,7 @@ const patchSchema = z.object({
   notes: z.string().max(2000).nullable().optional(),
   funderId: z.string().uuid().nullable().optional(),
   isAccepted: z.boolean().optional(),
+  isReverseConsolidation: z.boolean().optional(),
 });
 
 function num(v: unknown): string | null {
@@ -78,6 +79,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if ('notes' in body) patch.notes = body.notes ?? null;
     if ('funderId' in body) patch.funderId = body.funderId ?? null;
     if ('isAccepted' in body) patch.isAccepted = body.isAccepted;
+    if ('isReverseConsolidation' in body) patch.isReverseConsolidation = body.isReverseConsolidation;
 
     const [updated] = await db.update(dealOffers)
       .set(patch)

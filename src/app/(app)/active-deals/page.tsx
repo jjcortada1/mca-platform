@@ -810,6 +810,7 @@ interface OfferRow {
   notes: string | null;
   funderId: string | null;
   isAccepted: boolean;
+  isReverseConsolidation: boolean;
   createdAt: string;
 }
 
@@ -864,6 +865,7 @@ const blankOffer = (): Omit<OfferRow, 'id' | 'createdAt'> => ({
   notes: '',
   funderId: null,
   isAccepted: false,
+  isReverseConsolidation: false,
 });
 
 /**
@@ -997,9 +999,20 @@ function OffersManager({ dealId }: { dealId: string }) {
           <OfferField label="Notes">
             <Input value={draft.notes ?? ''} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} placeholder="Funder name, conditions, etc." />
           </OfferField>
-          <div className="flex justify-end gap-2">
-            <Button size="sm" variant="ghost" onClick={() => { setAdding(false); setDraft(blankOffer()); }}>Cancel</Button>
-            <Button size="sm" onClick={addOffer} loading={savingId === '__new'}>Save offer</Button>
+          <div className="flex items-center justify-between gap-2">
+            <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5"
+                checked={draft.isReverseConsolidation}
+                onChange={(e) => setDraft({ ...draft, isReverseConsolidation: e.target.checked })}
+              />
+              Reverse consolidation
+            </label>
+            <div className="flex gap-2">
+              <Button size="sm" variant="ghost" onClick={() => { setAdding(false); setDraft(blankOffer()); }}>Cancel</Button>
+              <Button size="sm" onClick={addOffer} loading={savingId === '__new'}>Save offer</Button>
+            </div>
           </div>
         </div>
       )}
@@ -1057,8 +1070,19 @@ function OffersManager({ dealId }: { dealId: string }) {
                 <div className="text-xs font-semibold flex items-center gap-2">
                   Offer {i + 1}
                   {o.isAccepted && <Badge variant="success">Accepted</Badge>}
+                  {o.isReverseConsolidation && (
+                    <Badge className="bg-violet-100 text-violet-800 border-violet-200">Reverse consolidation</Badge>
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
+                  <label className="flex items-center gap-1 text-[11px] text-muted-foreground cursor-pointer mr-1.5">
+                    <input
+                      type="checkbox"
+                      checked={o.isReverseConsolidation}
+                      onChange={(e) => updateOffer(o.id, { isReverseConsolidation: e.target.checked })}
+                    />
+                    RC
+                  </label>
                   <label className="flex items-center gap-1 text-[11px] text-muted-foreground cursor-pointer">
                     <input
                       type="checkbox"
