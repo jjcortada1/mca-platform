@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { computePaydown, buildPaymentSchedule, DEAL_STATUS_META, DEAL_STATUS_OPTIONS } from '@/lib/deals/paydown';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useConfirm } from '@/components/confirm-provider';
+import { useAutoRefresh } from '@/lib/use-auto-refresh';
 
 interface Deal {
   id: string;
@@ -38,6 +39,10 @@ interface Deal {
   renewalNotes: string | null;
   createdAt: string;
   updatedAt: string;
+  // Server-computed summary of every logged offer (accepted first) so the
+  // list row + CSV export show offers without expanding.
+  offersCount?: number;
+  offersText?: string;
 }
 
 // Tailwind classes per status tone (color-coded badges).
@@ -103,6 +108,10 @@ export default function ActiveDealsPage() {
 
   // New deal form
   const [creating, setCreating] = useState<Deal | null>(null);
+  // Background sync — pick up other users' changes automatically. Paused
+  // while a row is expanded or the create drawer is open so edits are never
+  // clobbered mid-flight.
+  useAutoRefresh(() => { load(); }, { enabled: expandedId === null && !creating });
   // Two-step confirmation for state-changing actions on the active-deals
   // page. Status changes, rep reassigns, edit saves, and deletes all
   // route through this single dialog. Each variant carries the minimum
@@ -378,7 +387,10 @@ export default function ActiveDealsPage() {
                 { key: 'merchantPhone', label: 'Phone' },
                 { key: 'merchantEmail', label: 'Email' },
                 { key: 'offerAmount', label: 'Offer Amount', format: (v) => (v ? Number(v) : '') },
-                { key: 'offerNotes', label: 'Offer / Offers' },
+                { key: 'offerNotes', label: 'Offer Notes' },
+                // Full detail of EVERY logged offer (funding @ factor, term,
+                // fee, payment, notes; ★ = accepted, [RC] = reverse consol).
+                { key: 'offersText', label: 'All Offers (full details)' },
                 { key: 'status', label: 'Status' },
                 { key: 'fundedWith', label: 'Funded With' },
                 { key: 'fundedAmount', label: 'Funded Amount', format: (v) => (v ? Number(v) : '') },
@@ -565,9 +577,10 @@ export default function ActiveDealsPage() {
               {filtered.map((d) => {
                 const isExpanded = expandedId === d.id;
                 const repName = reps.find((r) => r.id === d.assignedRepId)?.name ?? '—';
-                const offerDisplay = d.offerAmount
-                  ? formatCurrency(d.offerAmount)
-                  : (d.offerNotes ? d.offerNotes : '—');
+                // Prefer the live offers summary (all logged offers, accepted
+                // first); fall back to the legacy single-offer columns.
+                const offerDisplay = d.offersText
+                  || (d.offerAmount ? formatCurrency(d.offerAmount) : (d.offerNotes || '—'));
                 return (
                   <>
                     <tr
@@ -598,8 +611,11 @@ export default function ActiveDealsPage() {
                       <td className="px-3 py-2.5 text-foreground/80 whitespace-nowrap tabular-nums">{d.merchantPhone || '—'}</td>
                       <td className="px-3 py-2.5 text-foreground/80 whitespace-nowrap max-w-[200px] truncate">{d.merchantEmail || '—'}</td>
                       <td className="px-3 py-2.5 whitespace-nowrap max-w-[150px] truncate">{d.fundedWithName || '—'}</td>
-                      <td className="px-3 py-2.5 whitespace-nowrap max-w-[180px] truncate tabular-nums" title={d.offerNotes ?? undefined}>
+                      <td className="px-3 py-2.5 whitespace-nowrap max-w-[220px] truncate tabular-nums" title={d.offersText || d.offerNotes || undefined}>
                         {offerDisplay}
+                        {(d.offersCount ?? 0) > 1 && (
+                          <span className="ml-1 text-[10px] text-muted-foreground">({d.offersCount})</span>
+                        )}
                       </td>
                       <td className="px-3 py-2.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         <select

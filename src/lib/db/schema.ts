@@ -1109,6 +1109,55 @@ export const notifications = pgTable(
   (t) => ({ userIdx: index('notifications_user_idx').on(t.userId, t.createdAt) })
 );
 
+/* ---------- E-sign (Dropbox Sign) ----------
+   Per-company Dropbox Sign config + a log of sent signature requests, so a
+   rep can type a name + email and fire off the application template. */
+export const esignConfig = pgTable('esign_config', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id').notNull().unique().references(() => companies.id, { onDelete: 'cascade' }),
+  // Dropbox Sign API key, AES-encrypted at rest (lib/crypto).
+  apiKeyEncrypted: text('api_key_encrypted'),
+  templateId: varchar('template_id', { length: 120 }),
+  // The signer role name defined on the template (e.g. "Client").
+  signerRole: varchar('signer_role', { length: 100 }),
+  subject: varchar('subject', { length: 200 }),
+  message: text('message'),
+  testMode: boolean('test_mode').notNull().default(false),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const esignRequests = pgTable(
+  'esign_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    recipientName: varchar('recipient_name', { length: 200 }).notNull(),
+    recipientEmail: varchar('recipient_email', { length: 320 }).notNull(),
+    signatureRequestId: varchar('signature_request_id', { length: 120 }),
+    status: varchar('status', { length: 30 }).notNull().default('sent'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ companyIdx: index('esign_requests_company_idx').on(t.companyId) })
+);
+
+/* ---------- Push subscriptions ----------
+   Browser/phone push endpoints per user (Web Push). A user can have several
+   (desktop Chrome + phone). Dead endpoints are pruned on send failures. */
+export const pushSubscriptions = pgTable(
+  'push_subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    endpoint: text('endpoint').notNull().unique(),
+    p256dh: text('p256dh').notNull(),
+    auth: text('auth').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ userIdx: index('push_subscriptions_user_idx').on(t.userId) })
+);
+
 /* ---------- Funded approvals ----------
    When a funded email is sent, a pending approval is created instead of the
    deal being logged directly. An admin reviews (and may modify) the details —

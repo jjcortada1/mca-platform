@@ -1,3 +1,38 @@
+# Update — July 2026 (round 17)
+
+## Notifications — real desktop + phone push
+- Notifications are now delivered as **real OS notifications on your
+  computer and phone**, even when the app tab is closed. Click the bell →
+  "Enable desktop alerts" once per device. (iPhone: add the site to your
+  home screen first — Apple requires that for web push.)
+- **More triggers**: you now get notified for **new offers** on your deals,
+  **task assignments**, **submission status changes** (funder approved/
+  declined), deal updates, and funded approvals — always to the rep AND
+  their team leader.
+- The bell dropdown no longer opens off-screen from the sidebar.
+
+## Live auto-refresh everywhere
+- Active Deals, Submissions, Funded Deals, Funded Board, Syndication, and
+  Bonuses now **refresh themselves in the background** (~30–45s) so
+  everyone sees everyone's changes without reloading. Refresh pauses while
+  you're typing or editing a row — it never wipes what you're entering.
+
+## Send Application — Dropbox Sign integration (new tab)
+- New **Send Application** page: type a name + email → Dropbox Sign emails
+  them your application template for signature. Recent sends listed below.
+- Admin setup in **Settings → E-sign applications**: paste your Dropbox
+  Sign API key (stored encrypted), the template ID, and the template's
+  signer role name. Test mode toggle included.
+
+## Fixes
+- **Saved email signature now shows** when you open the signature editor
+  (a loading race left the box blank even though a signature was saved).
+- **Active Deals**: the Offer column now shows ALL logged offers before
+  expanding (★ = accepted, [RC] = reverse consolidation), and the CSV
+  export includes an "All Offers (full details)" column.
+
+---
+
 # Update — July 2026 (round 16)
 
 ## Syndication

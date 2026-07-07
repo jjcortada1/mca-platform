@@ -577,12 +577,19 @@ function SignatureCard() {
         setText(t); setSavedText(t);
         setLogoUrl(l); setSavedLogo(l);
         setLink(k); setSavedLink(k);
-        // Editor mounts on the next paint (loading flips false) — defer the
-        // content injection until the ref exists.
-        setTimeout(() => setEditorContent(t), 0);
       })
       .finally(() => setLoading(false));
   }, []);
+
+  // Inject the SAVED signature into the editor once it's actually mounted.
+  // The editor renders only after loading flips false, so a setTimeout from
+  // the fetch callback could fire before the ref existed — which left the
+  // box empty even though a signature was saved. This effect runs after the
+  // post-loading render, when the ref is guaranteed to be there.
+  useEffect(() => {
+    if (!loading && savedText) setEditorContent(savedText);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   /** Email yourself a sample message so you can verify exactly how the
    *  saved signature renders in a real inbox. */

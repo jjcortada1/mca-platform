@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { Search, Trash2, Plus, LayoutGrid, List as ListIcon, Upload } from 'lucide-react';
 import { BulkImportModal } from '@/components/bulk-import-modal';
 import { FundedApprovalsCard } from '@/components/funded-approvals-card';
+import { useAutoRefresh } from '@/lib/use-auto-refresh';
 import { computePaydown } from '@/lib/deals/paydown';
 import { formatCalendarDate, toDateInput } from '@/lib/dates';
 
@@ -157,6 +158,11 @@ export default function PortfolioPage() {
       });
     }
   }, [autoExpandId, viewMode]);
+
+  // Background sync — funded deals + paydown reflect other users' changes
+  // automatically. The hook itself skips ticks while the user is typing, so
+  // in-row edits aren't clobbered.
+  useAutoRefresh(() => { loadDeals(); }, { intervalMs: 45_000 });
 
   // Deals fetch, extracted so it can be re-run after bulk import / approvals
   // (not just on mount). Referenced by the BulkImportModal onComplete below.

@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import {
   ShoppingBag, Send, Inbox, Briefcase, Users, TrendingUp, Calculator, BookOpen, FileText,
   Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle, ClipboardList, Search,
-  Handshake, Gift,
+  Handshake, Gift, FileSignature,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { GlobalSearch } from '@/components/global-search';
@@ -42,6 +42,8 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   // /submit redirects to /deal-shop so any old bookmarks still resolve.
   { href: '/deal-shop',    label: 'Shop & Submit',  icon: ShoppingBag, perm: 'deals.shop' },
   { href: '/funded-email', label: 'Funded Email',   icon: Send,        perm: 'deals.submit' },
+  // Send Application — Dropbox Sign: name + email → signature request.
+  { href: '/esign',        label: 'Send Application', icon: FileSignature, perm: 'deals.submit' },
   { href: '/submissions',  label: 'Submissions',    icon: Inbox,       perm: 'submissions.view' },
   { href: '/active-deals', label: 'Active Deals',   icon: Briefcase,   perm: 'active_deals.view' },
   { href: '/funded-board', label: 'Funded Board',   icon: TrendingUp,  perm: 'active_deals.view' },
@@ -71,7 +73,7 @@ export const ALL_NAV_ITEMS: NavItem[] = [
 export const DEFAULT_CATEGORIES: { id: string; label: string; items: string[] }[] = [
   {
     id: 'workflow', label: 'Workflow',
-    items: ['/deal-shop', '/funded-email', '/submissions', '/active-deals', '/funded-board', '/portfolio', '/syndication'],
+    items: ['/deal-shop', '/funded-email', '/esign', '/submissions', '/active-deals', '/funded-board', '/portfolio', '/syndication'],
   },
   {
     id: 'commissions', label: 'Commissions',
@@ -423,7 +425,7 @@ function SidebarBody({
             <X className="h-4 w-4" />
           </button>
         ) : (
-          <NotificationBell compact />
+          <NotificationBell compact align="left" />
         )}
       </div>
 

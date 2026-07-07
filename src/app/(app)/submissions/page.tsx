@@ -10,6 +10,7 @@ import { formatDate, cn } from '@/lib/utils';
 import { Download, Send, PlusCircle } from 'lucide-react';
 import { exportCSV } from '@/lib/csv-export';
 import { useToast } from '@/components/toast';
+import { useAutoRefresh } from '@/lib/use-auto-refresh';
 import { useConfirm } from '@/components/confirm-provider';
 
 interface SubmissionFunder {
@@ -127,6 +128,11 @@ export default function SubmissionsPage() {
     });
     setShowManualAdd(true);
   }
+
+  // Background sync — new submissions/status changes from other users
+  // appear without a manual reload. (Function declarations hoist, so `load`
+  // is callable from the hook callback below.)
+  useAutoRefresh(() => { load(); });
 
   async function load() {
     setLoading(true);

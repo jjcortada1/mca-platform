@@ -12,6 +12,7 @@ import { useToast } from '@/components/toast';
 import { useConfirm } from '@/components/confirm-provider';
 import { cn } from '@/lib/utils';
 import { Gift, Plus, Pencil, Trash2 } from 'lucide-react';
+import { useAutoRefresh } from '@/lib/use-auto-refresh';
 import { toDateInput } from '@/lib/dates';
 
 interface Bonus {
@@ -76,6 +77,10 @@ export default function BonusesPage() {
     }
   }
   useEffect(() => { load(); }, []);
+
+  // Background sync — bonus updates from admins appear without a reload.
+  // Paused while the add/edit form is open.
+  useAutoRefresh(() => { load(); }, { enabled: editing === null });
 
   const visible = useMemo(() => {
     const list = rows.map((b) => ({ b, state: bonusState(b) }));

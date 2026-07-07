@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 // as the "My account" tab.
 import AccountPage from '../account/page';
 
-type Tab = 'account' | 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar' | 'celebration' | 'teams' | 'companies';
+type Tab = 'account' | 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar' | 'celebration' | 'teams' | 'companies' | 'esign';
 
 // Flatter, friendlier settings nav. Each entry has an icon + one-line
 // description so the user can scan and find what they want without reading
@@ -55,6 +55,7 @@ const TAB_GROUPS: {
       { key: 'smtp', label: 'SMTP setup', icon: Send, description: 'Connect your sending account' },
       { key: 'fields', label: 'Email fields', icon: FileText, description: 'Custom deal info fields' },
       { key: 'funded', label: 'Funded email template', icon: FileText, description: 'Subject + fields for the funded email' },
+      { key: 'esign', label: 'E-sign applications', icon: FileText, description: 'Dropbox Sign API key + application template' },
     ],
   },
   {
@@ -84,7 +85,7 @@ const TAB_GROUPS: {
   },
 ];
 
-const VALID_TABS: Tab[] = ['account', 'branding', 'email', 'smtp', 'commission', 'fields', 'users', 'tiers', 'options', 'security', 'sheets', 'leadsources', 'backup', 'funded', 'sidebar', 'celebration', 'teams', 'companies'];
+const VALID_TABS: Tab[] = ['account', 'branding', 'email', 'smtp', 'commission', 'fields', 'users', 'tiers', 'options', 'security', 'sheets', 'leadsources', 'backup', 'funded', 'sidebar', 'celebration', 'teams', 'companies', 'esign'];
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('branding');
@@ -194,6 +195,7 @@ export default function SettingsPage() {
           {tab === 'commission' && <CommissionRulesSection />}
           {tab === 'fields' && <StructuredFieldsSection />}
           {tab === 'funded' && <FundedTemplateSection />}
+          {tab === 'esign' && <EsignSection />}
           {tab === 'users' && <UsersSection />}
           {tab === 'teams' && <TeamsSection />}
           {tab === 'tiers' && <TiersSection />}
@@ -1749,6 +1751,102 @@ function fmtBytes(n: number): string {
 function fmtWhen(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+/* ============================================================
+   E-SIGN (Dropbox Sign) — API key + application template config.
+   Reps then send applications from the "Send Application" page.
+   ============================================================ */
+function EsignSection() {
+  const toast = useToast();
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const [apiKey, setApiKey] = useState('');
+  const [templateId, setTemplateId] = useState('');
+  const [signerRole, setSignerRole] = useState('');
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+  const [testMode, setTestMode] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/esign/config', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => {
+        const d = j?.data;
+        if (!d) return;
+        setHasApiKey(!!d.hasApiKey);
+        setTemplateId(d.templateId ?? '');
+        setSignerRole(d.signerRole ?? '');
+        setSubject(d.subject ?? '');
+        setMessage(d.message ?? '');
+        setTestMode(!!d.testMode);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = { templateId, signerRole, subject, message, testMode };
+      if (apiKey.trim()) body.apiKey = apiKey.trim();
+      const res = await fetch('/api/esign/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const j = await res.json();
+      if (!res.ok) { toast.error(j.error || 'Could not save.'); return; }
+      toast.success('E-sign settings saved.');
+      if (apiKey.trim()) { setHasApiKey(true); setApiKey(''); }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
+
+  return (
+    <div className="space-y-5 max-w-2xl">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Dropbox Sign connection</CardTitle>
+          <CardDescription>
+            Reps type a name + email on the Send Application page and Dropbox Sign emails your application template for signature. You need three things from your Dropbox Sign account: an <strong>API key</strong> (Settings → API), a <strong>template ID</strong> (open the template → copy its ID), and the template's <strong>signer role name</strong> (set when the template was created, e.g. &quot;Client&quot;).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Field label={hasApiKey ? 'API key (saved — enter a new one to replace)' : 'API key'}>
+            <Input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={hasApiKey ? '••••••••••••  (leave blank to keep current)' : 'Your Dropbox Sign API key'}
+            />
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Template ID">
+              <Input value={templateId} onChange={(e) => setTemplateId(e.target.value)} placeholder="e.g. 5de8179668f2033afac48da1868d0093bf133b8a" />
+            </Field>
+            <Field label="Signer role name">
+              <Input value={signerRole} onChange={(e) => setSignerRole(e.target.value)} placeholder="e.g. Client" />
+            </Field>
+          </div>
+          <Field label="Email subject">
+            <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Please sign your application" />
+          </Field>
+          <Field label="Default message">
+            <Textarea rows={2} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Included in the signature request email (reps can add a personal note per send)" />
+          </Field>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" className="h-4 w-4" checked={testMode} onChange={(e) => setTestMode(e.target.checked)} />
+            <span className="text-sm">Test mode (no real signatures — for trying it out without a paid plan)</span>
+          </label>
+          <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save e-sign settings'}</Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 function BackupSection() {

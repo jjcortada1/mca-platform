@@ -11,6 +11,7 @@ import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import { Plus, X, Trash2, TrendingUp, Trophy, Download } from 'lucide-react';
 import { exportCSV } from '@/lib/csv-export';
 import { triggerFundingCelebration } from '@/components/funding-celebration';
+import { useAutoRefresh } from '@/lib/use-auto-refresh';
 
 interface FundedEntry {
   id: string;
@@ -55,6 +56,10 @@ export default function FundedBoardPage() {
   }
 
   useEffect(() => { load(); }, []);
+
+  // Background sync — the board updates live as teammates log fundings.
+  // Paused while the log-funded form is open.
+  useAutoRefresh(() => { load(); }, { enabled: !showForm });
 
   async function saveEntry() {
     if (!newEntry.repId || !newEntry.dealInitials || !newEntry.amountFunded) {

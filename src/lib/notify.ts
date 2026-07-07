@@ -35,6 +35,11 @@ export async function notifyUsers(
         link: payload.link ?? null,
       }))
     );
+    // Mirror to OS-level push (desktop + phone), which reaches users even
+    // when the app tab is closed. Fire-and-forget.
+    import('@/lib/push')
+      .then(({ sendPushToUsers }) => sendPushToUsers(ids, payload))
+      .catch(() => {});
   } catch (err) {
     console.error('[notify] insert failed (non-fatal):', err instanceof Error ? err.message : err);
   }

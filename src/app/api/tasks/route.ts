@@ -132,5 +132,24 @@ export const POST = handle(async (req: NextRequest) => {
     createdBy: ctx.user.id,
   }).returning();
 
+  // Task assigned → ping the assignee + their team leader(s). Best-effort.
+  if (task.assignedToUserId) {
+    try {
+      const { notifyUsers, leadersOf } = await import('@/lib/notify');
+      notifyUsers(
+        ctx.companyId,
+        [task.assignedToUserId, ...(await leadersOf(task.assignedToUserId))],
+        {
+          title: `New task: ${task.title}`,
+          body: task.dueDate
+            ? `Assigned by ${ctx.user.name || ctx.user.email} — due ${new Date(task.dueDate).toLocaleDateString()}.`
+            : `Assigned by ${ctx.user.name || ctx.user.email}.`,
+          link: '/tasks',
+        },
+        ctx.user.id,
+      ).catch(() => {});
+    } catch { /* best-effort */ }
+  }
+
   return created({ id: task.id });
 });

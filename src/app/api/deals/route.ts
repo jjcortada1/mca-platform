@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { deals, users } from '@/lib/db/schema';
+import { deals, users, dealOffers } from '@/lib/db/schema';
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import { visibleRepIds } from '@/lib/auth/team-scope';
@@ -62,7 +62,41 @@ export async function GET(req: NextRequest) {
     const list = await db.select().from(deals)
       .where(and(...conditions))
       .orderBy(desc(deals.createdAt));
-    return NextResponse.json({ deals: list, data: list });
+
+    // Attach an offers summary to every deal so the list view + CSV export
+    // show full offer details WITHOUT expanding each row. One query covers
+    // all returned deals; accepted offers sort first.
+    const ids = list.map((d) => d.id);
+    const offerRows = ids.length
+      ? await db.select().from(dealOffers).where(inArray(dealOffers.dealId, ids))
+      : [];
+    const fmtMoney = (v: string | null) =>
+      v != null ? `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '';
+    const describeOffer = (o: typeof offerRows[number]) => {
+      const parts: string[] = [];
+      if (o.fundingAmount != null) parts.push(fmtMoney(o.fundingAmount));
+      if (o.factorRate != null) parts.push(`@ ${Number(o.factorRate)}`);
+      if (o.termCount != null) parts.push(`${o.termCount} ${o.termMode ?? ''}`.trim());
+      if (o.fees != null) parts.push(`${Number(o.fees)}% fee`);
+      if (o.paymentAmount != null) parts.push(`${fmtMoney(o.paymentAmount)}/pmt`);
+      if (o.notes) parts.push(o.notes);
+      let s = parts.join(' · ');
+      if (o.isReverseConsolidation) s = `[RC] ${s}`;
+      if (o.isAccepted) s = `★ ${s}`;
+      return s || 'offer logged (no details)';
+    };
+    const byDeal = new Map<string, string[]>();
+    for (const o of [...offerRows].sort((a, b) => Number(b.isAccepted) - Number(a.isAccepted))) {
+      const arr = byDeal.get(o.dealId) ?? [];
+      arr.push(describeOffer(o));
+      byDeal.set(o.dealId, arr);
+    }
+    const enriched = list.map((d) => {
+      const offs = byDeal.get(d.id) ?? [];
+      return { ...d, offersCount: offs.length, offersText: offs.join(' | ') };
+    });
+
+    return NextResponse.json({ deals: enriched, data: enriched });
   } catch (e) { return apiError(e); }
 }
 

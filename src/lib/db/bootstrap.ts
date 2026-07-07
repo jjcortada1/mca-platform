@@ -219,6 +219,42 @@ const STATEMENTS: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at)`,
 
+  // ---- e-sign / Dropbox Sign (additive) ----
+  `CREATE TABLE IF NOT EXISTS esign_config (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id uuid NOT NULL UNIQUE REFERENCES companies(id) ON DELETE CASCADE,
+    api_key_encrypted text,
+    template_id varchar(120),
+    signer_role varchar(100),
+    subject varchar(200),
+    message text,
+    test_mode boolean NOT NULL DEFAULT false,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS esign_requests (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    recipient_name varchar(200) NOT NULL,
+    recipient_email varchar(320) NOT NULL,
+    signature_request_id varchar(120),
+    status varchar(30) NOT NULL DEFAULT 'sent',
+    created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS esign_requests_company_idx ON esign_requests (company_id)`,
+
+  // ---- push subscriptions (Web Push endpoints, additive) ----
+  `CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint text NOT NULL UNIQUE,
+    p256dh text NOT NULL,
+    auth text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions (user_id)`,
+
   // ---- funded approvals (additive) ----
   `CREATE TABLE IF NOT EXISTS funded_approvals (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -13,6 +13,16 @@ interface NotificationRow {
   createdAt: string;
 }
 
+/** Convert a base64url VAPID key to the Uint8Array PushManager expects. */
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const output = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) output[i] = rawData.charCodeAt(i);
+  return output;
+}
+
 function timeAgo(iso: string): string {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 60) return 'just now';
@@ -26,7 +36,7 @@ function timeAgo(iso: string): string {
  * dropdown, and mirrors NEW notifications to the user's physical screen via
  * the browser Notifications API (when the user has granted permission).
  */
-export function NotificationBell({ compact = false }: { compact?: boolean }) {
+export function NotificationBell({ compact = false, align = 'right' }: { compact?: boolean; align?: 'left' | 'right' }) {
   const router = useRouter();
   const [items, setItems] = useState<NotificationRow[]>([]);
   const [unread, setUnread] = useState(0);
@@ -40,7 +50,11 @@ export function NotificationBell({ compact = false }: { compact?: boolean }) {
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setPermission(Notification.permission);
+      // Already-granted devices re-register silently so push keeps working
+      // after re-deploys, browser updates, or subscription expiry.
+      if (Notification.permission === 'granted') subscribePush();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const poll = useCallback(async () => {
@@ -118,6 +132,36 @@ export function NotificationBell({ compact = false }: { compact?: boolean }) {
     if (!('Notification' in window)) return;
     const p = await Notification.requestPermission();
     setPermission(p);
+    if (p === 'granted') await subscribePush();
+  }
+
+  /**
+   * Register this device for OS-level Web Push — notifications then arrive
+   * on the desktop/phone even when the app tab is closed. Best-effort: the
+   * in-tab notifications keep working regardless.
+   */
+  async function subscribePush() {
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+      const keyRes = await fetch('/api/push', { cache: 'no-store' });
+      if (!keyRes.ok) return;
+      const { publicKey } = await keyRes.json();
+      if (!publicKey) return;
+      const existing = await reg.pushManager.getSubscription();
+      const sub = existing ?? await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+      const raw = sub.toJSON();
+      if (!raw.endpoint || !raw.keys?.p256dh || !raw.keys?.auth) return;
+      await fetch('/api/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: raw.endpoint, keys: { p256dh: raw.keys.p256dh, auth: raw.keys.auth } }),
+      });
+    } catch { /* push is a bonus channel — in-app bell still works */ }
   }
 
   return (
@@ -136,7 +180,13 @@ export function NotificationBell({ compact = false }: { compact?: boolean }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-1.5 w-[340px] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
+        <div className={cn(
+          // align='left' anchors the panel's LEFT edge to the bell so it opens
+          // toward the page center — needed when the bell sits in the left
+          // sidebar (right-aligned panels extended off-screen there).
+          'absolute z-50 mt-1.5 w-[340px] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card shadow-2xl overflow-hidden',
+          align === 'left' ? 'left-0' : 'right-0'
+        )}>
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
             <div className="text-sm font-semibold">Notifications</div>
             {unread > 0 && (

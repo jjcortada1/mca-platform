@@ -21,6 +21,7 @@ import { useToast } from '@/components/toast';
 import { useConfirm } from '@/components/confirm-provider';
 import { formatCurrency, cn } from '@/lib/utils';
 import { Handshake, Copy, Plus, Trash2, Lock, Unlock, ChevronDown, ChevronRight } from 'lucide-react';
+import { useAutoRefresh } from '@/lib/use-auto-refresh';
 
 interface Entry {
   id: string;
@@ -103,6 +104,9 @@ export default function SyndicationPage() {
     }
   }
   useEffect(() => { load(); }, []);
+
+  // Background sync — new deals and entries from other reps show up live.
+  useAutoRefresh(() => { load(); });
 
   const visible = useMemo(
     () => dealsList.filter((d) => showClosed || d.status === 'open'),

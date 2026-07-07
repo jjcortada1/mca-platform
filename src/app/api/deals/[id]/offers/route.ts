@@ -105,6 +105,28 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       }).where(eq(deals.id, params.id));
     }
 
+    // New offer → ping the assigned rep + their team leader(s). Best-effort.
+    try {
+      const { notifyUsers, leadersOf } = await import('@/lib/notify');
+      const [d] = await db.select({ name: deals.name, assignedRepId: deals.assignedRepId })
+        .from(deals).where(eq(deals.id, params.id)).limit(1);
+      if (d?.assignedRepId) {
+        const money = row.fundingAmount
+          ? `$${Number(row.fundingAmount).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '';
+        notifyUsers(
+          ctx.companyId,
+          [d.assignedRepId, ...(await leadersOf(d.assignedRepId))],
+          {
+            title: `New offer: ${d.name}`,
+            body: [money, row.factorRate ? `@ ${Number(row.factorRate)}` : '', row.isReverseConsolidation ? '(reverse consolidation)' : '']
+              .filter(Boolean).join(' ') || 'An offer was logged.',
+            link: `/active-deals?deal=${params.id}`,
+          },
+          ctx.user.id,
+        ).catch(() => {});
+      }
+    } catch { /* notification is best-effort */ }
+
     return NextResponse.json({ data: row });
   } catch (e) { return apiError(e); }
 }
