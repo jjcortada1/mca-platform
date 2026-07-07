@@ -1,3 +1,66 @@
+# Update — July 2026 (round 14) — structural upgrade
+
+**Data preservation:** every change in this round is ADDITIVE. New features
+get their own new tables (syndication, bonuses, notifications, approvals);
+no existing table, column, or row is modified or deleted. All your deals,
+submissions, commissions, funders, users, and settings are untouched.
+
+## Syndication (new sidebar tab)
+- A shared board where deals open for syndication are posted with full terms:
+  deal name, funding amount, term, rate, commission, fee, early payoff
+  (+details), funder, position #, and notes.
+- Reps put their **name, company, and the amount** they want to syndicate.
+- **Copy** button on every deal copies the whole capture — terms + every
+  rep's entry + total committed — ready to paste anywhere.
+- Poster/admin can close or reopen a deal; totals and % committed shown live.
+
+## Bonuses (new sidebar tab)
+- Post which **funders are running bonuses**: the bonus, the conditions to
+  qualify, and either a start/end window or "running" (ongoing).
+- Everyone sees the board with clear Active / Upcoming / Ended / Running
+  status; admins add and edit.
+
+## Notifications (bell + your actual screen)
+- A **bell** now lives in the sidebar (and mobile top bar). When a deal
+  assigned to a rep is updated, **the rep AND their team leader** get a
+  notification saying **exactly what changed** (status, offer, funder, etc.).
+- Click "Enable desktop alerts" once and updates also pop up as **real
+  browser notifications on your screen**, even when you're in another tab.
+
+## Funded email → admin approval
+- Sending a funded email now **automatically submits it for approval** to
+  log as a funded deal — nothing is logged until an **admin approves**.
+- Admins see a queue at the top of Funded Deals; they can **modify every
+  detail** (deal, rep, amount, rate, funder, gross commission, split %)
+  before approving. Approving marks the deal funded, assigns the rep, and
+  **creates the rep's commission** in one shot. Rep gets notified.
+
+## Submit flow
+- Deal details/notes are captured **only on the deal** now — they no longer
+  copy into the submission's notes/offer field (that field is reserved for
+  logging the funder's offer).
+- **Multiple CCs** on Shop & Submit: press Enter/comma after each address, or
+  paste a whole comma-separated list — every address becomes a chip.
+
+## Screens
+- **Active Deals** is now a clean line-per-deal table: Date · Rep · Deal
+  name · Cell · Email · Funder · Offer (+ status + expand for full editing).
+- **Funded Board**: filter by **any specific month** (dropdown), on top of
+  the This Month / This Week / All Time chips.
+- **Calculator (Merchant Funding Estimator)**: term now displays in
+  **business days when Daily** is selected (weeks when Weekly), and the
+  "Likely MCA structures" panel is **collapsed by default** with the best
+  match summarized — expand to see the full ranked list.
+
+## Premium feel
+- The **dashboard is now an analytics home**: every KPI shows its
+  month-over-month change, plus a **6-month funded-volume chart** with
+  amounts on each bar.
+- Subtle brand-tinted depth added across pages (inherits each company's
+  color).
+
+---
+
 # Update — July 2026 (round 13)
 
 ## Deal details are captured again on submit (for re-shopping)

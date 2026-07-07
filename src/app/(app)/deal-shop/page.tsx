@@ -392,10 +392,20 @@ export default function DealShopPage() {
       revenueOption, creditOption, position, industry, state, dealType]);
 
   function addCc() {
-    const v = ccInput.trim();
-    if (!v || !v.includes('@')) return;
-    if (extraCc.includes(v)) { setCcInput(''); return; }
-    setExtraCc([...extraCc, v]);
+    // Accept several at once — comma/semicolon/newline separated (so a whole
+    // list can be pasted in) — validate each, dedupe, and chip them all.
+    const parts = ccInput.split(/[,;\n]/).map((s) => s.trim()).filter(Boolean);
+    if (!parts.length) return;
+    const valid = parts.filter((v) => v.includes('@'));
+    if (!valid.length) return;
+    setExtraCc((prev) => {
+      const merged = [...prev];
+      for (const v of valid) {
+        const e = v.toLowerCase();
+        if (!merged.some((x) => x.toLowerCase() === e)) merged.push(v);
+      }
+      return merged;
+    });
     setCcInput('');
   }
   function removeCc(email: string) {
@@ -1102,9 +1112,10 @@ export default function DealShopPage() {
                 <Input
                   value={ccInput}
                   onChange={(e) => setCcInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCc(); } }}
-                  placeholder="someone@example.com — Enter to add"
-                  type="email"
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',' || e.key === ';') { e.preventDefault(); addCc(); } }}
+                  onBlur={() => addCc()}
+                  placeholder="Add CCs — Enter or comma after each; paste a whole list"
+                  type="text"
                 />
                 {ccList.length > 0 && (
                   <div className="flex flex-wrap gap-1">

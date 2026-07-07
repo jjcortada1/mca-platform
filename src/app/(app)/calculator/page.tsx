@@ -4,7 +4,7 @@ import * as React from 'react';
 import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, Button, Input, Field, PageHeader, Badge, MoneyInput } from '@/components/ui/primitives';
 import { formatCurrency, cn } from '@/lib/utils';
-import { Calculator, RotateCcw, Sparkles, Lock, Unlock } from 'lucide-react';
+import { Calculator, RotateCcw, Sparkles, Lock, Unlock, ChevronDown, ChevronUp } from 'lucide-react';
 import { reverseCalculate, type ReverseCandidate } from '@/lib/calculator/reverse';
 
 type Tab = 'fwd' | 'rev';
@@ -255,6 +255,10 @@ function ReverseCalc() {
   const [lockTerm, setLockTerm] = useState(false);
   const [lockDeposit, setLockDeposit] = useState(false);
   const [lockPayment, setLockPayment] = useState(false);
+
+  // Likely-structures panel starts collapsed (easier to read); the header
+  // shows the best match and an Expand control reveals the full list.
+  const [structuresOpen, setStructuresOpen] = useState(false);
 
   const dep = deposit === '' ? 0 : deposit;
   const pmt = payment === '' ? 0 : payment;
@@ -598,7 +602,11 @@ function ReverseCalc() {
 
             <div className="space-y-1">
               <div className="flex items-center justify-between">
-                <div className="text-xs font-medium text-muted-foreground">Term (weeks)</div>
+                {/* Term follows the payment frequency: daily deals show the
+                    term in business days, weekly deals in weeks. */}
+                <div className="text-xs font-medium text-muted-foreground">
+                  {freq === 'daily' ? 'Term (business days)' : 'Term (weeks)'}
+                </div>
                 <LockToggle locked={lockTerm} onToggle={() => setLockTerm((v) => !v)} title="Lock term" />
               </div>
               <Slider
@@ -608,7 +616,7 @@ function ReverseCalc() {
                 max={60}
                 step={1}
                 onChange={setTermWeeks}
-                format={(v) => `${v.toFixed(0)} wks`}
+                format={(v) => freq === 'daily' ? `${(v * BUSINESS_DAYS_PER_WEEK).toFixed(0)} days` : `${v.toFixed(0)} wks`}
                 cleanValues={[10, 12, 16, 20, 24, 30, 40]}
                 disabled={lockTerm}
                 precision={0}
@@ -625,12 +633,27 @@ function ReverseCalc() {
         {likelyStructures.length > 0 && (
           <Card>
             <CardContent className="p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-primary" />
+              {/* Collapsed by default for readability — the header shows the
+                  best match at a glance; expanding reveals the full ranked
+                  list with all the numbers. */}
+              <button
+                type="button"
+                onClick={() => setStructuresOpen((v) => !v)}
+                className="w-full flex items-center gap-2 text-left"
+              >
+                <Sparkles className="h-4 w-4 text-primary shrink-0" />
                 <div className="text-sm font-semibold">Likely MCA structures</div>
-                <span className="text-xs text-muted-foreground">ranked by accuracy</span>
-              </div>
-              {likelyStructures.map((c, i) => (
+                {!structuresOpen && likelyStructures[0] && (
+                  <span className="text-xs text-muted-foreground truncate">
+                    best: {formatCurrency(likelyStructures[0].fundingAmount)} · {likelyStructures[0].factorRate.toFixed(2)} · {likelyStructures[0].termWeeks} wks ({likelyStructures[0].accuracy}%)
+                  </span>
+                )}
+                {structuresOpen && <span className="text-xs text-muted-foreground">ranked by accuracy</span>}
+                <span className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-primary shrink-0">
+                  {structuresOpen ? <>Collapse <ChevronUp className="h-3.5 w-3.5" /></> : <>Expand {likelyStructures.length} <ChevronDown className="h-3.5 w-3.5" /></>}
+                </span>
+              </button>
+              {structuresOpen && likelyStructures.map((c, i) => (
                 <div
                   key={i}
                   className={cn(

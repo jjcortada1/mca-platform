@@ -6,9 +6,11 @@ import { useEffect, useState } from 'react';
 import {
   ShoppingBag, Send, Inbox, Briefcase, Users, TrendingUp, Calculator, BookOpen, FileText,
   Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle, ClipboardList, Search,
+  Handshake, Gift,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { GlobalSearch } from '@/components/global-search';
+import { NotificationBell } from '@/components/notification-bell';
 import { BrandMark } from '@/components/brand-mark';
 import { resolveIcon } from '@/lib/sidebar-icons';
 import type { SessionUser } from '@/lib/auth/context';
@@ -44,6 +46,9 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { href: '/active-deals', label: 'Active Deals',   icon: Briefcase,   perm: 'active_deals.view' },
   { href: '/funded-board', label: 'Funded Board',   icon: TrendingUp,  perm: 'active_deals.view' },
   { href: '/portfolio',    label: 'Funded Deals',   icon: TrendingUp,  perm: 'active_deals.view' },
+  // Syndication — a shared board where deals open for syndication are posted
+  // with full terms, and reps put in how much they want to participate.
+  { href: '/syndication',  label: 'Syndication',    icon: Handshake,   perm: 'deals.view' },
   { href: '/commissions',  label: 'Commissions',    icon: DollarSign,  perm: 'commissions.view' },
   { href: '/payments',     label: 'Payments',       icon: DollarSign,  perm: 'commissions.manage' },
   { href: '/accounting',   label: 'Accounting',     icon: DollarSign,  perm: 'commissions.manage' },
@@ -54,6 +59,8 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   // contracts from a funder. Lives under the same "General / Resources"
   // bucket as Calculator + Info. No persistence; pure formatter UI.
   { href: '/doc-request',  label: 'Doc Request',    icon: FileText,    perm: 'calculator.use' },
+  // Bonuses — which funders are running bonuses, the window, and conditions.
+  { href: '/bonuses',      label: 'Bonuses',        icon: Gift,        perm: 'deals.view' },
   { href: '/info',         label: 'Info',           icon: BookOpen,    perm: 'info.view' },
   // Tasks — company + broker to-dos with teams/leaders. Gated by the most
   // basic permission every user has so the tab shows for everyone.
@@ -64,7 +71,7 @@ export const ALL_NAV_ITEMS: NavItem[] = [
 export const DEFAULT_CATEGORIES: { id: string; label: string; items: string[] }[] = [
   {
     id: 'workflow', label: 'Workflow',
-    items: ['/deal-shop', '/funded-email', '/submissions', '/active-deals', '/funded-board', '/portfolio'],
+    items: ['/deal-shop', '/funded-email', '/submissions', '/active-deals', '/funded-board', '/portfolio', '/syndication'],
   },
   {
     id: 'commissions', label: 'Commissions',
@@ -72,7 +79,7 @@ export const DEFAULT_CATEGORIES: { id: string; label: string; items: string[] }[
   },
   {
     id: 'resources', label: 'Resources',
-    items: ['/funders', '/calculator', '/doc-request', '/info', '/tasks'],
+    items: ['/funders', '/bonuses', '/calculator', '/doc-request', '/info', '/tasks'],
   },
 ];
 
@@ -270,6 +277,7 @@ function MobileTopBar({
           >
             <Search className="h-5 w-5" />
           </button>
+          <NotificationBell />
           <div className="h-8 w-8 rounded-lg bg-foreground text-background flex items-center justify-center text-xs font-semibold">
             {userInitial}
           </div>
@@ -419,7 +427,7 @@ function SidebarBody({
             <div className="text-[10.5px] text-muted-foreground truncate mt-0.5">{branding.displayName}</div>
           </div>
         </Link>
-        {closable && (
+        {closable ? (
           <button
             onClick={onClose}
             aria-label="Close menu"
@@ -427,6 +435,8 @@ function SidebarBody({
           >
             <X className="h-4 w-4" />
           </button>
+        ) : (
+          <NotificationBell compact />
         )}
       </div>
 

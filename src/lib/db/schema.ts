@@ -998,6 +998,125 @@ export const tasks = pgTable(
 export type TeamRow = typeof teams.$inferSelect;
 export type TaskRow = typeof tasks.$inferSelect;
 
+/* ---------- Syndication ----------
+   A board where deals open for syndication are posted (with full terms) and
+   reps put their name + company + the amount they want to syndicate in. */
+
+export const syndicationDeals = pgTable(
+  'syndication_deals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    // Optional link back to the CRM deal it came from.
+    dealId: uuid('deal_id').references(() => deals.id, { onDelete: 'set null' }),
+    dealName: varchar('deal_name', { length: 300 }).notNull(),
+    fundingAmount: numeric('funding_amount', { precision: 14, scale: 2 }),
+    term: varchar('term', { length: 120 }),
+    rate: varchar('rate', { length: 60 }),
+    commission: varchar('commission', { length: 120 }),
+    fee: varchar('fee', { length: 120 }),
+    hasEarlyPayoff: boolean('has_early_payoff').notNull().default(false),
+    earlyPayoffDetails: text('early_payoff_details'),
+    funderName: varchar('funder_name', { length: 200 }),
+    positionNumber: varchar('position_number', { length: 20 }),
+    notes: text('notes'),
+    status: varchar('status', { length: 20 }).notNull().default('open'), // open | closed
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ companyIdx: index('syndication_deals_company_idx').on(t.companyId) })
+);
+
+export const syndicationEntries = pgTable(
+  'syndication_entries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    syndicationDealId: uuid('syndication_deal_id').notNull().references(() => syndicationDeals.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    repName: varchar('rep_name', { length: 200 }).notNull(),
+    companyName: varchar('company_name', { length: 200 }),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ dealIdx: index('syndication_entries_deal_idx').on(t.syndicationDealId) })
+);
+
+/* ---------- Funder bonuses ----------
+   Which funders are running bonuses, over what window (or ongoing), and the
+   conditions — so reps can see at a glance where the extra money is. */
+
+export const funderBonuses = pgTable(
+  'funder_bonuses',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    funderId: uuid('funder_id').references(() => funders.id, { onDelete: 'set null' }),
+    funderName: varchar('funder_name', { length: 200 }).notNull(),
+    bonus: text('bonus').notNull(),          // what the bonus is
+    conditions: text('conditions'),          // conditions to qualify
+    startDate: timestamp('start_date', { withTimezone: true }),
+    endDate: timestamp('end_date', { withTimezone: true }),
+    isRunning: boolean('is_running').notNull().default(false), // ongoing, no end date
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ companyIdx: index('funder_bonuses_company_idx').on(t.companyId) })
+);
+
+/* ---------- Notifications ----------
+   In-app + browser notifications. A row per recipient; read_at marks seen. */
+
+export const notifications = pgTable(
+  'notifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    title: varchar('title', { length: 300 }).notNull(),
+    body: text('body'),
+    link: varchar('link', { length: 500 }),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ userIdx: index('notifications_user_idx').on(t.userId, t.createdAt) })
+);
+
+/* ---------- Funded approvals ----------
+   When a funded email is sent, a pending approval is created instead of the
+   deal being logged directly. An admin reviews (and may modify) the details —
+   deal, rep, and commission — then approves, which applies everything. */
+
+export const fundedApprovals = pgTable(
+  'funded_approvals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    dealId: uuid('deal_id').references(() => deals.id, { onDelete: 'set null' }),
+    dealName: varchar('deal_name', { length: 300 }),
+    repId: uuid('rep_id').references(() => users.id, { onDelete: 'set null' }),
+    fundedAmount: numeric('funded_amount', { precision: 14, scale: 2 }),
+    factorRate: numeric('factor_rate', { precision: 8, scale: 4 }),
+    termDetails: varchar('term_details', { length: 200 }),
+    funderName: varchar('funder_name', { length: 200 }),
+    grossCommission: numeric('gross_commission', { precision: 14, scale: 2 }),
+    repSplitPct: numeric('rep_split_pct', { precision: 6, scale: 2 }),
+    notes: text('notes'),
+    // Raw funded-email fields as sent, for the admin's reference.
+    payload: jsonb('payload'),
+    status: varchar('status', { length: 20 }).notNull().default('pending'), // pending | approved | rejected
+    submittedBy: uuid('submitted_by').references(() => users.id, { onDelete: 'set null' }),
+    reviewedBy: uuid('reviewed_by').references(() => users.id, { onDelete: 'set null' }),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ companyIdx: index('funded_approvals_company_idx').on(t.companyId, t.status) })
+);
+
 /* ---------- Relations ---------- */
 
 export const companiesRelations = relations(companies, ({ many }) => ({

@@ -98,8 +98,26 @@ export default function FundedBoardPage() {
     }
   }
 
-  // Filter by date range
+  // Specific-month filter — built from the months that actually have funded
+  // deals. Selecting a month overrides the quick range chips.
+  const [month, setMonth] = useState<string>(''); // 'YYYY-MM' or '' = use range
+  const monthOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of entries) {
+      const d = new Date(e.fundedDate);
+      set.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+    return Array.from(set).sort().reverse();
+  }, [entries]);
+
+  // Filter by date range OR a specific month
   const filteredEntries = useMemo(() => {
+    if (month) {
+      return entries.filter((e) => {
+        const d = new Date(e.fundedDate);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` === month;
+      });
+    }
     if (range === 'all') return entries;
     const now = new Date();
     let start: Date;
@@ -112,7 +130,7 @@ export default function FundedBoardPage() {
       start.setHours(0, 0, 0, 0);
     }
     return entries.filter((e) => new Date(e.fundedDate) >= start);
-  }, [entries, range]);
+  }, [entries, range, month]);
 
   // Group by rep
   const repBoards = useMemo(() => {
@@ -143,6 +161,12 @@ export default function FundedBoardPage() {
     wtd: 'This Week',
     all: 'All Time',
   };
+  // What the KPI tiles + empty state call the current period. A picked month
+  // wins over the quick range chips.
+  const periodLabel = month
+    ? new Date(Number(month.split('-')[0]), Number(month.split('-')[1]) - 1, 1)
+        .toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+    : rangeLabel[range];
 
   return (
     <div className="space-y-5">
@@ -174,15 +198,15 @@ export default function FundedBoardPage() {
         }
       />
 
-      {/* Range toggle */}
+      {/* Range toggle + specific-month filter */}
       <div className="flex flex-wrap items-center gap-2">
         {(['mtd', 'wtd', 'all'] as const).map((r) => (
           <button
             key={r}
-            onClick={() => setRange(r)}
+            onClick={() => { setRange(r); setMonth(''); }}
             className={cn(
               'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-all',
-              range === r
+              range === r && !month
                 ? 'bg-primary text-primary-foreground border-primary'
                 : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-foreground/30',
             )}
@@ -190,6 +214,23 @@ export default function FundedBoardPage() {
             {rangeLabel[r]}
           </button>
         ))}
+        <select
+          value={month}
+          onChange={(e) => setMonth(e.target.value)}
+          className={cn(
+            'h-[30px] rounded-full border px-3 text-xs font-medium bg-card transition-all focus:outline-none focus:ring-2 focus:ring-ring',
+            month ? 'border-primary text-primary' : 'border-border text-muted-foreground'
+          )}
+          title="Jump to a specific month"
+        >
+          <option value="">Pick a month…</option>
+          {monthOptions.map((m) => {
+            const [y, mo] = m.split('-');
+            const label = new Date(Number(y), Number(mo) - 1, 1)
+              .toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+            return <option key={m} value={m}>{label}</option>;
+          })}
+        </select>
       </div>
 
       {/* KPI tiles */}
@@ -197,7 +238,7 @@ export default function FundedBoardPage() {
         <div className="kpi-tile bg-primary/5 border-primary/20">
           <div className="flex items-start justify-between">
             <div>
-              <div className="text-xs font-medium text-muted-foreground">{rangeLabel[range]} Volume</div>
+              <div className="text-xs font-medium text-muted-foreground">{periodLabel} Volume</div>
               <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wider mt-0.5">Total funded</div>
             </div>
             <div className="p-2 rounded-md bg-primary/10">
@@ -213,7 +254,7 @@ export default function FundedBoardPage() {
           <div className="flex items-start justify-between">
             <div>
               <div className="text-xs font-medium text-muted-foreground">Funded Deals</div>
-              <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wider mt-0.5">{rangeLabel[range]}</div>
+              <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wider mt-0.5">{periodLabel}</div>
             </div>
             <div className="p-2 rounded-md bg-emerald-50">
               <span className="block h-4 w-4 rounded-full bg-emerald-600" />
@@ -226,7 +267,7 @@ export default function FundedBoardPage() {
           <div className="flex items-start justify-between">
             <div>
               <div className="text-xs font-medium text-muted-foreground">Top Rep</div>
-              <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wider mt-0.5">{rangeLabel[range]}</div>
+              <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wider mt-0.5">{periodLabel}</div>
             </div>
             <div className="p-2 rounded-md bg-amber-50">
               <Trophy className="h-4 w-4 text-amber-600" />

@@ -211,38 +211,34 @@ export default function FundedEmailPage() {
     }
     toast.success('Funded email sent.');
 
-    // Offer to log this as a funded deal — never automatic; always asks.
-    // If a deal is attached, mark it funded (+ assign rep + pull any amounts
-    // we have); otherwise offer to create one to fill in.
-    const wantLog = await confirm({
-      title: 'Log this as a funded deal?',
-      description: dealId
-        ? 'Marks the selected deal as funded and assigns the rep. You can fill in any missing details on the Funded Deals page.'
-        : 'Opens Funded Deals so you can add this as a new funded deal.',
-      confirmLabel: 'Yes, log it',
-      cancelLabel: 'No thanks',
-    });
+    // Automatically submit this for ADMIN APPROVAL as a funded deal. Nothing
+    // is applied yet — an admin reviews (and can modify) the deal, rep, and
+    // commission details, then approves, which logs everything in one go.
+    // The template's filled-in fields ride along as the payload so the admin
+    // sees exactly what was sent.
+    try {
+      const attachedDeal = dealId ? deals.find((d) => d.id === dealId) : null;
+      const derivedName =
+        attachedDeal?.name ||
+        values['deal_name'] || values['business_name'] || values['merchant'] || '';
+      const approvalRes = await fetch('/api/funded-approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dealId: dealId || null,
+          dealName: derivedName || null,
+          repId: repId || null,
+          notes: notes || null,
+          payload: { fields: values, subject: tmpl?.subject ?? null },
+        }),
+      });
+      if (approvalRes.ok) {
+        toast.success('Sent to your admin for approval to log as a funded deal.');
+      }
+    } catch { /* approval submission is best-effort; the email already sent */ }
 
     setToEmail(''); setCcEmails([]); setCcInput('');
     setValues({}); setNotes(''); setFiles([]);
-
-    if (wantLog) {
-      if (dealId) {
-        const body: Record<string, unknown> = { status: 'funded' };
-        if (repId) body.assignedRepId = repId;
-        const r = await fetch(`/api/deals/${dealId}`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-        });
-        if (r.ok) {
-          toast.success('Logged as a funded deal.');
-          router.push(`/portfolio?deal=${dealId}`);
-        } else {
-          toast.error('Could not log the deal — open Funded Deals to add it manually.');
-        }
-      } else {
-        router.push('/portfolio');
-      }
-    }
     setDealId(''); setRepId('');
   }
 

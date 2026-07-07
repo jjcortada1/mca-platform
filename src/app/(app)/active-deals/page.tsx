@@ -32,6 +32,7 @@ interface Deal {
   termCount: string | null;
   fundingDate: string | null;
   fundedWithFunderId: string | null;
+  fundedWithName: string | null;
   fundedNotes: string | null;
   amountCollected: string | null;
   renewalNotes: string | null;
@@ -74,7 +75,7 @@ const blankDeal = (): Deal => ({
   merchantEmail: '', merchantPhone: '', offerNotes: '', offerAmount: '',
   assignedRepId: null, status: 'submitted',
   fundedAmount: '', netAmount: '', feePct: '', factorRate: '', termMode: 'weekly', termCount: '',
-  fundingDate: '', fundedWithFunderId: null, fundedNotes: null,
+  fundingDate: '', fundedWithFunderId: null, fundedWithName: null, fundedNotes: null,
   amountCollected: '', renewalNotes: '',
   createdAt: '', updatedAt: '',
 });
@@ -538,24 +539,33 @@ export default function ActiveDealsPage() {
         //     pipeline; funded deals live in /portfolio where the paydown
         //     tracker lives). Keeping just Deal name, Merchant, Offers count,
         //     Status, Rep, Updated keeps every row under ~960px wide.
+        // Row layout per spec: Date · Rep · Deal name · Cell · Email · Funder
+        // · Offer — each deal always renders as ONE line (no wrapping); the
+        // table scrolls horizontally on narrow screens instead of stacking.
         <Card>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[1080px]">
             <thead>
               <tr className="bg-muted/40 border-b border-border">
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-2 py-2 w-8"></th>
-                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Deal</th>
-                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Merchant</th>
-                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 w-20">Offers</th>
-                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Status</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 w-24">Date</th>
                 <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Rep</th>
-                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2 hidden md:table-cell">Updated</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Deal name</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Cell</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Email</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Funder</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Offer</th>
+                <th className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-3 py-2">Status</th>
                 <th className="w-8"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
               {filtered.map((d) => {
                 const isExpanded = expandedId === d.id;
-                const fullName = [d.merchantFirstName, d.merchantLastName].filter(Boolean).join(' ') || '—';
+                const repName = reps.find((r) => r.id === d.assignedRepId)?.name ?? '—';
+                const offerDisplay = d.offerAmount
+                  ? formatCurrency(d.offerAmount)
+                  : (d.offerNotes ? d.offerNotes : '—');
                 return (
                   <>
                     <tr
@@ -569,40 +579,39 @@ export default function ActiveDealsPage() {
                       <td className="px-2 py-2.5 text-muted-foreground">
                         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                       </td>
-                      <td className="px-3 py-2.5 font-medium truncate max-w-[200px]">{d.name}</td>
-                      <td className="px-3 py-2.5 text-foreground/80 truncate max-w-[160px]">{fullName}</td>
-                      <td className="px-3 py-2.5 text-xs text-muted-foreground tabular-nums" onClick={(e) => e.stopPropagation()}>
-                        <OfferCountBadge dealId={d.id} />
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                        {formatDate(d.createdAt)}
                       </td>
-                      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-2">
-                          <StatusBadge status={d.status} />
-                          <select
-                            value={STATUS_OPTIONS.includes(d.status as never) ? d.status : ''}
-                            onChange={(e) => quickStatusChange(d, e.target.value)}
-                            disabled={savingId === d.id}
-                            className="h-7 rounded-md border border-input bg-card px-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
-                            title="Change status"
-                          >
-                            {!STATUS_OPTIONS.includes(d.status as never) && <option value="">{statusMeta(d.status).label}</option>}
-                            {STATUS_OPTIONS.map((s) => (
-                              <option key={s} value={s}>{statusMeta(s).label}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-3 py-2.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         <RepPicker
                           value={d.assignedRepId ?? ''}
                           onChange={(v) => quickRepChange(d, v || null)}
                           reps={reps}
                           size="sm"
                           disabled={savingId === d.id}
-                          className="max-w-[150px]"
+                          className="max-w-[140px]"
                         />
                       </td>
-                      <td className="px-3 py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap hidden md:table-cell">
-                        {formatDate(d.updatedAt)}
+                      <td className="px-3 py-2.5 font-medium whitespace-nowrap max-w-[220px] truncate">{d.name}</td>
+                      <td className="px-3 py-2.5 text-foreground/80 whitespace-nowrap tabular-nums">{d.merchantPhone || '—'}</td>
+                      <td className="px-3 py-2.5 text-foreground/80 whitespace-nowrap max-w-[200px] truncate">{d.merchantEmail || '—'}</td>
+                      <td className="px-3 py-2.5 whitespace-nowrap max-w-[150px] truncate">{d.fundedWithName || '—'}</td>
+                      <td className="px-3 py-2.5 whitespace-nowrap max-w-[180px] truncate tabular-nums" title={d.offerNotes ?? undefined}>
+                        {offerDisplay}
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <select
+                          value={STATUS_OPTIONS.includes(d.status as never) ? d.status : ''}
+                          onChange={(e) => quickStatusChange(d, e.target.value)}
+                          disabled={savingId === d.id}
+                          className="h-7 rounded-md border border-input bg-card px-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+                          title="Change status"
+                        >
+                          {!STATUS_OPTIONS.includes(d.status as never) && <option value="">{statusMeta(d.status).label}</option>}
+                          {STATUS_OPTIONS.map((s) => (
+                            <option key={s} value={s}>{statusMeta(s).label}</option>
+                          ))}
+                        </select>
                       </td>
                       <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
                         <button
@@ -616,7 +625,7 @@ export default function ActiveDealsPage() {
                     </tr>
                     {isExpanded && (
                       <tr className="bg-muted/20">
-                        <td colSpan={8} className="px-4 py-4">
+                        <td colSpan={10} className="px-4 py-4">
                           <div className="space-y-4 max-w-4xl">
                             {/* Merchant identity — phone/email moved here from the table */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -680,6 +689,7 @@ export default function ActiveDealsPage() {
               })}
             </tbody>
           </table>
+          </div>
         </Card>
       )}
 

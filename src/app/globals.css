@@ -177,6 +177,14 @@
 }
 
 @layer components {
+  /* Ambient page atmosphere — a faint brand-tinted glow at the top of the
+     content area so screens read as layered, not flat. Subtle on purpose;
+     inherits each tenant's primary color. */
+  main {
+    background:
+      radial-gradient(1100px 380px at 50% -120px, hsl(var(--primary) / 0.045), transparent 70%);
+  }
+
   /* Layered card system — `.card-refined` for flush panels, `.card-elevated`
    * for floating ones. Both grow shadow on hover (no border color change). */
   .card-refined {

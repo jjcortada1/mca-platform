@@ -140,6 +140,95 @@ const STATEMENTS: string[] = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS data_backups_company_idx ON data_backups (company_id)`,
+
+  // ---- syndication board (added 2026-07, additive) ----
+  `CREATE TABLE IF NOT EXISTS syndication_deals (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    deal_id uuid REFERENCES deals(id) ON DELETE SET NULL,
+    deal_name varchar(300) NOT NULL,
+    funding_amount numeric(14,2),
+    term varchar(120),
+    rate varchar(60),
+    commission varchar(120),
+    fee varchar(120),
+    has_early_payoff boolean NOT NULL DEFAULT false,
+    early_payoff_details text,
+    funder_name varchar(200),
+    position_number varchar(20),
+    notes text,
+    status varchar(20) NOT NULL DEFAULT 'open',
+    created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+    is_deleted boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS syndication_deals_company_idx ON syndication_deals (company_id)`,
+  `CREATE TABLE IF NOT EXISTS syndication_entries (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    syndication_deal_id uuid NOT NULL REFERENCES syndication_deals(id) ON DELETE CASCADE,
+    user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+    rep_name varchar(200) NOT NULL,
+    company_name varchar(200),
+    amount numeric(14,2) NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS syndication_entries_deal_idx ON syndication_entries (syndication_deal_id)`,
+
+  // ---- funder bonuses (additive) ----
+  `CREATE TABLE IF NOT EXISTS funder_bonuses (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    funder_id uuid REFERENCES funders(id) ON DELETE SET NULL,
+    funder_name varchar(200) NOT NULL,
+    bonus text NOT NULL,
+    conditions text,
+    start_date timestamptz,
+    end_date timestamptz,
+    is_running boolean NOT NULL DEFAULT false,
+    created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+    is_deleted boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS funder_bonuses_company_idx ON funder_bonuses (company_id)`,
+
+  // ---- notifications (additive) ----
+  `CREATE TABLE IF NOT EXISTS notifications (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title varchar(300) NOT NULL,
+    body text,
+    link varchar(500),
+    read_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at)`,
+
+  // ---- funded approvals (additive) ----
+  `CREATE TABLE IF NOT EXISTS funded_approvals (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    deal_id uuid REFERENCES deals(id) ON DELETE SET NULL,
+    deal_name varchar(300),
+    rep_id uuid REFERENCES users(id) ON DELETE SET NULL,
+    funded_amount numeric(14,2),
+    factor_rate numeric(8,4),
+    term_details varchar(200),
+    funder_name varchar(200),
+    gross_commission numeric(14,2),
+    rep_split_pct numeric(6,2),
+    notes text,
+    payload jsonb,
+    status varchar(20) NOT NULL DEFAULT 'pending',
+    submitted_by uuid REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_by uuid REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS funded_approvals_company_idx ON funded_approvals (company_id, status)`,
 ];
 
 /**

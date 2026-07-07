@@ -9,6 +9,7 @@ import { upsertDealSchema } from '@/lib/validation/schemas';
 import { apiError } from '@/lib/api/errors';
 import { fromDateInput } from '@/lib/dates';
 import { triggerSync } from '@/lib/sheets/sync';
+import { notifyDealUpdate, DEAL_FIELD_LABELS } from '@/lib/notify';
 
 /**
  * Returns true when the given user is allowed to read/write the given deal.
@@ -96,6 +97,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (updates.fundingDate === '') updates.fundingDate = null;
     else if (updates.fundingDate != null) updates.fundingDate = fromDateInput(String(updates.fundingDate)) ?? new Date();
 
+    // Snapshot BEFORE the update so the notification can say what actually
+    // changed (not just what fields were sent).
+    const [before] = await db.select().from(deals)
+      .where(and(eq(deals.id, params.id), eq(deals.companyId, ctx.companyId))).limit(1);
+
     await db.update(deals).set(updates)
       .where(and(eq(deals.id, params.id), eq(deals.companyId, ctx.companyId)));
 
@@ -105,6 +111,36 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       await db.update(dealCommissions)
         .set({ repId: body.assignedRepId || null, syncState: 'pending', updatedAt: new Date() })
         .where(and(eq(dealCommissions.dealId, params.id), eq(dealCommissions.companyId, ctx.companyId)));
+    }
+
+    // Notify the assigned rep + their team leader(s) about what changed.
+    // Only fields whose value actually differs make the summary; silent
+    // no-op saves (e.g. autosaved intake) don't ping anyone.
+    if (before) {
+      const changed: string[] = [];
+      const seen = new Set<string>();
+      for (const key of Object.keys(body)) {
+        if (key === 'submissionIntake') continue; // autosave noise, not a human-visible change
+        const label = DEAL_FIELD_LABELS[key];
+        if (!label || seen.has(label)) continue;
+        const prev = (before as Record<string, unknown>)[key];
+        const next = (updates as Record<string, unknown>)[key];
+        const norm = (v: unknown) => (v === null || v === undefined || v === '' ? '' :
+          v instanceof Date ? v.toISOString().slice(0, 10) : String(v));
+        if (norm(prev) !== norm(next)) { changed.push(label); seen.add(label); }
+      }
+      const repForNotify = body.assignedRepId !== undefined
+        ? (body.assignedRepId || null)
+        : before.assignedRepId;
+      notifyDealUpdate({
+        companyId: ctx.companyId,
+        dealId: params.id,
+        dealName: before.name,
+        assignedRepId: repForNotify,
+        actorId: ctx.user.id,
+        actorName: ctx.user.name || ctx.user.email,
+        changes: changed,
+      }).catch(() => {});
     }
 
     triggerSync(ctx.companyId);

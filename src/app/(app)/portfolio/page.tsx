@@ -10,6 +10,7 @@ import { formatCurrency } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { Search, Trash2, Plus, LayoutGrid, List as ListIcon, Upload } from 'lucide-react';
 import { BulkImportModal } from '@/components/bulk-import-modal';
+import { FundedApprovalsCard } from '@/components/funded-approvals-card';
 import { computePaydown } from '@/lib/deals/paydown';
 import { formatCalendarDate, toDateInput } from '@/lib/dates';
 
@@ -366,6 +367,12 @@ export default function PortfolioPage() {
           </div>
         }
       />
+
+      {/* Funded emails waiting for admin sign-off — approving marks the deal
+          funded, assigns the rep, and creates the commission. Hidden for
+          non-admins and when the queue is empty. Reload after approve so the
+          newly-funded deal appears in the list below. */}
+      <FundedApprovalsCard onApproved={() => window.location.reload()} />
 
       {showBulk && (
         <BulkImportModal

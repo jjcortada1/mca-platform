@@ -435,7 +435,11 @@ export async function POST(req: NextRequest) {
                 manualFunderName: t.fi.funderId ? null : t.fi.manualFunderName ?? null,
                 submittedBy: ctx.user.id,
                 status: 'no_response',
-                notes: bodyNotes || null,
+                // Deliberately NOT the email body: the submission-funder notes
+                // field is reserved for logging the funder's OFFER later. The
+                // deal details/notes are captured on the deal itself
+                // (deals.submissionIntake) — they must not pollute this field.
+                notes: null,
               })
               .returning();
 
