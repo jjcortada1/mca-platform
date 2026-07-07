@@ -410,7 +410,7 @@ function AlwaysCcCard() {
   }
 
   function onKeyDown(ev: KeyboardEvent<HTMLInputElement>) {
-    if (ev.key === 'Enter' || ev.key === ',' || ev.key === ';') {
+    if (ev.key === 'Enter') {
       ev.preventDefault();
       commitDraft();
     } else if (ev.key === 'Backspace' && !draft && emails.length) {
@@ -485,14 +485,23 @@ function AlwaysCcCard() {
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onKeyDown}
-              onBlur={() => commitDraft()}
               placeholder={emails.length ? 'Add another…' : 'manager@company.com'}
               className="min-w-[12ch] flex-1 bg-transparent py-0.5 text-sm outline-none placeholder:text-muted-foreground"
             />
+            <button
+              type="button"
+              onClick={() => commitDraft()}
+              disabled={!draft.trim().includes('@')}
+              aria-label="Add CC email"
+              title="Add this email"
+              className="h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md border border-input bg-card text-base font-semibold text-primary hover:bg-primary hover:text-primary-foreground transition-colors disabled:opacity-40 disabled:pointer-events-none"
+            >
+              +
+            </button>
           </div>
         </Field>
         <p className="text-xs text-muted-foreground">
-          Press Enter, comma, or semicolon to add each address.
+          Type an email and press + (or Enter) to add it.
         </p>
         <div className="flex items-center gap-3">
           <Button onClick={save} disabled={saving || !dirty}>

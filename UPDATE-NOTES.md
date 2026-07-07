@@ -1,3 +1,38 @@
+# Update — July 2026 (round 15) — refinements
+
+## Syndication
+- **No more expanding rows** — every deal is a card with all terms visible
+  up front (funding, term, rate, commission, fee, early payoff, funder,
+  position, committed %) plus a progress bar toward the funding amount.
+- **Dollar amounts add commas as you type** (posting a deal and putting your
+  amount in).
+- **Rep directory**: pick your name from a saved list and your company
+  auto-fills — just type the amount and "Add me in". New names typed once
+  are saved to the directory automatically.
+- **Copy** now copies ONLY the syndication lines: each rep's **company and
+  amount** (one per line). Nothing else.
+
+## Sidebar consolidation
+- **My account** and **Companies** no longer take up sidebar spots — both
+  live under **Settings** now. Admins: Settings → "My account" tab (top) and
+  Settings → "Companies" (platform owner only). Reps: their Settings entry
+  opens their personal account settings directly.
+
+## CC everywhere: the + button
+- Shop & Submit "Additional CC" and My Account "Always CC" now use a **+
+  button**: type an email, press + (or Enter), it chips below. No commas.
+
+## Other fixes you asked for
+- **Credit dropdown** now runs **low → high** (Below 600 first, Above 700
+  last).
+- **Calculator (daily)**: term now goes up to **360 business days**.
+- **Active Deals CSV export** now includes the **offer** (amount + notes).
+- **Funded Deals analytics follow the rep filter** — pick a rep and the
+  totals, status pie, and monthly volume chart show just their book; "All"
+  still shows the whole company.
+
+---
+
 # Update — July 2026 (round 14) — structural upgrade
 
 **Data preservation:** every change in this round is ADDITIVE. New features

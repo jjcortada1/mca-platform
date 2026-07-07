@@ -174,6 +174,14 @@ const STATEMENTS: string[] = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS syndication_entries_deal_idx ON syndication_entries (syndication_deal_id)`,
+  `CREATE TABLE IF NOT EXISTS syndication_reps (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    rep_name varchar(200) NOT NULL,
+    rep_company_name varchar(200),
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS syndication_reps_company_idx ON syndication_reps (company_id)`,
 
   // ---- funder bonuses (additive) ----
   `CREATE TABLE IF NOT EXISTS funder_bonuses (

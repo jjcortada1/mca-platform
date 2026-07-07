@@ -221,6 +221,20 @@ export default function PortfolioPage() {
       }),
     })), [deals]);
 
+  // Rep scoping — applied BEFORE both the visible list and every analytic on
+  // the page, so choosing a rep filters their deals AND their numbers:
+  //   • Non-admin: hard-scoped to their own deals (defense in depth on top
+  //     of the server-side filter — keeps any cached list private).
+  //   • Admin with repFilter='mine': scope to admin's own deals.
+  //   • Admin with repFilter=<repId>: scope to that rep.
+  //   • Admin with empty repFilter: all funded deals (whole company).
+  const repScoped = useMemo(() => {
+    if (me && !isAdmin) return enriched.filter((e) => e.deal.assignedRepId === me.id);
+    if (isAdmin && me && repFilter === 'mine') return enriched.filter((e) => e.deal.assignedRepId === me.id);
+    if (isAdmin && repFilter && repFilter !== 'mine') return enriched.filter((e) => e.deal.assignedRepId === repFilter);
+    return enriched;
+  }, [enriched, me, isAdmin, repFilter]);
+
   const portfolio = useMemo(() => {
     // Include EVERY funded-status deal — both ones with a paydown structure
     // (full set: fundedAmount + factor + term + fundingDate) and ones that
@@ -228,21 +242,7 @@ export default function PortfolioPage() {
     // un-populated cards entirely; per the new spec, funding details are
     // now entered HERE on Funded Deals (not Active Deals), so we have to
     // surface the cards that need attention.
-    let list = enriched;
-
-    // Rep filter:
-    //   • Non-admin: hard-scoped to their own deals (defense in depth on top
-    //     of the server-side filter — keeps any cached list private).
-    //   • Admin with repFilter='mine': scope to admin's own deals.
-    //   • Admin with repFilter=<repId>: scope to that rep.
-    //   • Admin with empty repFilter: all funded deals.
-    if (me && !isAdmin) {
-      list = list.filter((e) => e.deal.assignedRepId === me.id);
-    } else if (isAdmin && me && repFilter === 'mine') {
-      list = list.filter((e) => e.deal.assignedRepId === me.id);
-    } else if (isAdmin && repFilter && repFilter !== 'mine') {
-      list = list.filter((e) => e.deal.assignedRepId === repFilter);
-    }
+    let list = repScoped;
 
     if (view === 'paying') list = list.filter((e) => e.p.hasStructure && !e.p.renewalEligible && e.p.pctPaidIn < 100);
     if (view === 'refi') list = list.filter((e) => e.p.hasStructure && e.p.renewalEligible);
@@ -267,19 +267,21 @@ export default function PortfolioPage() {
     // populated ones still lead the page.
     sorted.sort((a, b) => Number(b.p.hasStructure) - Number(a.p.hasStructure));
     return sorted;
-  }, [enriched, view, search, sort, me, isAdmin, repFilter]);
+  }, [repScoped, view, search, sort]);
 
-  // Portfolio totals
+  // Portfolio totals — computed from the REP-SCOPED list, so filtering to a
+  // rep also filters every analytic on the page (totals, pie, monthly bars).
+  // "All" still shows the whole company.
   const totals = useMemo(() => {
     let funded = 0, payback = 0, collected = 0, remaining = 0, refi = 0;
-    for (const e of enriched) {
+    for (const e of repScoped) {
       if (!e.p.hasStructure) continue;
       funded += e.p.fundedAmount; payback += e.p.totalPayback;
       collected += e.p.amountCollected; remaining += e.p.remainingBalance;
       if (e.p.renewalEligible) refi++;
     }
-    return { funded, payback, collected, remaining, refi, count: enriched.filter((e) => e.p.hasStructure).length };
-  }, [enriched]);
+    return { funded, payback, collected, remaining, refi, count: repScoped.filter((e) => e.p.hasStructure).length };
+  }, [repScoped]);
 
   /**
    * Sub-status breakdown for the dashboard pie chart.
@@ -306,7 +308,7 @@ export default function PortfolioPage() {
       paid_off: 0,
       refinanced: 0,
     };
-    for (const e of enriched) {
+    for (const e of repScoped) {
       if (!e.p.hasStructure) continue;
       const ss = e.deal.fundedSubStatus ?? 'active';
       if (ss === 'refinanced') buckets.refinanced++;
@@ -317,7 +319,7 @@ export default function PortfolioPage() {
       else buckets.active++;
     }
     return buckets;
-  }, [enriched]);
+  }, [repScoped]);
 
   /**
    * Month-over-month funded volume for the bar chart.
@@ -337,7 +339,7 @@ export default function PortfolioPage() {
       months.push({ key, label, volume: 0, count: 0 });
     }
     const byKey = new Map(months.map((m) => [m.key, m]));
-    for (const e of enriched) {
+    for (const e of repScoped) {
       if (!e.p.hasStructure || !e.p.fundingDate) continue;
       const fd = e.p.fundingDate;
       const key = `${fd.getFullYear()}-${String(fd.getMonth() + 1).padStart(2, '0')}`;
@@ -347,7 +349,7 @@ export default function PortfolioPage() {
       bucket.count++;
     }
     return months;
-  }, [enriched]);
+  }, [repScoped]);
 
   return (
     <div className="space-y-5">

@@ -613,11 +613,13 @@ function ReverseCalc() {
                 label=""
                 value={termWeeks}
                 min={4}
-                max={60}
+                // Daily deals run longer terms — allow up to 360 business
+                // days (72 weeks). Weekly stays capped at 60 weeks.
+                max={freq === 'daily' ? 72 : 60}
                 step={1}
                 onChange={setTermWeeks}
                 format={(v) => freq === 'daily' ? `${(v * BUSINESS_DAYS_PER_WEEK).toFixed(0)} days` : `${v.toFixed(0)} wks`}
-                cleanValues={[10, 12, 16, 20, 24, 30, 40]}
+                cleanValues={freq === 'daily' ? [10, 12, 16, 20, 24, 30, 40, 48, 60, 72] : [10, 12, 16, 20, 24, 30, 40]}
                 disabled={lockTerm}
                 precision={0}
               />

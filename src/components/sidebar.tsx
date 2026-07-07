@@ -318,19 +318,6 @@ function SidebarBody({
   const isAdmin = user.role === 'company_admin' || user.role === 'master_admin';
   const userInitial = (user.name || user.email || 'U').charAt(0).toUpperCase();
 
-  // Does the current admin belong to the platform-owner company? Drives the
-  // "Companies" link — owner-company admins manage tenants; client-company
-  // admins never see the master surface. master_admin always qualifies.
-  const [isPlatformOwner, setIsPlatformOwner] = useState(false);
-  useEffect(() => {
-    if (user.role === 'master_admin') { setIsPlatformOwner(true); return; }
-    if (user.role !== 'company_admin') return;
-    fetch('/api/companies/me', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((j) => setIsPlatformOwner(!!j?.company?.isPlatformOwner))
-      .catch(() => {});
-  }, [user.role]);
-
   // Open tasks assigned to me — drives the red badge on the Tasks nav item
   // so a broker sees at a glance that something was assigned to them.
   // Polled every 60s; cheap endpoint, no push infra needed.
@@ -476,50 +463,30 @@ function SidebarBody({
           </div>
         ))}
 
-        {/* Personal: every user gets this, including reps + lead sources */}
+        {/* One Settings entry for everyone.
+            Admins → /settings (which now contains My account + Companies).
+            Non-admins → /account (their personal settings: signature, SMTP,
+            password, 2FA, always-CC). My Account and Companies no longer get
+            their own sidebar spots. */}
         <div className="mb-5">
           <div className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-            Personal
+            {isAdmin ? 'Admin' : 'Personal'}
           </div>
           <div className="space-y-0.5">
             <Link
-              href="/account"
+              href={isAdmin ? '/settings' : '/account'}
               onClick={onNavigate}
-              className={cn('nav-item', pathname.startsWith('/account') ? 'nav-item-active' : 'nav-item-inactive')}
+              className={cn(
+                'nav-item',
+                (pathname.startsWith('/settings') || pathname.startsWith('/account') || pathname.startsWith('/master'))
+                  ? 'nav-item-active' : 'nav-item-inactive'
+              )}
             >
-              <UserCircle className="h-4 w-4" />
-              <span>My account</span>
+              <Settings className="h-4 w-4" />
+              <span>Settings</span>
             </Link>
           </div>
         </div>
-
-        {isAdmin && (
-          <div className="mb-5">
-            <div className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-              Admin
-            </div>
-            <div className="space-y-0.5">
-              <Link
-                href="/settings"
-                onClick={onNavigate}
-                className={cn('nav-item', pathname.startsWith('/settings') ? 'nav-item-active' : 'nav-item-inactive')}
-              >
-                <Settings className="h-4 w-4" />
-                <span>Settings</span>
-              </Link>
-              {isPlatformOwner && (
-                <Link
-                  href="/master"
-                  onClick={onNavigate}
-                  className={cn('nav-item', pathname.startsWith('/master') ? 'nav-item-active' : 'nav-item-inactive')}
-                >
-                  <Building2 className="h-4 w-4" />
-                  <span>Companies</span>
-                </Link>
-              )}
-            </div>
-          </div>
-        )}
       </nav>
 
       {/* User footer */}

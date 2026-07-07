@@ -9,13 +9,18 @@ import { useToast } from '@/components/toast';
 import {
   Palette, Mail, Send, FileText, DollarSign, Layers, ListChecks,
   Users as UsersIcon, GitBranch, Database, ShieldCheck, Menu as MenuIcon,
-  Trash2, Sparkles, Crown, Plus,
+  Trash2, Sparkles, Crown, Plus, UserCircle, Building2,
 } from 'lucide-react';
+import Link from 'next/link';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useConfirm } from '@/components/confirm-provider';
 import { cn } from '@/lib/utils';
+// My Account now lives INSIDE Settings (it lost its own sidebar spot). The
+// account page is a self-contained client component, so we render it directly
+// as the "My account" tab.
+import AccountPage from '../account/page';
 
-type Tab = 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar' | 'celebration' | 'teams';
+type Tab = 'account' | 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar' | 'celebration' | 'teams' | 'companies';
 
 // Flatter, friendlier settings nav. Each entry has an icon + one-line
 // description so the user can scan and find what they want without reading
@@ -24,6 +29,12 @@ const TAB_GROUPS: {
   title: string;
   tabs: { key: Tab; label: string; icon: React.ComponentType<{ className?: string }>; description: string }[];
 }[] = [
+  {
+    title: 'Personal',
+    tabs: [
+      { key: 'account', label: 'My account', icon: UserCircle, description: 'Signature, password, 2FA, always CC' },
+    ],
+  },
   {
     title: 'General',
     tabs: [
@@ -60,6 +71,8 @@ const TAB_GROUPS: {
       { key: 'users', label: 'Reps & admins', icon: UsersIcon, description: 'Invite, deactivate, permissions' },
       { key: 'teams', label: 'Teams', icon: UsersIcon, description: 'Teams, leaders, and members' },
       { key: 'leadsources', label: 'Lead sources', icon: GitBranch, description: 'Referral partner accounts' },
+      // Shown only to platform-owner admins (filtered at render time).
+      { key: 'companies', label: 'Companies', icon: Building2, description: 'Create and manage client companies' },
     ],
   },
   {
@@ -71,10 +84,12 @@ const TAB_GROUPS: {
   },
 ];
 
-const VALID_TABS: Tab[] = ['branding', 'email', 'smtp', 'commission', 'fields', 'users', 'tiers', 'options', 'security', 'sheets', 'leadsources', 'backup', 'funded', 'sidebar', 'celebration', 'teams'];
+const VALID_TABS: Tab[] = ['account', 'branding', 'email', 'smtp', 'commission', 'fields', 'users', 'tiers', 'options', 'security', 'sheets', 'leadsources', 'backup', 'funded', 'sidebar', 'celebration', 'teams', 'companies'];
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('branding');
+  // Companies tab is platform-owner only — same rule as the old sidebar link.
+  const [isPlatformOwner, setIsPlatformOwner] = useState(false);
 
   // Deep link: /settings?tab=teams opens that tab directly (used by global
   // search results and cross-page links).
@@ -83,7 +98,19 @@ export default function SettingsPage() {
       const t = new URLSearchParams(window.location.search).get('tab');
       if (t && (VALID_TABS as string[]).includes(t)) setTab(t as Tab);
     } catch { /* ignore */ }
+    fetch('/api/companies/me', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => setIsPlatformOwner(!!j?.company?.isPlatformOwner))
+      .catch(() => {});
   }, []);
+
+  // Groups with the companies tab filtered out for non-platform-owners.
+  const visibleGroups = TAB_GROUPS
+    .map((g) => ({
+      ...g,
+      tabs: g.tabs.filter((t) => t.key !== 'companies' || isPlatformOwner),
+    }))
+    .filter((g) => g.tabs.length > 0);
 
   // Find active item for header display
   const activeItem = TAB_GROUPS.flatMap((g) => g.tabs).find((t) => t.key === tab);
@@ -96,7 +123,7 @@ export default function SettingsPage() {
         {/* Sidebar nav — vertical, grouped, scrollable on mobile */}
         <aside className="lg:w-64 shrink-0">
           <nav className="space-y-5 lg:sticky lg:top-6">
-            {TAB_GROUPS.map((group) => (
+            {visibleGroups.map((group) => (
               <div key={group.title}>
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 mb-1.5 px-2">
                   {group.title}
@@ -140,6 +167,25 @@ export default function SettingsPage() {
             </div>
           )}
 
+          {tab === 'account' && <AccountPage />}
+          {tab === 'companies' && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Company management</CardTitle>
+                <CardDescription>
+                  Create client companies, set their admin logins, funder lists, feature access, and branding — everything lives in the company console.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Link
+                  href="/master"
+                  className="inline-flex items-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 h-10 text-sm font-medium hover:opacity-90 transition-opacity"
+                >
+                  <Building2 className="h-4 w-4" /> Open company console
+                </Link>
+              </CardContent>
+            </Card>
+          )}
           {tab === 'branding' && <BrandingSection />}
           {tab === 'sidebar' && <SidebarOrderSection />}
           {tab === 'celebration' && <CelebrationSection />}

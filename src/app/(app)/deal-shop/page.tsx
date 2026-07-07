@@ -599,7 +599,17 @@ export default function DealShopPage() {
       .then((r) => r.json())
       .then((j) => {
         const grouped = j.data ?? {};
-        setCreditRanges(grouped.credit_range ?? []);
+        // Credit ranges display LOW → HIGH (Below 600 first, Above 700 last),
+        // regardless of how they're ordered in the database. Sorted by each
+        // option's minScore; "Unknown" (no score) goes last.
+        const creditSorted = [...(grouped.credit_range ?? [])].sort(
+          (a: MatchOption, b: MatchOption) => {
+            const sa = typeof a.meta?.minScore === 'number' ? (a.meta.minScore as number) : Number.POSITIVE_INFINITY;
+            const sb = typeof b.meta?.minScore === 'number' ? (b.meta.minScore as number) : Number.POSITIVE_INFINITY;
+            return sa - sb;
+          }
+        );
+        setCreditRanges(creditSorted);
         setRevenueRanges(grouped.revenue_range ?? []);
         setIndustries(grouped.industry ?? []);
         setDealTypes(grouped.deal_type ?? []);
@@ -1109,14 +1119,28 @@ export default function DealShopPage() {
 
             <Field label="Additional CC">
               <div className="space-y-1.5">
-                <Input
-                  value={ccInput}
-                  onChange={(e) => setCcInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',' || e.key === ';') { e.preventDefault(); addCc(); } }}
-                  onBlur={() => addCc()}
-                  placeholder="Add CCs — Enter or comma after each; paste a whole list"
-                  type="text"
-                />
+                {/* Type an email, hit the + (or Enter) — it chips below and
+                    the box clears for the next one. */}
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    value={ccInput}
+                    onChange={(e) => setCcInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCc(); } }}
+                    placeholder="someone@example.com"
+                    type="email"
+                    className="flex-1"
+                  />
+                  <button
+                    type="button"
+                    onClick={addCc}
+                    disabled={!ccInput.trim().includes('@')}
+                    aria-label="Add CC"
+                    title="Add this email to CC"
+                    className="h-10 w-10 shrink-0 inline-flex items-center justify-center rounded-lg border border-input bg-card text-lg font-semibold text-primary hover:bg-primary hover:text-primary-foreground transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    +
+                  </button>
+                </div>
                 {ccList.length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {ccList.map((email) => {

@@ -1043,6 +1043,22 @@ export const syndicationEntries = pgTable(
   (t) => ({ dealIdx: index('syndication_entries_deal_idx').on(t.syndicationDealId) })
 );
 
+/* ---------- Syndication rep directory ----------
+   Saved rep ↔ company pairs so putting yourself into a deal is two clicks:
+   pick your name (company auto-fills), type the amount. New names typed on
+   an entry are saved here automatically. */
+export const syndicationReps = pgTable(
+  'syndication_reps',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    repName: varchar('rep_name', { length: 200 }).notNull(),
+    repCompanyName: varchar('rep_company_name', { length: 200 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ companyIdx: index('syndication_reps_company_idx').on(t.companyId) })
+);
+
 /* ---------- Funder bonuses ----------
    Which funders are running bonuses, over what window (or ongoing), and the
    conditions — so reps can see at a glance where the extra money is. */

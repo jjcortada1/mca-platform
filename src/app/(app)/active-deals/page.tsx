@@ -377,6 +377,8 @@ export default function ActiveDealsPage() {
                 { key: 'merchantLastName', label: 'Merchant Last' },
                 { key: 'merchantPhone', label: 'Phone' },
                 { key: 'merchantEmail', label: 'Email' },
+                { key: 'offerAmount', label: 'Offer Amount', format: (v) => (v ? Number(v) : '') },
+                { key: 'offerNotes', label: 'Offer / Offers' },
                 { key: 'status', label: 'Status' },
                 { key: 'fundedWith', label: 'Funded With' },
                 { key: 'fundedAmount', label: 'Funded Amount', format: (v) => (v ? Number(v) : '') },

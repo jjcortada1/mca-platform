@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { syndicationDeals, syndicationEntries } from '@/lib/db/schema';
+import { syndicationDeals, syndicationEntries, syndicationReps } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
@@ -96,13 +96,32 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return NextResponse.json({ error: 'This syndication is closed.' }, { status: 400 });
     }
     const body = entrySchema.parse(await req.json());
+    const repName = body.repName.trim();
+    const companyName = body.companyName?.trim() || null;
     const [row] = await db.insert(syndicationEntries).values({
       syndicationDealId: deal.id,
       userId: ctx.user.id,
-      repName: body.repName.trim(),
-      companyName: body.companyName?.trim() || null,
+      repName,
+      companyName,
       amount: String(body.amount),
     }).returning();
+
+    // Keep the rep ↔ company directory fresh: a new name is saved
+    // automatically so next time it's a one-click pick. Best-effort.
+    try {
+      const existing = await db.select().from(syndicationReps)
+        .where(eq(syndicationReps.companyId, ctx.companyId));
+      const match = existing.find((r) => r.repName.toLowerCase() === repName.toLowerCase());
+      if (!match) {
+        await db.insert(syndicationReps).values({
+          companyId: ctx.companyId, repName, repCompanyName: companyName,
+        });
+      } else if (companyName && companyName !== match.repCompanyName) {
+        await db.update(syndicationReps).set({ repCompanyName: companyName })
+          .where(eq(syndicationReps.id, match.id));
+      }
+    } catch { /* directory upkeep never blocks the entry */ }
+
     return NextResponse.json({ ok: true, data: row });
   } catch (e) { return apiError(e); }
 }
