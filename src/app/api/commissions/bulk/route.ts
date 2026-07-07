@@ -92,10 +92,14 @@ export async function POST(req: NextRequest) {
     for (const p of prepared) {
       if (!p.valid || !p.data.dealId) { errors.push({ row: p.row, message: `No deal matching "${p.data.deal}"` }); continue; }
       const d = p.data;
+      // Re-narrow after the guard above — TypeScript loses the !p.data.dealId
+      // check across the `const d = p.data` alias, and the column is NOT NULL.
+      const dealId = d.dealId;
+      if (!dealId) continue;
       try {
         await db.insert(dealCommissions).values({
           companyId: ctx.companyId,
-          dealId: d.dealId,
+          dealId,
           repId: d.repId,
           fundedAmount: d.fundedAmount != null ? String(d.fundedAmount) : null,
           rate: d.rate != null ? String(d.rate) : null,

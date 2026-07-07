@@ -158,6 +158,14 @@ export default function PortfolioPage() {
     }
   }, [autoExpandId, viewMode]);
 
+  // Deals fetch, extracted so it can be re-run after bulk import / approvals
+  // (not just on mount). Referenced by the BulkImportModal onComplete below.
+  function loadDeals() {
+    fetch('/api/deals', { cache: 'no-store' }).then((r) => r.json()).then((j) => {
+      setDeals((j.data ?? j.deals ?? []) as Deal[]);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }
+
   useEffect(() => {
     // Load current user FIRST so we know whether to send `?mine=1`. We don't
     // actually need to wait — the server enforces the rep scoping by role —
@@ -166,9 +174,7 @@ export default function PortfolioPage() {
       if (j?.user) setMe({ id: j.user.id, role: j.user.role });
     }).catch(() => {});
 
-    fetch('/api/deals', { cache: 'no-store' }).then((r) => r.json()).then((j) => {
-      setDeals((j.data ?? j.deals ?? []) as Deal[]);
-    }).catch(() => {}).finally(() => setLoading(false));
+    loadDeals();
 
     // Load company users so the rep-assignment dropdown has the full roster.
     // Lead-source accounts excluded (they own deals via leadSourceId).
@@ -394,7 +400,7 @@ export default function PortfolioPage() {
             { key: 'repLabel', label: 'Rep' },
           ]}
           onClose={() => setShowBulk(false)}
-          onComplete={() => { setShowBulk(false); load(); }}
+          onComplete={() => { setShowBulk(false); loadDeals(); }}
         />
       )}
 

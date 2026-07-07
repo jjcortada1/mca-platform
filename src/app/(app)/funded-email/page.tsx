@@ -218,9 +218,15 @@ export default function FundedEmailPage() {
     // sees exactly what was sent.
     try {
       const attachedDeal = dealId ? deals.find((d) => d.id === dealId) : null;
+      // `values` is keyed by field INDEX — to pull a name we find the template
+      // field whose LABEL looks like a deal/business/merchant name and read
+      // that index's value. (String-keyed lookups here silently returned
+      // nothing before.)
+      const nameFieldIdx = (tmpl?.fields ?? []).findIndex((f) =>
+        /deal\s*name|business\s*name|merchant/i.test(f.label || ''));
       const derivedName =
         attachedDeal?.name ||
-        values['deal_name'] || values['business_name'] || values['merchant'] || '';
+        (nameFieldIdx >= 0 ? (values[nameFieldIdx] ?? '') : '');
       const approvalRes = await fetch('/api/funded-approvals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -229,7 +235,16 @@ export default function FundedEmailPage() {
           dealName: derivedName || null,
           repId: repId || null,
           notes: notes || null,
-          payload: { fields: values, subject: tmpl?.subject ?? null },
+          // Label-keyed so the admin approval queue shows "Funded amount: …",
+          // not raw field indexes.
+          payload: {
+            fields: Object.fromEntries(
+              (tmpl?.fields ?? [])
+                .map((f, i) => [f.label || `Field ${i + 1}`, values[i] ?? ''] as const)
+                .filter(([, v]) => v)
+            ),
+            subject: tmpl?.subject ?? null,
+          },
         }),
       });
       if (approvalRes.ok) {
