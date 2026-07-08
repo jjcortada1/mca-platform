@@ -458,12 +458,15 @@ function ReverseCalc() {
         <Card>
           <CardContent className="p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold">Observed</div>
+              <div className="text-sm font-semibold">
+                <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-primary text-primary-foreground text-[11px] font-bold mr-2">1</span>
+                What you see on the statement
+              </div>
               <Button variant="ghost" size="sm" onClick={reset}>Reset</Button>
             </div>
 
-            <div className="rounded bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
-              Enter what you can see — the bank deposit and the payment going out. Then adjust the sliders to find the most likely MCA structure.
+            <div className="rounded bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-200">
+              Just two numbers: the deposit that hit the merchant&apos;s bank, and the payment being pulled. Everything on the right updates as you type.
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -519,12 +522,18 @@ function ReverseCalc() {
         <Card>
           <CardContent className="p-5 space-y-5">
             <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold">Adjust assumptions</div>
+              <div className="text-sm font-semibold">
+                <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-primary text-primary-foreground text-[11px] font-bold mr-2">2</span>
+                Fine-tune (optional)
+              </div>
               <Button variant="outline" size="sm" onClick={snapToClean} className="gap-1.5">
                 <Sparkles className="h-3 w-3" />
                 Suggest clean structures
               </Button>
             </div>
+            <p className="text-xs text-muted-foreground -mt-2">
+              Drag the sliders to test a factor / fee / term — or just hit <span className="font-medium text-foreground">Suggest clean structures</span> and tap one to apply it.
+            </p>
 
             {suggestions.length > 0 && (
               <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5">
@@ -630,6 +639,19 @@ function ReverseCalc() {
 
       {/* Results panel */}
       <div className="lg:col-span-3 space-y-4">
+        {/* Friendly starting point — before any numbers are entered the
+            results side explains exactly what to do instead of sitting empty. */}
+        {!pmt && (
+          <Card>
+            <CardContent className="p-6 text-center">
+              <Sparkles className="h-6 w-6 text-primary mx-auto mb-2" />
+              <div className="text-sm font-semibold">Enter the merchant&apos;s payment to get started</div>
+              <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                Type the daily or weekly payment on the left (and the deposit if you have it) — the most likely MCA structures appear here instantly, ranked by accuracy.
+              </p>
+            </CardContent>
+          </Card>
+        )}
         {/* Likely MCA structures — ranked by the reverse engine. Top result
             first with a "why", then alternatives to compare. */}
         {likelyStructures.length > 0 && (

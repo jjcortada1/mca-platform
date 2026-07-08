@@ -67,7 +67,7 @@ export default function EsignPage() {
     <div className="space-y-5 max-w-3xl">
       <PageHeader
         title="Send application"
-        description="Enter a name and email — Dropbox Sign emails them your application template to fill out and sign."
+        description="Enter a name and email — they get an email from you with the link to your application. Subject line is your company name + Application."
       />
 
       <Card>
@@ -80,11 +80,11 @@ export default function EsignPage() {
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="john@business.com" />
             </Field>
           </div>
-          <Field label="Personal note (optional)">
-            <Textarea rows={2} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Added to the signature request email" />
+          <Field label="Personal note (optional)" hint="Added under the saved message and link. The saved message itself is editable in Settings → Application link.">
+            <Textarea rows={2} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Anything extra you want to say" />
           </Field>
           <Button onClick={send} disabled={sending}>
-            <Send className="h-4 w-4" /> {sending ? 'Sending…' : 'Send for signature'}
+            <Send className="h-4 w-4" /> {sending ? 'Sending…' : 'Send application link'}
           </Button>
         </CardContent>
       </Card>

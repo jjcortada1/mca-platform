@@ -52,6 +52,12 @@ interface Deal {
   // 'standard_mca' | 'reverse_consolidation' — RC deals get draw-based
   // commission treatment, so they're markable right from the editor here.
   dealType?: string | null;
+  // Payment pause + temporary modification (set from the editor below).
+  paymentsPaused?: boolean;
+  paymentsPausedAt?: string | null;
+  modifiedPaymentAmount?: string | null;
+  modifiedPaymentUntil?: string | null;
+  paymentModificationNote?: string | null;
   // Paid-off tracking (schema fields). When the deal has been closed out
   // — either by payoff or by being rolled into a refi — paidOff is true.
   // paidOffAmount captures the actual settled amount, which can differ
@@ -821,6 +827,10 @@ function FundedDealRow({
     fundedWithFunderId: string | null;
     fundedNotes: string;
     dealType: string;
+    paymentsPaused: boolean;
+    modifiedPaymentAmount: string;
+    modifiedPaymentUntil: string;
+    paymentModificationNote: string;
   }>({
     fundedAmount: deal.fundedAmount ?? '',
     feePct: deal.feePct ?? '',
@@ -841,6 +851,10 @@ function FundedDealRow({
     fundedWithFunderId: deal.fundedWithFunderId ?? null,
     fundedNotes: deal.fundedNotes ?? '',
     dealType: deal.dealType ?? 'standard_mca',
+    paymentsPaused: deal.paymentsPaused ?? false,
+    modifiedPaymentAmount: deal.modifiedPaymentAmount ?? '',
+    modifiedPaymentUntil: deal.modifiedPaymentUntil ? String(deal.modifiedPaymentUntil).slice(0, 10) : '',
+    paymentModificationNote: deal.paymentModificationNote ?? '',
   });
 
   // Pending-confirm state — when set, a ConfirmDialog asks the user
@@ -988,6 +1002,25 @@ function FundedDealRow({
                 opens the new-deal form; this dropdown option just labels. */}
             <option value="refinanced">Refinanced</option>
           </select>
+          {/* Payment pause / temporary modification chips — visible without
+              expanding so a paused deal reads at a glance. */}
+          {deal.paymentsPaused && (
+            <span
+              className="ml-1.5 inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 whitespace-nowrap"
+              title={deal.paymentsPausedAt ? `Payments paused since ${formatCalendarDate(deal.paymentsPausedAt)}` : 'Payments paused'}
+            >
+              ⏸ Paused{deal.paymentsPausedAt ? ` ${formatCalendarDate(deal.paymentsPausedAt)}` : ''}
+            </span>
+          )}
+          {!deal.paymentsPaused && deal.modifiedPaymentAmount && deal.modifiedPaymentUntil
+            && new Date(deal.modifiedPaymentUntil) >= new Date() && (
+            <span
+              className="ml-1.5 inline-flex items-center rounded-full border border-sky-200 bg-sky-100 px-2 py-0.5 text-[10px] font-medium text-sky-800 whitespace-nowrap"
+              title={deal.paymentModificationNote ?? undefined}
+            >
+              Mod {formatCurrency(deal.modifiedPaymentAmount)} → {formatCalendarDate(deal.modifiedPaymentUntil)}
+            </span>
+          )}
         </td>
         <td className="px-3 py-2 text-xs text-muted-foreground tabular-nums whitespace-nowrap hidden md:table-cell">
           {fundedDateDisplay}
@@ -1296,6 +1329,57 @@ function FundedDealRow({
                         <option value="reverse_consolidation">Reverse consolidation</option>
                       </select>
                     </Field>
+                  </div>
+
+                  {/* Payments pause + temporary modification. Pausing stamps
+                      the date (server-side); a modified payment records a
+                      temporary amount and how long it runs. */}
+                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 space-y-2">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={draft.paymentsPaused}
+                          onChange={(e) => setDraft({ ...draft, paymentsPaused: e.target.checked })}
+                        />
+                        <span className="text-sm font-medium">Pause payments</span>
+                      </label>
+                      {deal.paymentsPaused && deal.paymentsPausedAt && (
+                        <span className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+                          Paused since {formatCalendarDate(deal.paymentsPausedAt)}
+                        </span>
+                      )}
+                      {draft.paymentsPaused && !deal.paymentsPaused && (
+                        <span className="text-[11px] text-muted-foreground">Pause date is stamped when you save.</span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <Field label="Modified payment (optional)">
+                        <CurrencyInput
+                          className="h-9"
+                          value={draft.modifiedPaymentAmount}
+                          onChange={(v) => setDraft({ ...draft, modifiedPaymentAmount: v })}
+                          placeholder="e.g. 250"
+                        />
+                      </Field>
+                      <Field label="Until">
+                        <Input
+                          type="date"
+                          className="h-9"
+                          value={draft.modifiedPaymentUntil}
+                          onChange={(e) => setDraft({ ...draft, modifiedPaymentUntil: e.target.value })}
+                        />
+                      </Field>
+                      <Field label="Note">
+                        <Input
+                          className="h-9"
+                          value={draft.paymentModificationNote}
+                          onChange={(e) => setDraft({ ...draft, paymentModificationNote: e.target.value })}
+                          placeholder="e.g. half payments, hurricane"
+                        />
+                      </Field>
+                    </div>
                   </div>
                   {/* Notes — free-text, full-width below the field grid. Also
                       surfaced in the rep commission view, so reps see deal

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { deals, users, dealOffers } from '@/lib/db/schema';
+import { deals, users, dealOffers, funders } from '@/lib/db/schema';
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { requireTenantContext, hasPermission } from '@/lib/auth/context';
 import { visibleRepIds } from '@/lib/auth/team-scope';
@@ -70,10 +70,17 @@ export async function GET(req: NextRequest) {
     const offerRows = ids.length
       ? await db.select().from(dealOffers).where(inArray(dealOffers.dealId, ids))
       : [];
+    // Funder names for the summaries (offers store just the FK).
+    const funderIds = Array.from(new Set(offerRows.map((o) => o.funderId).filter(Boolean))) as string[];
+    const funderRows = funderIds.length
+      ? await db.select({ id: funders.id, name: funders.name }).from(funders).where(inArray(funders.id, funderIds))
+      : [];
+    const funderName = new Map(funderRows.map((f) => [f.id, f.name]));
     const fmtMoney = (v: string | null) =>
       v != null ? `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '';
     const describeOffer = (o: typeof offerRows[number]) => {
       const parts: string[] = [];
+      if (o.funderId && funderName.get(o.funderId)) parts.push(funderName.get(o.funderId)!);
       if (o.fundingAmount != null) parts.push(fmtMoney(o.fundingAmount));
       if (o.factorRate != null) parts.push(`@ ${Number(o.factorRate)}`);
       if (o.termCount != null) parts.push(`${o.termCount} ${o.termMode ?? ''}`.trim());

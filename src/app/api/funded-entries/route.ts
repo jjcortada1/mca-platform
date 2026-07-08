@@ -6,13 +6,22 @@ import { requirePermission, requireTenantContext } from '@/lib/auth/context';
 import { fundedEntrySchema } from '@/lib/validation/schemas';
 import { apiError } from '@/lib/api/errors';
 import { fromDateInput } from '@/lib/dates';
+import { visibleRepIds } from '@/lib/auth/team-scope';
 
 export async function GET() {
   try {
     const ctx = await requirePermission('funded_board.view');
 
+    // Performance visibility: admins see the whole company's board; team
+    // leaders see their team's; everyone else sees only their own entries.
+    const isAdmin = ctx.user.role === 'company_admin' || ctx.user.role === 'master_admin';
+    const scope = isAdmin ? null : await visibleRepIds(ctx.user.id);
+
     const entries = await db.select().from(fundedEntries)
-      .where(eq(fundedEntries.companyId, ctx.companyId))
+      .where(and(
+        eq(fundedEntries.companyId, ctx.companyId),
+        ...(scope ? [inArray(fundedEntries.repId, scope)] : []),
+      ))
       .orderBy(desc(fundedEntries.fundedDate));
 
     const repIds = Array.from(new Set(entries.map((e) => e.repId)));

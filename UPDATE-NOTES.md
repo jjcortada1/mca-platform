@@ -1,3 +1,55 @@
+# Update — July 2026 (round 18)
+
+## Funded deals — pause payments
+- Each funded deal can now be **paused**: tick "Pause payments" in the deal
+  editor and the deal shows an amber **⏸ Paused + date** chip right on the
+  row. You can also record a **temporary modified payment** — amount, until
+  date, and a note (e.g. "half payments, hurricane") — shown as a chip too.
+
+## Performance visibility
+- The **dashboard and Funded Board are now scoped by role**: admins see the
+  whole company, team leaders see their team's numbers, and every rep sees
+  only their own performance (KPIs, deltas, and the 6-month chart included).
+
+## Active Deals — offers
+- Offer term is **days/weeks only** (months removed).
+- Every offer has a **Funder picker** (add form + editable on each offer),
+  and the funder's name now leads the offer summary on the row.
+- Adding/editing/deleting an offer **updates the row summary instantly**.
+- The expanded view is **half the height**: merchant info (deal name, first/
+  last, cell, email) compact on the LEFT, offers on the RIGHT.
+
+## Funders
+- **Clicking a funder now opens the quick view** (contacts + key criteria).
+  The full editor is behind an explicit **Edit** button — on the row and
+  inside the quick view.
+- The restricted-states picker now uses **your states from Settings** (when
+  you've defined them); industries already sync. Credit/revenue/positions/
+  deal types from Settings already drive the Shop & Submit form.
+
+## Send Application — now a link, not an API
+- Reworked per your spec: enter a name + email → they get an email FROM YOU
+  (your connected sending account + signature) with subject
+  **"<Your company> Application"** and a body of
+  "Hi <first name>, here is a link to our application. Please complete it
+  ASAP so I can get working on your file now." + **your application link**.
+- The saved body is editable in **Settings → Application link** (plus the
+  link itself); reps can add a personal note per send. No Dropbox Sign
+  account needed.
+
+## Settings
+- The settings **nav and the open panel scroll independently** on desktop.
+- **Email swap**: change any user's email in Settings → Reps & admins →
+  Email field — password, permissions, deals, commissions all stay; only
+  the login email changes. (Works for reps and company admins.)
+
+## Merchant Funding Estimator
+- Friendlier flow: **step 1 "What you see on the statement"** (two numbers)
+  and **step 2 "Fine-tune (optional)"**, plus a clear starting hint on the
+  results side before you've typed anything.
+
+---
+
 # Update — July 2026 (round 17)
 
 ## Notifications — real desktop + phone push

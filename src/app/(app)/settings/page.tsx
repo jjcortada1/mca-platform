@@ -55,7 +55,7 @@ const TAB_GROUPS: {
       { key: 'smtp', label: 'SMTP setup', icon: Send, description: 'Connect your sending account' },
       { key: 'fields', label: 'Email fields', icon: FileText, description: 'Custom deal info fields' },
       { key: 'funded', label: 'Funded email template', icon: FileText, description: 'Subject + fields for the funded email' },
-      { key: 'esign', label: 'E-sign applications', icon: FileText, description: 'Dropbox Sign API key + application template' },
+      { key: 'esign', label: 'Application link', icon: FileText, description: 'The application URL reps send + saved email body' },
     ],
   },
   {
@@ -120,10 +120,13 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <PageHeader title="Settings" description="Manage your company, team, deals, and integrations." />
 
-      <div className="flex flex-col lg:flex-row gap-6 lg:gap-10">
-        {/* Sidebar nav — vertical, grouped, scrollable on mobile */}
-        <aside className="lg:w-64 shrink-0">
-          <nav className="space-y-5 lg:sticky lg:top-6">
+      {/* On desktop the settings NAV and the open settings PANEL scroll
+          independently — a fixed-height split where each column has its own
+          scrollbar. Mobile keeps normal page flow. */}
+      <div className="flex flex-col lg:flex-row gap-6 lg:gap-10 lg:h-[calc(100vh-240px)] lg:min-h-[420px] lg:overflow-hidden">
+        {/* Sidebar nav — its own scroll area on desktop */}
+        <aside className="lg:w-64 shrink-0 lg:overflow-y-auto lg:pr-1 lg:overscroll-contain">
+          <nav className="space-y-5">
             {visibleGroups.map((group) => (
               <div key={group.title}>
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 mb-1.5 px-2">
@@ -159,8 +162,8 @@ export default function SettingsPage() {
           </nav>
         </aside>
 
-        {/* Main settings panel */}
-        <div className="flex-1 min-w-0 space-y-4">
+        {/* Main settings panel — its own scroll area on desktop */}
+        <div className="flex-1 min-w-0 space-y-4 lg:overflow-y-auto lg:pr-2 lg:overscroll-contain">
           {activeItem && (
             <div className="pb-2 border-b border-border">
               <h2 className="text-lg font-semibold tracking-tight">{activeItem.label}</h2>
@@ -1045,7 +1048,11 @@ function UsersSection() {
             </div>
             <div className="p-6 space-y-4">
               <Field label="Name" required><Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Field>
-              <Field label="Email" required><Input value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} /></Field>
+              <Field
+                label="Email"
+                required
+                hint={editing.id ? 'Swap the login email freely — the password, permissions, deals, commissions, and everything else on this account stay exactly as they are. Only the email changes.' : undefined}
+              ><Input value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} /></Field>
               <Field label={editing.id ? 'Password (leave blank to keep)' : 'Password'} required={!editing.id} hint="At least 8 characters.">
                 <Input type="password" value={editing.password ?? ''} onChange={(e) => setEditing({ ...editing, password: e.target.value })} autoComplete="new-password" />
               </Field>
@@ -1754,18 +1761,13 @@ function fmtWhen(iso: string): string {
 }
 
 /* ============================================================
-   E-SIGN (Dropbox Sign) — API key + application template config.
-   Reps then send applications from the "Send Application" page.
+   APPLICATION LINK — the URL reps email out from "Send Application",
+   plus the saved email body (editable here).
    ============================================================ */
 function EsignSection() {
   const toast = useToast();
-  const [hasApiKey, setHasApiKey] = useState(false);
-  const [apiKey, setApiKey] = useState('');
-  const [templateId, setTemplateId] = useState('');
-  const [signerRole, setSignerRole] = useState('');
-  const [subject, setSubject] = useState('');
-  const [message, setMessage] = useState('');
-  const [testMode, setTestMode] = useState(false);
+  const [applicationUrl, setApplicationUrl] = useState('');
+  const [emailBody, setEmailBody] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -1773,32 +1775,27 @@ function EsignSection() {
     fetch('/api/esign/config', { cache: 'no-store' })
       .then((r) => r.json())
       .then((j) => {
-        const d = j?.data;
-        if (!d) return;
-        setHasApiKey(!!d.hasApiKey);
-        setTemplateId(d.templateId ?? '');
-        setSignerRole(d.signerRole ?? '');
-        setSubject(d.subject ?? '');
-        setMessage(d.message ?? '');
-        setTestMode(!!d.testMode);
+        setApplicationUrl(j?.data?.applicationUrl ?? '');
+        setEmailBody(j?.data?.emailBody ?? '');
       })
       .finally(() => setLoading(false));
   }, []);
 
   async function save() {
+    if (applicationUrl.trim() && !/^https?:\/\//i.test(applicationUrl.trim())) {
+      toast.error('The application link must start with http:// or https://');
+      return;
+    }
     setSaving(true);
     try {
-      const body: Record<string, unknown> = { templateId, signerRole, subject, message, testMode };
-      if (apiKey.trim()) body.apiKey = apiKey.trim();
       const res = await fetch('/api/esign/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ applicationUrl, emailBody }),
       });
       const j = await res.json();
       if (!res.ok) { toast.error(j.error || 'Could not save.'); return; }
-      toast.success('E-sign settings saved.');
-      if (apiKey.trim()) { setHasApiKey(true); setApiKey(''); }
+      toast.success('Application settings saved.');
     } finally {
       setSaving(false);
     }
@@ -1810,39 +1807,28 @@ function EsignSection() {
     <div className="space-y-5 max-w-2xl">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Dropbox Sign connection</CardTitle>
+          <CardTitle className="text-base">Application link</CardTitle>
           <CardDescription>
-            Reps type a name + email on the Send Application page and Dropbox Sign emails your application template for signature. You need three things from your Dropbox Sign account: an <strong>API key</strong> (Settings → API), a <strong>template ID</strong> (open the template → copy its ID), and the template's <strong>signer role name</strong> (set when the template was created, e.g. &quot;Client&quot;).
+            Reps type a name + email on the <strong>Send Application</strong> page and this link is emailed to the merchant. The subject line is automatic: your company name + &quot;Application&quot; (e.g. &quot;Cortada Capital Group Application&quot;), and the email is sent from the rep&apos;s connected sending account with their signature.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <Field label={hasApiKey ? 'API key (saved — enter a new one to replace)' : 'API key'}>
+          <Field label="Link to your application" required>
             <Input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder={hasApiKey ? '••••••••••••  (leave blank to keep current)' : 'Your Dropbox Sign API key'}
+              value={applicationUrl}
+              onChange={(e) => setApplicationUrl(e.target.value)}
+              placeholder="https://yourdomain.com/application"
             />
           </Field>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Template ID">
-              <Input value={templateId} onChange={(e) => setTemplateId(e.target.value)} placeholder="e.g. 5de8179668f2033afac48da1868d0093bf133b8a" />
-            </Field>
-            <Field label="Signer role name">
-              <Input value={signerRole} onChange={(e) => setSignerRole(e.target.value)} placeholder="e.g. Client" />
-            </Field>
-          </div>
-          <Field label="Email subject">
-            <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Please sign your application" />
+          <Field label="Saved email body" hint="Shown after 'Hi <first name>,' and before the link. Leave blank for the default below.">
+            <Textarea
+              rows={3}
+              value={emailBody}
+              onChange={(e) => setEmailBody(e.target.value)}
+              placeholder="Here is a link to our application. Please complete it ASAP so I can get working on your file now."
+            />
           </Field>
-          <Field label="Default message">
-            <Textarea rows={2} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Included in the signature request email (reps can add a personal note per send)" />
-          </Field>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" className="h-4 w-4" checked={testMode} onChange={(e) => setTestMode(e.target.checked)} />
-            <span className="text-sm">Test mode (no real signatures — for trying it out without a paid plan)</span>
-          </label>
-          <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save e-sign settings'}</Button>
+          <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
         </CardContent>
       </Card>
     </div>

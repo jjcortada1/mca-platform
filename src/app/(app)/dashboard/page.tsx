@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { db } from '@/lib/db/client';
 import { deals, submissions, fundedEntries, funders } from '@/lib/db/schema';
-import { eq, and, gte, count, sum } from 'drizzle-orm';
+import { eq, and, gte, count, sum, inArray, type SQL } from 'drizzle-orm';
 import { pageRequireTenant } from '@/lib/auth/context';
+import { visibleRepIds } from '@/lib/auth/team-scope';
 import { Briefcase, Inbox, TrendingUp, DollarSign, ShoppingBag, Send, Calculator, Users, ArrowUpRight } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import PortfolioDashboard from '@/components/portfolio-dashboard';
@@ -25,22 +26,33 @@ export default async function DashboardPage() {
   const sixMonthsAgo = new Date(monthStart);
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
 
+  // ---- Performance visibility scoping ----
+  // Admins see the COMPANY's numbers. Team leaders see THEIR TEAM's numbers
+  // (self + reps they lead). Everyone else sees only THEIR OWN performance.
+  const isAdmin = user.role === 'company_admin' || user.role === 'master_admin';
+  const scopeIds = isAdmin ? null : await visibleRepIds(user.id);
+  const dealScope: SQL[] = scopeIds ? [inArray(deals.assignedRepId, scopeIds)] : [];
+  const fundedScope: SQL[] = scopeIds ? [inArray(fundedEntries.repId, scopeIds)] : [];
+
   const [dealCount] = await db.select({ c: count() }).from(deals)
-    .where(and(eq(deals.companyId, companyId), gte(deals.createdAt, monthStart)));
+    .where(and(eq(deals.companyId, companyId), gte(deals.createdAt, monthStart), ...dealScope));
+  // Submissions don't carry a rep directly — scope via the parent deal.
   const [submissionCount] = await db.select({ c: count() }).from(submissions)
-    .where(and(eq(submissions.companyId, companyId), gte(submissions.createdAt, monthStart)));
+    .innerJoin(deals, eq(deals.id, submissions.dealId))
+    .where(and(eq(submissions.companyId, companyId), gte(submissions.createdAt, monthStart), ...dealScope));
   const [funded] = await db.select({ c: count(), total: sum(fundedEntries.amountFunded) }).from(fundedEntries)
-    .where(and(eq(fundedEntries.companyId, companyId), gte(fundedEntries.fundedDate, monthStart)));
+    .where(and(eq(fundedEntries.companyId, companyId), gte(fundedEntries.fundedDate, monthStart), ...fundedScope));
   const [funderCount] = await db.select({ c: count() }).from(funders)
     .where(and(eq(funders.companyId, companyId), eq(funders.isActive, true)));
 
-  // Last-month comparatives for the delta chips.
+  // Last-month comparatives for the delta chips (same scope).
   const [prevDeals] = await db.select({ c: count() }).from(deals)
-    .where(and(eq(deals.companyId, companyId), gte(deals.createdAt, prevMonthStart)));
+    .where(and(eq(deals.companyId, companyId), gte(deals.createdAt, prevMonthStart), ...dealScope));
   const [prevSubs] = await db.select({ c: count() }).from(submissions)
-    .where(and(eq(submissions.companyId, companyId), gte(submissions.createdAt, prevMonthStart)));
+    .innerJoin(deals, eq(deals.id, submissions.dealId))
+    .where(and(eq(submissions.companyId, companyId), gte(submissions.createdAt, prevMonthStart), ...dealScope));
   const [prevFunded] = await db.select({ c: count(), total: sum(fundedEntries.amountFunded) }).from(fundedEntries)
-    .where(and(eq(fundedEntries.companyId, companyId), gte(fundedEntries.fundedDate, prevMonthStart)));
+    .where(and(eq(fundedEntries.companyId, companyId), gte(fundedEntries.fundedDate, prevMonthStart), ...fundedScope));
   // gte(prevMonthStart) includes this month too — subtract to isolate last month.
   const lastMoDeals = Math.max(0, (prevDeals?.c ?? 0) - (dealCount?.c ?? 0));
   const lastMoSubs = Math.max(0, (prevSubs?.c ?? 0) - (submissionCount?.c ?? 0));
@@ -51,7 +63,7 @@ export default async function DashboardPage() {
   const trendRows = await db
     .select({ fundedDate: fundedEntries.fundedDate, amount: fundedEntries.amountFunded })
     .from(fundedEntries)
-    .where(and(eq(fundedEntries.companyId, companyId), gte(fundedEntries.fundedDate, sixMonthsAgo)));
+    .where(and(eq(fundedEntries.companyId, companyId), gte(fundedEntries.fundedDate, sixMonthsAgo), ...fundedScope));
   const trend: { label: string; total: number; deals: number }[] = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(monthStart);
@@ -103,7 +115,11 @@ export default async function DashboardPage() {
           {firstName}.
         </h1>
         <p className="text-sm sm:text-[15px] text-muted-foreground mt-2">
-          Here's what's happening across your brokerage in {monthLabel}.
+          {isAdmin
+            ? <>Here's what's happening across your brokerage in {monthLabel}.</>
+            : scopeIds && scopeIds.length > 1
+              ? <>Here's your team's performance in {monthLabel}.</>
+              : <>Here's your performance in {monthLabel}.</>}
         </p>
       </div>
 

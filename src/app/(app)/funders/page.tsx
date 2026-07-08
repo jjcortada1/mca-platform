@@ -88,13 +88,18 @@ export default function FundersPage() {
   // shows whatever the admin has set up there + falls back to the seed list
   // so brand-new tenants aren't starting from a blank dropdown.
   const [industries, setIndustries] = useState<string[]>(COMMON_INDUSTRIES);
+  // States shown in the restricted-states picker. Sourced from Settings →
+  // match options when the admin has defined states there (same list the
+  // Shop & Submit form uses); falls back to all 50 US states.
+  const [stateList, setStateList] = useState<{ code: string; name: string }[]>(US_STATES);
 
   async function load() {
     setLoading(true);
-    const [fres, tres, mres] = await Promise.all([
+    const [fres, tres, mres, sres] = await Promise.all([
       fetch('/api/funders', { cache: 'no-store' }).then((r) => r.json()),
       fetch('/api/funder-tiers', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({ data: [] })),
       fetch('/api/settings/match-options?kind=industry', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({ data: [] })),
+      fetch('/api/settings/match-options?kind=state', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({ data: [] })),
     ]);
     setFunders(fres.data ?? fres ?? []);
     setTiers(tres.data ?? []);
@@ -102,6 +107,20 @@ export default function FundersPage() {
     const adminIndustries = (mres.data ?? []) as { label: string; value: string; isActive: boolean }[];
     const names = adminIndustries.filter((o) => o.isActive !== false).map((o) => o.label);
     setIndustries(names.length ? names : COMMON_INDUSTRIES);
+    // Admin-defined states: match against the canonical US list by code OR
+    // name so restrictions keep storing 2-letter codes either way.
+    const adminStates = (sres.data ?? []) as { label: string; value: string; isActive: boolean }[];
+    if (adminStates.length) {
+      const resolved = adminStates
+        .filter((o) => o.isActive !== false)
+        .map((o) => US_STATES.find((s) =>
+          s.code.toLowerCase() === o.value.toLowerCase() ||
+          s.code.toLowerCase() === o.label.toLowerCase() ||
+          s.name.toLowerCase() === o.value.toLowerCase() ||
+          s.name.toLowerCase() === o.label.toLowerCase()))
+        .filter((s): s is { code: string; name: string } => !!s);
+      if (resolved.length) setStateList(resolved);
+    }
     setLoading(false);
   }
 
@@ -288,7 +307,9 @@ export default function FundersPage() {
                     <tr
                       key={f.id}
                       className="border-b border-border hover:bg-muted/30 cursor-pointer"
-                      onClick={() => setEditing(f)}
+                      // Row click = QUICK VIEW (contacts + key criteria).
+                      // Full editing lives behind the explicit Edit button.
+                      onClick={() => setQuickView(f)}
                     >
                       <td className="px-4 py-3 font-medium">
                         {f.name}
@@ -311,11 +332,11 @@ export default function FundersPage() {
                       </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <button
-                          onClick={() => setQuickView(f)}
-                          title="Quick view"
-                          className="text-muted-foreground hover:text-primary transition p-1 rounded"
+                          onClick={() => setEditing(f)}
+                          title="Edit this funder"
+                          className="text-xs font-medium text-primary hover:underline px-1"
                         >
-                          <Eye className="h-4 w-4" />
+                          Edit
                         </button>
                       </td>
                     </tr>
@@ -344,9 +365,18 @@ export default function FundersPage() {
                   {quickView.supportsReverseConsolidation && ' • reverse consolidation'}
                 </p>
               </div>
-              <button onClick={() => setQuickView(null)} className="text-muted-foreground hover:text-foreground p-1">
-                <X className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => { const f = quickView; setQuickView(null); setEditing(f); }}
+                >
+                  Edit
+                </Button>
+                <button onClick={() => setQuickView(null)} className="text-muted-foreground hover:text-foreground p-1">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
             <div className="p-6 space-y-4 text-sm">
               {/* Basic info */}
@@ -457,6 +487,7 @@ export default function FundersPage() {
           funder={editing}
           tiers={tiers}
           industries={industries}
+          stateList={stateList}
           onChange={setEditing}
           onClose={() => setEditing(null)}
           onSave={save}
@@ -480,11 +511,12 @@ export default function FundersPage() {
 }
 
 function FunderDrawer({
-  funder, tiers, industries, onChange, onClose, onSave, onDelete,
+  funder, tiers, industries, stateList = US_STATES, onChange, onClose, onSave, onDelete,
 }: {
   funder: Funder;
   tiers: FunderTier[];
   industries: string[];
+  stateList?: { code: string; name: string }[];
   onChange: (f: Funder) => void;
   onClose: () => void;
   onSave: () => void;
@@ -787,7 +819,7 @@ function FunderDrawer({
             <h3 className="font-medium text-sm uppercase tracking-wide text-muted-foreground">Restricted states</h3>
             <p className="text-xs text-muted-foreground">Click to toggle. Funder will not match deals from selected states.</p>
             <div className="flex flex-wrap gap-1">
-              {US_STATES.map((s) => {
+              {stateList.map((s) => {
                 const selected = funder.restrictedStates.includes(s.code);
                 return (
                   <button

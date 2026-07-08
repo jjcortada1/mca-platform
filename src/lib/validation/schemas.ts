@@ -163,6 +163,12 @@ export const upsertDealSchema = z.object({
   // Notes attached to the funded deal — separate from offerNotes (which
   // is pre-funding context) so the funded notes don't pollute the shop view.
   fundedNotes: z.string().max(10000).optional().nullable(),
+  // Payment pause + temporary payment modification (funded deals). Pausing
+  // stamps paymentsPausedAt server-side; resuming clears it.
+  paymentsPaused: z.boolean().optional(),
+  modifiedPaymentAmount: z.coerce.number().nonnegative().optional().nullable(),
+  modifiedPaymentUntil: z.string().optional().nullable(),
+  paymentModificationNote: z.string().max(1000).optional().nullable(),
   // Submission intake — JSON blob with the structured "what to send the
   // funder" context. Shape is enforced by the form UI on /deal-shop;
   // the API just round-trips it. z.any() is intentional: the shape may

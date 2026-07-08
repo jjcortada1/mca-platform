@@ -137,4 +137,8 @@ export const DEAL_FIELD_LABELS: Record<string, string> = {
   dealType: 'deal type',
   amountCollected: 'amount collected',
   renewalNotes: 'renewal notes',
+  paymentsPaused: 'payments paused/resumed',
+  modifiedPaymentAmount: 'modified payment',
+  modifiedPaymentUntil: 'modified payment period',
+  paymentModificationNote: 'payment modification note',
 };

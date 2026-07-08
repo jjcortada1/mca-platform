@@ -89,13 +89,20 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (typeof updates.merchantLastName === 'string' && updates.merchantLastName) updates.merchantLastName = titleCaseName(updates.merchantLastName);
 
     // Numeric columns: '' → null, numbers → string (Drizzle numeric wants string).
-    for (const k of ['offerAmount', 'fundedAmount', 'netAmount', 'feePct', 'factorRate', 'termCount', 'amountCollected'] as const) {
+    for (const k of ['offerAmount', 'fundedAmount', 'netAmount', 'feePct', 'factorRate', 'termCount', 'amountCollected', 'modifiedPaymentAmount'] as const) {
       if (updates[k] === '' ) updates[k] = null;
       else if (updates[k] != null) updates[k] = String(updates[k]);
     }
     // Funding date: '' → null, string → Date
     if (updates.fundingDate === '') updates.fundingDate = null;
     else if (updates.fundingDate != null) updates.fundingDate = fromDateInput(String(updates.fundingDate)) ?? new Date();
+    // Modified-payment end date: '' → null, string → Date
+    if (updates.modifiedPaymentUntil === '') updates.modifiedPaymentUntil = null;
+    else if (updates.modifiedPaymentUntil != null) updates.modifiedPaymentUntil = fromDateInput(String(updates.modifiedPaymentUntil));
+    // Pausing stamps the pause date; resuming clears it. The client never
+    // sets paymentsPausedAt directly — the server owns the timestamp.
+    if (updates.paymentsPaused === true) updates.paymentsPausedAt = new Date();
+    else if (updates.paymentsPaused === false) updates.paymentsPausedAt = null;
 
     // Snapshot BEFORE the update so the notification can say what actually
     // changed (not just what fields were sent).

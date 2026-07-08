@@ -49,6 +49,15 @@ const STATEMENTS: string[] = [
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS offer_amount numeric(14,2)`,
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS net_amount numeric(14,2)`,
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS deal_type varchar(30) NOT NULL DEFAULT 'standard_mca'`,
+  // Payment pause / temporary modification on funded deals (additive).
+  `ALTER TABLE deals ADD COLUMN IF NOT EXISTS payments_paused boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE deals ADD COLUMN IF NOT EXISTS payments_paused_at timestamptz`,
+  `ALTER TABLE deals ADD COLUMN IF NOT EXISTS modified_payment_amount numeric(14,2)`,
+  `ALTER TABLE deals ADD COLUMN IF NOT EXISTS modified_payment_until timestamptz`,
+  `ALTER TABLE deals ADD COLUMN IF NOT EXISTS payment_modification_note text`,
+  // Application-link email (replaces the Dropbox Sign API flow).
+  `ALTER TABLE esign_config ADD COLUMN IF NOT EXISTS application_url text`,
+  `ALTER TABLE esign_config ADD COLUMN IF NOT EXISTS email_body text`,
 
   // ---- submission_funders: intake notes stored per funder submission ----
   `ALTER TABLE submission_funders ADD COLUMN IF NOT EXISTS notes text`,

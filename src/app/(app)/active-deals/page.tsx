@@ -124,15 +124,23 @@ export default function ActiveDealsPage() {
     | null
   >(null);
 
+  // Funder directory for the offer form's funder picker.
+  const [funderOptions, setFunderOptions] = useState<{ id: string; name: string }[]>([]);
+
   async function load() {
     setLoading(true);
-    const [dRes, uRes] = await Promise.all([
+    const [dRes, uRes, fRes] = await Promise.all([
       fetch('/api/deals', { cache: 'no-store' }).then((r) => r.json()),
       fetch('/api/users').then((r) => r.json()).catch(() => ({ data: [] })),
+      fetch('/api/funders', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({ data: [] })),
     ]);
     setDeals(dRes.data ?? dRes ?? []);
     // Reps only — exclude master admins and lead source accounts.
     setReps((uRes.data ?? []).filter((u: { role: string }) => u.role === 'rep' || u.role === 'company_admin'));
+    setFunderOptions(((fRes.data ?? fRes.funders ?? []) as { id: string; name: string; isActive?: boolean }[])
+      .filter((f) => f.isActive !== false)
+      .map((f) => ({ id: f.id, name: f.name }))
+      .sort((a, b) => a.name.localeCompare(b.name)));
     setLoading(false);
   }
 
@@ -643,36 +651,38 @@ export default function ActiveDealsPage() {
                     </tr>
                     {isExpanded && (
                       <tr className="bg-muted/20">
-                        <td colSpan={10} className="px-4 py-4">
-                          <div className="space-y-4 max-w-4xl">
-                            {/* Merchant identity — phone/email moved here from the table */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              <LabeledInline label="Deal name">
-                                <Input value={(draft.name ?? d.name) ?? ''} onChange={(e) => patchDraft('name', e.target.value)} />
-                              </LabeledInline>
-                              <LabeledInline label="Merchant first">
-                                <Input value={(draft.merchantFirstName ?? d.merchantFirstName) ?? ''} onChange={(e) => patchDraft('merchantFirstName', e.target.value)} />
-                              </LabeledInline>
-                              <LabeledInline label="Merchant last">
-                                <Input value={(draft.merchantLastName ?? d.merchantLastName) ?? ''} onChange={(e) => patchDraft('merchantLastName', e.target.value)} />
-                              </LabeledInline>
-                              <LabeledInline label="Merchant phone">
-                                <Input value={(draft.merchantPhone ?? d.merchantPhone) ?? ''} onChange={(e) => patchDraft('merchantPhone', e.target.value)} />
-                              </LabeledInline>
-                              <LabeledInline label="Merchant email">
-                                <Input type="email" value={(draft.merchantEmail ?? d.merchantEmail) ?? ''} onChange={(e) => patchDraft('merchantEmail', e.target.value)} />
-                              </LabeledInline>
-                            </div>
+                        <td colSpan={10} className="px-4 py-3">
+                          {/* Compact two-column expansion: merchant info on the
+                              LEFT, offers on the RIGHT — roughly half the old
+                              height with tighter inputs. */}
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-3 items-start">
+                              {/* Left: merchant identity, small inputs */}
+                              <div className="grid grid-cols-2 gap-2 [&_input]:h-8 [&_input]:text-[13px]">
+                                <div className="col-span-2">
+                                  <LabeledInline label="Deal name">
+                                    <Input value={(draft.name ?? d.name) ?? ''} onChange={(e) => patchDraft('name', e.target.value)} />
+                                  </LabeledInline>
+                                </div>
+                                <LabeledInline label="Merchant first">
+                                  <Input value={(draft.merchantFirstName ?? d.merchantFirstName) ?? ''} onChange={(e) => patchDraft('merchantFirstName', e.target.value)} />
+                                </LabeledInline>
+                                <LabeledInline label="Merchant last">
+                                  <Input value={(draft.merchantLastName ?? d.merchantLastName) ?? ''} onChange={(e) => patchDraft('merchantLastName', e.target.value)} />
+                                </LabeledInline>
+                                <LabeledInline label="Cell">
+                                  <Input value={(draft.merchantPhone ?? d.merchantPhone) ?? ''} onChange={(e) => patchDraft('merchantPhone', e.target.value)} />
+                                </LabeledInline>
+                                <LabeledInline label="Email">
+                                  <Input type="email" value={(draft.merchantEmail ?? d.merchantEmail) ?? ''} onChange={(e) => patchDraft('merchantEmail', e.target.value)} />
+                                </LabeledInline>
+                              </div>
 
-                            {/* Multi-offer manager — replaces the single
-                                offerAmount + offerNotes inputs. Each offer
-                                tracks funding amount, factor rate, term,
-                                fees, payment amount, and notes. The rep can
-                                mark one as accepted. Funding-detail entry
-                                (fundedAmount, feePct, fundingDate, etc) has
-                                been moved out of Active Deals — those only
-                                live on Funded Deals now per the spec. */}
-                            <OffersManager dealId={d.id} />
+                              {/* Right: offers (incl. the funder picker on
+                                  each offer). Adding/editing an offer
+                                  refreshes the row summary immediately. */}
+                              <OffersManager dealId={d.id} funders={funderOptions} onChanged={() => load()} />
+                            </div>
 
                             <div className="flex justify-between items-center gap-2 pt-2 border-t border-border">
                               {/* Quick path to the unified shop view with this
@@ -890,7 +900,11 @@ const blankOffer = (): Omit<OfferRow, 'id' | 'createdAt'> => ({
  * side-by-side. Replaces the old single-offerAmount / single-offerNotes
  * inputs that used to live on Active Deals.
  */
-function OffersManager({ dealId }: { dealId: string }) {
+function OffersManager({ dealId, funders = [], onChanged }: {
+  dealId: string;
+  funders?: { id: string; name: string }[];
+  onChanged?: () => void;
+}) {
   const toast = useToast();
   const confirm = useConfirm();
   const [offers, setOffers] = useState<OfferRow[]>([]);
@@ -926,6 +940,7 @@ function OffersManager({ dealId }: { dealId: string }) {
     setAdding(false);
     setDraft(blankOffer());
     load();
+    onChanged?.(); // refresh the parent row's offer summary immediately
   }
 
   async function updateOffer(id: string, patch: Partial<OfferRow>) {
@@ -944,22 +959,26 @@ function OffersManager({ dealId }: { dealId: string }) {
       // Accepting an offer flips it on others — refetch to sync.
       load();
     }
+    onChanged?.();
   }
 
   async function deleteOffer(id: string) {
     if (!(await confirm({ title: 'Delete this offer?', confirmLabel: 'Delete', destructive: true }))) return;
     await fetch(`/api/offers/${id}`, { method: 'DELETE' });
     load();
+    onChanged?.();
   }
 
   if (!loaded) {
     return (
-      <div className="pt-3 border-t border-border text-xs text-muted-foreground">Loading offers…</div>
+      <div className="text-xs text-muted-foreground lg:border-l lg:border-border lg:pl-5">Loading offers…</div>
     );
   }
 
   return (
-    <div className="pt-3 border-t border-border space-y-2">
+    // Right column of the expanded row on desktop (divider on the left);
+    // stacks under the merchant info on small screens.
+    <div className="space-y-2 lg:border-l lg:border-border lg:pl-5">
       <div className="flex items-center justify-between">
         <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Offers {offers.length > 0 && <span className="text-foreground/60 normal-case font-normal">— {offers.length} on file</span>}
@@ -995,12 +1014,22 @@ function OffersManager({ dealId }: { dealId: string }) {
             <OfferField label="Term">
               <div className="flex gap-1">
                 <Input inputMode="numeric" className="flex-1" value={draft.termCount == null ? '' : String(draft.termCount)} onChange={(e) => setDraft({ ...draft, termCount: e.target.value === '' ? null : Number(e.target.value) })} placeholder="26" />
+                {/* Days and weeks only — MCA terms aren't quoted in months. */}
                 <select className="h-9 rounded-md border border-input bg-card px-1 text-xs" value={draft.termMode ?? 'weeks'} onChange={(e) => setDraft({ ...draft, termMode: e.target.value })}>
                   <option value="days">days</option>
                   <option value="weeks">wks</option>
-                  <option value="months">mos</option>
                 </select>
               </div>
+            </OfferField>
+            <OfferField label="Funder">
+              <select
+                className="h-9 w-full rounded-md border border-input bg-card px-2 text-xs"
+                value={draft.funderId ?? ''}
+                onChange={(e) => setDraft({ ...draft, funderId: e.target.value || null })}
+              >
+                <option value="">— pick funder —</option>
+                {funders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
             </OfferField>
             {/* Fees is a PERCENTAGE on a deal offer — not a dollar amount.
                 Funding fee % is how lenders quote it; storing as a dollar
@@ -1125,7 +1154,6 @@ function OffersManager({ dealId }: { dealId: string }) {
                     <select defaultValue={o.termMode ?? 'weeks'} onChange={(e) => updateOffer(o.id, { termMode: e.target.value })} className="h-8 rounded-md border border-input bg-card px-1 text-[11px]">
                       <option value="days">days</option>
                       <option value="weeks">wks</option>
-                      <option value="months">mos</option>
                     </select>
                   </div>
                 </OfferField>
@@ -1134,6 +1162,16 @@ function OffersManager({ dealId }: { dealId: string }) {
                 </OfferField>
                 <OfferField label="Payment ($)">
                   <Input inputMode="decimal" defaultValue={o.paymentAmount ?? ''} onBlur={(e) => updateOffer(o.id, { paymentAmount: e.target.value || null })} className="h-8 text-xs" />
+                </OfferField>
+                <OfferField label="Funder">
+                  <select
+                    value={o.funderId ?? ''}
+                    onChange={(e) => updateOffer(o.id, { funderId: e.target.value || null })}
+                    className="h-8 w-full rounded-md border border-input bg-card px-1 text-[11px]"
+                  >
+                    <option value="">— pick funder —</option>
+                    {funders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
                 </OfferField>
               </div>
               <OfferField label="Notes">

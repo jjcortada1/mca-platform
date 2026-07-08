@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { esignConfig, esignRequests, users } from '@/lib/db/schema';
+import { esignConfig, esignRequests, users, companies } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
-import { decrypt } from '@/lib/crypto';
+import { sendGenericEmail, type SmtpConfig } from '@/lib/email/smtp';
+import { titleCaseName } from '@/lib/utils';
 import { z } from 'zod';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** GET — recent signature requests for this company (newest first). */
+const DEFAULT_BODY =
+  'Here is a link to our application. Please complete it ASAP so I can get working on your file now.';
+
+/** GET — recent application sends for this company (newest first). */
 export async function GET() {
   try {
     const ctx = await requirePermission('deals.submit');
@@ -39,8 +43,14 @@ const sendSchema = z.object({
 });
 
 /**
- * POST — send the application template to someone via Dropbox Sign.
- * Type a name + email; Dropbox Sign emails them the signature request.
+ * POST — email someone the LINK to the application.
+ *
+ * Subject: "<Company name> Application" (e.g. "Cortada Capital Group Application").
+ * Body:    Hi <first name>,
+ *          <saved body from Settings — default asks them to complete it ASAP>
+ *          <application link>
+ *          (+ the rep's optional personal note, and their signature)
+ * Sent through the same SMTP the rep shops deals with.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -49,51 +59,68 @@ export async function POST(req: NextRequest) {
 
     const [cfg] = await db.select().from(esignConfig)
       .where(eq(esignConfig.companyId, ctx.companyId)).limit(1);
-    if (!cfg?.apiKeyEncrypted || !cfg.templateId || !cfg.signerRole) {
+    if (!cfg?.applicationUrl) {
       return NextResponse.json(
-        { error: 'Dropbox Sign isn\'t set up yet. An admin needs to add the API key, template ID, and signer role in Settings → E-sign applications.' },
+        { error: 'No application link is set up yet. An admin needs to add it in Settings → Application link.' },
         { status: 400 },
       );
     }
 
-    let apiKey: string;
-    try {
-      apiKey = decrypt(cfg.apiKeyEncrypted);
-    } catch {
-      return NextResponse.json({ error: 'Stored API key could not be read — re-save it in Settings.' }, { status: 500 });
+    // Resolve SMTP exactly like deal submissions: shared company account or
+    // the sender's own connected account.
+    const [company] = await db.select().from(companies).where(eq(companies.id, ctx.companyId)).limit(1);
+    if (!company) return NextResponse.json({ error: 'Company not found' }, { status: 404 });
+    let smtp: SmtpConfig | null = null;
+    const [me] = await db.select().from(users).where(eq(users.id, ctx.user.id)).limit(1);
+    if (company.emailMode === 'shared') {
+      smtp = (company.smtpConfig as SmtpConfig | null) ?? null;
+    } else {
+      smtp = (me?.smtpConfig as SmtpConfig | null) ?? null;
+    }
+    if (!smtp) {
+      return NextResponse.json(
+        { error: company.emailMode === 'per_rep'
+          ? 'Your email account isn\'t connected yet — set it up under Settings → My account → My email SMTP.'
+          : 'Email is not configured for the company yet. Ask an admin to set up SMTP in Settings.' },
+        { status: 400 },
+      );
     }
 
-    // Dropbox Sign (formerly HelloSign) — send a signature request from a
-    // template. Auth is HTTP Basic with the API key as the username.
-    const dsRes = await fetch('https://api.hellosign.com/v3/signature_request/send_with_template', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        template_ids: [cfg.templateId],
-        subject: cfg.subject || 'Please sign your application',
-        message: body.message?.trim() || cfg.message || '',
-        signers: [{ role: cfg.signerRole, name: body.name.trim(), email_address: body.email.trim().toLowerCase() }],
-        test_mode: cfg.testMode ? 1 : 0,
-      }),
+    const firstName = titleCaseName(body.name.trim().split(/\s+/)[0] || body.name.trim());
+    const savedBody = (cfg.emailBody?.trim() || DEFAULT_BODY);
+    const note = body.message?.trim();
+    const emailText = [
+      `Hi ${firstName},`,
+      '',
+      savedBody,
+      '',
+      cfg.applicationUrl,
+      ...(note ? ['', note] : []),
+    ].join('\n');
+
+    const signature = (me?.emailSignature || me?.signatureLogoUrl || me?.signatureLink)
+      ? { text: me.emailSignature ?? '', logoDataUri: me.signatureLogoUrl ?? null, link: me.signatureLink ?? null }
+      : null;
+
+    const result = await sendGenericEmail({
+      smtp,
+      toEmail: body.email.trim().toLowerCase(),
+      ccEmails: [],
+      subject: `${company.name} Application`,
+      bodyNotes: emailText,
+      structuredFields: [],
+      attachments: [],
+      signature,
     });
-
-    const dsJson = await dsRes.json().catch(() => ({} as Record<string, unknown>));
-    if (!dsRes.ok) {
-      const msg = (dsJson as { error?: { error_msg?: string } })?.error?.error_msg
-        || `Dropbox Sign rejected the request (HTTP ${dsRes.status}).`;
-      return NextResponse.json({ error: msg }, { status: 502 });
+    if (!result.success) {
+      return NextResponse.json({ error: result.error || 'The email could not be sent.' }, { status: 502 });
     }
-    const sigId = (dsJson as { signature_request?: { signature_request_id?: string } })
-      ?.signature_request?.signature_request_id ?? null;
 
     const [row] = await db.insert(esignRequests).values({
       companyId: ctx.companyId,
-      recipientName: body.name.trim(),
+      recipientName: titleCaseName(body.name.trim()),
       recipientEmail: body.email.trim().toLowerCase(),
-      signatureRequestId: sigId,
+      signatureRequestId: null,
       status: 'sent',
       createdBy: ctx.user.id,
     }).returning();

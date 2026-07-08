@@ -365,6 +365,15 @@ export const deals = pgTable(
     // Total collected so far (drives the paydown tracker). Defaults handled in app.
     amountCollected: numeric('amount_collected', { precision: 14, scale: 2 }),
     renewalNotes: text('renewal_notes'),
+    // ---- Payment pause / temporary modification ----
+    // When a merchant's payments are paused, the deal shows a "Paused" state
+    // with the date. A temporary modified payment (amount + until date) can
+    // also be recorded, e.g. half-payments for 4 weeks.
+    paymentsPaused: boolean('payments_paused').notNull().default(false),
+    paymentsPausedAt: timestamp('payments_paused_at', { withTimezone: true }),
+    modifiedPaymentAmount: numeric('modified_payment_amount', { precision: 14, scale: 2 }),
+    modifiedPaymentUntil: timestamp('modified_payment_until', { withTimezone: true }),
+    paymentModificationNote: text('payment_modification_note'),
     // Funded-deal sub-status — only meaningful when status='funded'. Lets the
     // user mark a funded deal as 'active' (paying normally), 'refi_eligible'
     // (ready to renew), 'payment_issues' (struggling), or 'default' (stopped
@@ -1123,6 +1132,9 @@ export const esignConfig = pgTable('esign_config', {
   subject: varchar('subject', { length: 200 }),
   message: text('message'),
   testMode: boolean('test_mode').notNull().default(false),
+  // Link-based application flow: the URL reps send out + the saved email body.
+  applicationUrl: text('application_url'),
+  emailBody: text('email_body'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
