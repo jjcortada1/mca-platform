@@ -1,3 +1,30 @@
+# Update — July 2026 (round 19) — design-system overhaul
+
+**Zero functional change.** No API, database, permission, calculation, or
+workflow was touched — this round is purely the design system every screen
+is built from, so the whole app upgrades at once with no data risk.
+
+## What changed visually
+- **Navigation**: active items now carry a subtle accent rail (in your
+  company's color) + soft fill — you always know where you are at a glance.
+  The sidebar reads as a recessed rail; the content area reads as the page.
+- **Loading**: the bare "Loading…" text on Active Deals, Submissions,
+  Funders, Syndication, Bonuses, Funded Board, and Tasks is replaced with
+  **skeleton loaders** that hold the page's shape while data arrives.
+- **Toasts**: redesigned — neutral card, colored accent rail, proper
+  elevation, correct in dark mode, screen-reader announced.
+- **Status chips**: success/warning/destructive badges now render correctly
+  in dark mode (translucent tints instead of washed-out pastels).
+- **Empty states**: refined icon treatment + typography.
+- **Layout**: on large monitors the content column expands to 1440px so
+  data-dense tables breathe instead of squeezing; vertical rhythm tightened.
+
+This builds on the existing system (Inter type stack, shadow/motion tokens,
+refined buttons/inputs/cards/dialogs, premium login) — everything now runs
+through one consistent language.
+
+---
+
 # Update — July 2026 (round 18)
 
 ## Funded deals — pause payments

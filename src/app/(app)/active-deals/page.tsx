@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
-import { Card, CardContent, Button, Input, Textarea, Badge, PageHeader, EmptyState, Field, CurrencyInput, PercentInput } from '@/components/ui/primitives';
+import { Card, CardContent, Button, Input, Textarea, Badge, PageHeader, EmptyState, Field, CurrencyInput, PercentInput, TableSkeleton } from '@/components/ui/primitives';
 import { RepPicker } from '@/components/ui/rep-picker';
 import { exportCSV } from '@/lib/csv-export';
 import { useToast } from '@/components/toast';
@@ -538,7 +538,7 @@ export default function ActiveDealsPage() {
 
       {/* Table */}
       {loading ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Loading…</CardContent></Card>
+        <TableSkeleton />
       ) : filtered.length === 0 ? (
         <Card>
           <CardContent>

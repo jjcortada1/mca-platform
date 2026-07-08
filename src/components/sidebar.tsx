@@ -228,7 +228,10 @@ export function AppShell({
         <MobileTopBar user={user} branding={branding} onOpenMenu={() => setOpen(true)} />
 
         <main className="flex-1 overflow-auto">
-          <div className="max-w-[1280px] mx-auto px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-12">
+          {/* Content column: 1280 on laptops, up to 1440 on large monitors so
+              data-dense tables get room instead of squeezing. Vertical rhythm
+              tightened slightly (py-12 read as empty at the top of lists). */}
+          <div className="max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-9">
             {children}
           </div>
         </main>
@@ -294,7 +297,10 @@ function MobileTopBar({
    ============================================================ */
 export function Sidebar({ user, branding }: { user: SessionUser; branding: Branding }) {
   return (
-    <aside className="w-60 border-r border-border bg-muted/30 flex flex-col shrink-0 h-screen sticky top-0">
+    // Flat, slightly-recessed rail (Linear/Stripe style): a whisper darker
+    // than the canvas with a hairline divider — the content area reads as
+    // the "paper" and the nav recedes.
+    <aside className="w-60 border-r border-border bg-muted/40 flex flex-col shrink-0 h-screen sticky top-0">
       <SidebarBody user={user} branding={branding} />
     </aside>
   );

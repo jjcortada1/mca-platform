@@ -395,11 +395,13 @@ export function Badge({
   variant = 'default',
   ...props
 }: React.HTMLAttributes<HTMLDivElement> & { variant?: 'default' | 'success' | 'destructive' | 'warning' | 'outline' }) {
+  // Semantic chips hold up in BOTH themes: solid pastel fills in light mode,
+  // translucent tints in dark mode so they sit on dark cards without glare.
   const styles = {
     default: 'bg-muted text-muted-foreground',
-    success: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
-    destructive: 'bg-rose-50 text-rose-700 ring-1 ring-rose-200',
-    warning: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
+    success: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/25',
+    destructive: 'bg-rose-50 text-rose-700 ring-1 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:ring-rose-500/25',
+    warning: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/25',
     outline: 'bg-transparent text-foreground ring-1 ring-border',
   }[variant];
   return <span className={cn('badge-status', styles, className)} {...props} />;
@@ -415,6 +417,32 @@ export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivEl
       className={cn('animate-pulse rounded-md bg-muted', className)}
       {...props}
     />
+  );
+}
+
+/**
+ * TableSkeleton — the standard loading state for list pages. Shows a shimmer
+ * header bar + N ghost rows so the page keeps its shape while data loads
+ * (instead of a bare "Loading…" string). Row widths are staggered so the
+ * placeholder reads as content, not stripes.
+ */
+export function TableSkeleton({ rows = 6, className }: { rows?: number; className?: string }) {
+  const widths = ['w-[88%]', 'w-[72%]', 'w-[94%]', 'w-[65%]', 'w-[80%]', 'w-[70%]', 'w-[85%]', 'w-[60%]'];
+  return (
+    <div className={cn('rounded-xl border border-border bg-card overflow-hidden', className)} aria-busy="true" aria-label="Loading">
+      <div className="px-4 py-3 border-b border-border bg-muted/30">
+        <div className="shimmer h-3.5 w-48 rounded" />
+      </div>
+      <div className="divide-y divide-border/50">
+        {Array.from({ length: rows }).map((_, i) => (
+          <div key={i} className="px-4 py-3.5 flex items-center gap-4">
+            <div className="shimmer h-3.5 rounded flex-none w-24" />
+            <div className={cn('shimmer h-3.5 rounded', widths[i % widths.length])} />
+            <div className="shimmer h-3.5 rounded w-16 ml-auto flex-none" />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -436,15 +464,17 @@ export function EmptyState({
   className?: string;
 }) {
   return (
-    <div className={cn('flex flex-col items-center justify-center text-center py-12 px-6', className)}>
+    <div className={cn('flex flex-col items-center justify-center text-center py-14 px-6', className)}>
       {Icon && (
-        <div className="mb-4 rounded-full bg-muted p-3">
-          <Icon className="h-6 w-6 text-muted-foreground" />
+        // Layered icon well — soft fill + hairline ring reads as designed,
+        // not default. Muted so empty states recede rather than shout.
+        <div className="mb-4 rounded-2xl bg-muted/60 ring-1 ring-border p-3.5">
+          <Icon className="h-6 w-6 text-muted-foreground/80" />
         </div>
       )}
-      <div className="text-base font-medium">{title}</div>
-      {description && <div className="text-sm text-muted-foreground mt-1 max-w-sm">{description}</div>}
-      {action && <div className="mt-4">{action}</div>}
+      <div className="text-[15px] font-semibold tracking-tight">{title}</div>
+      {description && <div className="text-sm text-muted-foreground mt-1.5 max-w-sm leading-relaxed">{description}</div>}
+      {action && <div className="mt-5">{action}</div>}
     </div>
   );
 }

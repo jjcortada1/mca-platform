@@ -15,8 +15,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   PageHeader, Card, CardContent, Button, Input, Textarea, Field, Badge, EmptyState,
-  CurrencyInput, PercentInput, Select,
-} from '@/components/ui/primitives';
+  CurrencyInput, PercentInput, Select, TableSkeleton } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { useConfirm } from '@/components/confirm-provider';
 import { formatCurrency, cn } from '@/lib/utils';
@@ -323,7 +322,7 @@ export default function SyndicationPage() {
       </div>
 
       {loading ? (
-        <div className="text-sm text-muted-foreground">Loading…</div>
+        <TableSkeleton />
       ) : visible.length === 0 ? (
         <EmptyState
           icon={Handshake}

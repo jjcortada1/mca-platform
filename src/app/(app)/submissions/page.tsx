@@ -4,8 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   Card, CardContent,
-  Button, Badge, Textarea,
-} from '@/components/ui/primitives';
+  Button, Badge, Textarea, TableSkeleton } from '@/components/ui/primitives';
 import { formatDate, cn } from '@/lib/utils';
 import { Download, Send, PlusCircle } from 'lucide-react';
 import { exportCSV } from '@/lib/csv-export';
@@ -546,7 +545,7 @@ export default function SubmissionsPage() {
       )}
 
       {loading ? (
-        <div className="text-sm text-muted-foreground">Loading…</div>
+        <TableSkeleton />
       ) : filteredRows.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-sm text-muted-foreground">

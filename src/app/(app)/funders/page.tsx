@@ -3,8 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import {
   Card, CardContent,
-  Button, Input, Textarea, Field, Badge, PageHeader, MoneyInput,
-} from '@/components/ui/primitives';
+  Button, Input, Textarea, Field, Badge, PageHeader, MoneyInput, TableSkeleton } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { useConfirm } from '@/components/confirm-provider';
 import { US_STATES, COMMON_INDUSTRIES, CREDIT_TIER_OPTIONS } from '@/lib/constants';
@@ -278,7 +277,7 @@ export default function FundersPage() {
       </div>
 
       {loading ? (
-        <div className="text-sm text-muted-foreground">Loading…</div>
+        <TableSkeleton />
       ) : (
         <Card>
           <CardContent className="p-0">

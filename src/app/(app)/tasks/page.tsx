@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, Button, Input, Field, PageHeader, EmptyState } from '@/components/ui/primitives';
+import { Card, CardContent, Button, Input, Field, PageHeader, EmptyState, TableSkeleton } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { cn } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -176,7 +176,7 @@ export default function TasksPage() {
 
       {/* List */}
       {loading ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Loading…</CardContent></Card>
+        <TableSkeleton />
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={ClipboardList}

@@ -3,8 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Card, CardContent,
-  Button, Input, Field, PageHeader, EmptyState, MoneyInput,
-} from '@/components/ui/primitives';
+  Button, Input, Field, PageHeader, EmptyState, MoneyInput, TableSkeleton } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { useConfirm } from '@/components/confirm-provider';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
@@ -361,7 +360,7 @@ export default function FundedBoardPage() {
 
       {/* Production rows — one per rep */}
       {loading ? (
-        <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">Loading…</CardContent></Card>
+        <TableSkeleton />
       ) : repBoards.length === 0 ? (
         <Card>
           <CardContent>
