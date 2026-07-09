@@ -24,14 +24,17 @@ export async function GET() {
 
     if (c.emailMode === 'shared') {
       const cfg = c.smtpConfig as SmtpConfig | null;
+      // Only admins manage the shared config, so only admins get its
+      // host/user details — everyone else just learns whether it's set up.
+      const isAdmin = ctx.user.role === 'company_admin' || ctx.user.role === 'master_admin';
       return NextResponse.json({
         data: {
           mode: 'shared',
           hasConfig: !!cfg,
-          host: cfg?.host ?? '',
-          port: cfg?.port ?? 587,
-          user: cfg?.user ?? '',
-          from: cfg?.from ?? '',
+          host: isAdmin ? (cfg?.host ?? '') : '',
+          port: isAdmin ? (cfg?.port ?? 587) : 587,
+          user: isAdmin ? (cfg?.user ?? '') : '',
+          from: isAdmin ? (cfg?.from ?? '') : '',
         },
       });
     }

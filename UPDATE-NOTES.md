@@ -36,13 +36,29 @@
 - A collapsed section still shows the page you're currently on, so you never
   lose your place.
 
-## Security audit (backend, all API routes)
-- Swept every API endpoint for tenant isolation (company can't read another
-  company's data), ownership checks on mutations, and role/permission
-  enforcement — results and any fixes are in this round's summary message.
-- Worksheet endpoints re-verified: reorder and import validate sheet access
-  server-side (view-only rejected; overwrite and column changes owner-only;
-  row updates scoped to the sheet in the URL so foreign row ids are ignored).
+## Security audit (backend, all 101 API routes) — 4 issues found, all fixed
+- Swept every API endpoint for tenant isolation, ownership checks on
+  mutations, and role/permission enforcement. **No cross-company data leaks
+  found.** Four gaps were found and fixed in this update:
+- **Deal offers are now rep-scoped** (was the one real issue): the offers
+  endpoints only checked the company, so a rep who learned a teammate's deal
+  id (they're visible on the syndication board) could read, add, edit, or
+  delete that deal's offers. Offers now enforce the exact same rule as the
+  deal itself — you must be the assigned rep, their team leader, or an admin.
+- **Funded-board entries** now require the funded-board permission to post
+  (before, any login — even a lead source — could post), and the rep on an
+  entry is always validated as a member of your company.
+- **Funded email sending** now requires the same submit permission and
+  per-user rate limit as deal submissions (before, any authenticated user
+  could trigger sends through SMTP).
+- **Company SMTP details** (host/username) in shared-email mode are now
+  returned only to admins; other users just see whether email is configured.
+  Passwords were never exposed.
+- Confirmed safe (spot highlights): reps can't see other reps' deals,
+  submissions, or commissions; lead sources see only their own payout
+  figures; team leaders see only their team; all admin endpoints check role
+  server-side; backups strip password hashes and SMTP credentials; worksheet
+  sharing grants access to the one shared sheet and nothing else.
 
 ---
 

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
 import { deals, dealOffers } from '@/lib/db/schema';
-import { and, eq, desc, asc } from 'drizzle-orm';
+import { eq, asc } from 'drizzle-orm';
 import { z } from 'zod';
 import { requirePermission } from '@/lib/auth/context';
+import { ensureDealAccess } from '@/lib/auth/deal-access';
 import { apiError } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
@@ -17,16 +18,11 @@ export const revalidate = 0;
  *                                   read left-to-right chronologically)
  *   POST  /api/deals/[id]/offers  → add a new offer
  *
- * Ownership: only deals owned by the requester's company are accessible.
+ * Ownership: same rep/team scoping as the deal itself (ensureDealAccess) —
+ * having the permission flag isn't enough, the caller must be allowed to
+ * see THIS deal. Company-only checks here let any rep read/write a
+ * teammate's offers once they learned the deal id.
  */
-
-async function verifyOwnership(dealId: string, companyId: string) {
-  const [row] = await db.select({ id: deals.id })
-    .from(deals)
-    .where(and(eq(deals.id, dealId), eq(deals.companyId, companyId)))
-    .limit(1);
-  return !!row;
-}
 
 const createSchema = z.object({
   fundingAmount: z.union([z.coerce.number().nonnegative(), z.literal('')]).optional().nullable(),
@@ -54,9 +50,8 @@ function num(v: unknown): string | null {
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const ctx = await requirePermission('active_deals.view');
-    if (!(await verifyOwnership(params.id, ctx.companyId))) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    }
+    const access = await ensureDealAccess(ctx, params.id);
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
     const rows = await db.select().from(dealOffers)
       .where(eq(dealOffers.dealId, params.id))
       .orderBy(asc(dealOffers.createdAt));
@@ -67,9 +62,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const ctx = await requirePermission('active_deals.edit');
-    if (!(await verifyOwnership(params.id, ctx.companyId))) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    }
+    const access = await ensureDealAccess(ctx, params.id);
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
     const body = createSchema.parse(await req.json());
 
     // If this offer is being marked accepted, clear the flag on any other

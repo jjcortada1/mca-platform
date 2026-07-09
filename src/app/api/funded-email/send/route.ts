@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
 import { users, companies } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { requireTenantContext } from '@/lib/auth/context';
+import { requirePermission } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
+import { rateLimit } from '@/lib/api/rate-limit';
 import {
   sendGenericEmail, type EmailAttachment, type SmtpConfig, type StructuredField,
 } from '@/lib/email/smtp';
@@ -48,7 +49,17 @@ function sanitizeFilename(raw: string): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const ctx = await requireTenantContext();
+    // Same gate + throttle as /api/submissions/send — this endpoint sends
+    // outbound mail through the rep/company SMTP account, so a bare session
+    // must not be enough.
+    const ctx = await requirePermission('deals.submit');
+    const rl = rateLimit(`send:${ctx.user.id}`, { max: 20, windowMs: 60_000 });
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: `Too many sends. Try again in ${rl.retryAfterSec}s.` },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } }
+      );
+    }
 
     const fd = await req.formData();
     const toEmail = String(fd.get('toEmail') ?? '').trim();

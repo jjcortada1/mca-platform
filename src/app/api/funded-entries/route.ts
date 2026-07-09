@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
 import { fundedEntries, users } from '@/lib/db/schema';
 import { eq, and, desc, inArray } from 'drizzle-orm';
-import { requirePermission, requireTenantContext } from '@/lib/auth/context';
+import { requirePermission } from '@/lib/auth/context';
 import { fundedEntrySchema } from '@/lib/validation/schemas';
 import { apiError } from '@/lib/api/errors';
 import { fromDateInput } from '@/lib/dates';
@@ -47,20 +47,23 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const ctx = await requireTenantContext();
+    // Same permission as reading the board — before this, POST only needed a
+    // session, so even a lead-source login could write leaderboard entries.
+    const ctx = await requirePermission('funded_board.view');
     // Reps can post for themselves; admins can post for anyone in the company
     const body = fundedEntrySchema.parse(await req.json());
 
-    if (ctx.user.role === 'rep' && body.repId !== ctx.user.id) {
-      return NextResponse.json({ error: 'Reps can only log their own deals' }, { status: 403 });
+    const isAdmin = ctx.user.role === 'company_admin' || ctx.user.role === 'master_admin';
+    if (!isAdmin && body.repId !== ctx.user.id) {
+      return NextResponse.json({ error: 'You can only log your own deals' }, { status: 403 });
     }
 
-    // Verify repId belongs to current company (admin path)
-    if (ctx.user.role === 'company_admin') {
-      const [rep] = await db.select({ id: users.id }).from(users)
-        .where(and(eq(users.id, body.repId), eq(users.companyId, ctx.companyId))).limit(1);
-      if (!rep) return NextResponse.json({ error: 'Rep not in this company' }, { status: 400 });
-    }
+    // Verify repId belongs to the current company for EVERY caller — before,
+    // only the company_admin path checked, so other roles could attach an
+    // arbitrary (even cross-company) user id to an entry.
+    const [rep] = await db.select({ id: users.id }).from(users)
+      .where(and(eq(users.id, body.repId), eq(users.companyId, ctx.companyId))).limit(1);
+    if (!rep) return NextResponse.json({ error: 'Rep not in this company' }, { status: 400 });
 
     const [e] = await db.insert(fundedEntries).values({
       companyId: ctx.companyId,

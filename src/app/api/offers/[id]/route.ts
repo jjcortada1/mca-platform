@@ -4,6 +4,7 @@ import { deals, dealOffers } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { requirePermission } from '@/lib/auth/context';
+import { ensureDealAccess } from '@/lib/auth/deal-access';
 import { apiError } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,9 @@ export const revalidate = 0;
  *   PATCH  /api/offers/[id]   → partial update
  *   DELETE /api/offers/[id]   → remove the offer
  *
- * Ownership is checked by joining offer → deal → company.
+ * Ownership is checked by joining offer → deal → company, THEN applying the
+ * same rep/team scoping as the deal itself (ensureDealAccess) — a rep who
+ * knows a teammate's offer or deal id must not be able to edit it.
  */
 
 async function loadOfferOwnedBy(offerId: string, companyId: string) {
@@ -57,6 +60,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const ctx = await requirePermission('active_deals.edit');
     const owned = await loadOfferOwnedBy(params.id, ctx.companyId);
     if (!owned) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    const access = await ensureDealAccess(ctx, owned.dealId);
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
 
     const body = patchSchema.parse(await req.json());
 
@@ -104,6 +109,8 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     const ctx = await requirePermission('active_deals.edit');
     const owned = await loadOfferOwnedBy(params.id, ctx.companyId);
     if (!owned) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    const access = await ensureDealAccess(ctx, owned.dealId);
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
     await db.delete(dealOffers).where(eq(dealOffers.id, params.id));
     return NextResponse.json({ ok: true });
   } catch (e) { return apiError(e); }
