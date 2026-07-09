@@ -1133,8 +1133,9 @@ export const worksheets = pgTable(
     ownerUserId: uuid('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 200 }).notNull(),
-    // Column definitions: [{ id, label }] — fully user-customizable.
-    columns: jsonb('columns').$type<{ id: string; label: string }[]>().notNull().default(sql`'[]'::jsonb`),
+    // Column definitions: [{ id, label, width? }] — fully user-customizable;
+    // width (px) persists drag-resizing.
+    columns: jsonb('columns').$type<{ id: string; label: string; width?: number }[]>().notNull().default(sql`'[]'::jsonb`),
     sortOrder: integer('sort_order').notNull().default(0),
     isDeleted: boolean('is_deleted').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

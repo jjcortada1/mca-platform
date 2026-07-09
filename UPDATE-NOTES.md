@@ -1,3 +1,33 @@
+# Update — July 2026 (round 21) — Worksheets fixes
+
+## Saving is now bulletproof
+- Cell edits **auto-save as you type** (about half a second after you stop),
+  plus on blur and Enter. Saves always use the latest text — no more lost
+  entries.
+- If a save fails, you now **see an error toast** and your text stays on
+  screen for retry (before, failures were silent).
+- The background refresh **never runs while you have unsaved edits**, so it
+  can't wipe what you're typing.
+- Leaving the page flushes any pending edits on the way out.
+
+## Double-click to expand
+- **Double-click any cell** to open it in a large editor — read or edit the
+  full value without scrolling sideways. Works for view-only users too
+  (read-only view).
+
+## Resizable columns
+- **Drag the right edge of any column header** to resize it. On sheets you
+  own, widths are saved and everyone sees your layout.
+
+## Shared sheets — visibility fix
+- A rep at another company who was shared a sheet could open it from the
+  notification but then couldn't find it again: his company's feature-access
+  list was hiding the Worksheets tab. Worksheets is a personal, cross-company
+  feature, so it now **always shows in the sidebar** regardless of company
+  feature access.
+
+---
+
 # Update — July 2026 (round 20) — Worksheets
 
 ## Worksheets (new "Sheets" section in the sidebar)

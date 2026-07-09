@@ -31,6 +31,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   } catch (e) { return apiError(e); }
 }
 
+/**
+ * POST — same as PATCH. Exists because navigator.sendBeacon (used to flush
+ * unsaved edits when the user leaves the page) can only send POST.
+ */
+export const POST = PATCH;
+
 /** DELETE — remove a row. Owner or edit access. */
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string; rowId: string } }) {
   try {

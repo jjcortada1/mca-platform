@@ -34,7 +34,12 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
 const patchSchema = z.object({
   name: z.string().min(1).max(200).optional(),
-  columns: z.array(z.object({ id: z.string().min(1).max(40), label: z.string().min(1).max(120) })).max(30).optional(),
+  columns: z.array(z.object({
+    id: z.string().min(1).max(40),
+    label: z.string().min(1).max(120),
+    // Column width in px (drag-resizable in the UI). Optional; clamped.
+    width: z.number().int().min(60).max(1200).optional(),
+  })).max(30).optional(),
 });
 
 /** PATCH — rename / edit columns. Owner only. */

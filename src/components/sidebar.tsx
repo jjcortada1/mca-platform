@@ -409,9 +409,13 @@ function SidebarBody({
     savedOrder,
     // Visible when: the user has the permission (admins pass everything)
     // AND the feature is enabled for this company (platform-owner control).
+    // EXCEPTION: /worksheets is a PERSONAL, cross-company feature — sheets
+    // can be shared to users at other companies, so it must never disappear
+    // because of a company's feature-access list (a rep at another company
+    // couldn't find a sheet shared with him for exactly this reason).
     (item) =>
       (isAdmin || user.permissions.includes(item.perm)) &&
-      (enabledNavItems === null || enabledNavItems.includes(item.href)),
+      (item.href === '/worksheets' || enabledNavItems === null || enabledNavItems.includes(item.href)),
   );
 
   return (
