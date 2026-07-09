@@ -1,3 +1,51 @@
+# Update — July 2026 (round 22) — Enterprise round 1: Sheets behaviors, import, sidebar, security audit
+
+## Worksheets — drag rows to reorder
+- **Grab the grip icon** next to any row number and drag the row where you
+  want it (row 50 → row 3, etc.). The custom order **saves automatically**
+  and is what everyone the sheet is shared with sees. If the save fails you
+  get a toast so you know it may reset.
+
+## Worksheets — inline row expansion (replaces the pop-up)
+- **Double-click a row** (or click the chevron by its number) and it now
+  **expands directly beneath itself** — every column as a labeled field you
+  can edit, wide text included. Click the X, the chevron, or double-click
+  again to collapse it. No more pop-up dialog; you stay in the grid.
+
+## Worksheets — import from Google Sheets / Excel / CSV
+- New **Import** button on every sheet you can edit. Accepts `.xlsx`, `.xls`,
+  `.csv`, `.tsv`, `.ods` — export your Google Sheet as Excel or CSV and drop
+  it in.
+- **Column mapping with preview**: file columns are auto-matched to your
+  sheet's columns by name; unmatched ones default to "Add as new column"
+  (owners) and you can remap or skip any column before importing. First five
+  rows preview so you can sanity-check.
+- Multi-tab files: **pick which tab** to import. Toggle whether the first
+  row is column names or data.
+- **Append or overwrite**: append adds below your existing rows (default,
+  nothing touched); overwrite replaces this sheet's rows only — owner-only,
+  with an explicit confirm, and it can never touch anything outside the one
+  sheet. Row and column **order from the file is preserved** exactly.
+- Limits for safety: 2,000 rows per import (split bigger files), 4,000
+  characters per cell.
+
+## Sidebar — collapsible sections that remember
+- **Click any section header** (Workflow, Commissions, Sheets, Resources…)
+  to collapse or expand it. Your choices are **remembered per browser**, so
+  the nav opens exactly how you left it.
+- A collapsed section still shows the page you're currently on, so you never
+  lose your place.
+
+## Security audit (backend, all API routes)
+- Swept every API endpoint for tenant isolation (company can't read another
+  company's data), ownership checks on mutations, and role/permission
+  enforcement — results and any fixes are in this round's summary message.
+- Worksheet endpoints re-verified: reorder and import validate sheet access
+  server-side (view-only rejected; overwrite and column changes owner-only;
+  row updates scoped to the sheet in the URL so foreign row ids are ignored).
+
+---
+
 # Update — July 2026 (round 21) — Worksheets fixes
 
 ## Saving is now bulletproof

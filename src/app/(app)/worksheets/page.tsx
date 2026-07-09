@@ -8,14 +8,17 @@
  *    (700ms); blur and Enter save immediately. Saves read the LATEST state
  *    via a ref, never a render-time closure.
  *  - Failed saves show an error toast and keep the row dirty for retry.
- *  - The background auto-refresh NEVER runs while any row is dirty or a
- *    save is in flight, so it can't clobber unsaved edits.
+ *  - The background auto-refresh NEVER runs while any row is dirty, a save
+ *    is in flight, or a drag is in progress, so it can't clobber edits.
  *
- * UX: double-click any cell to expand it into a large editor (see the whole
- * value without scrolling). Column edges drag to resize; widths persist on
- * sheets you own.
+ * Sheets behaviors:
+ *  - Drag the grip on a row number to reorder rows; the order persists.
+ *  - Double-click a row (or click its chevron) to expand it INLINE beneath
+ *    itself — every column as a labeled field — and collapse it again.
+ *  - Import from Google Sheets / Excel / CSV with column mapping and
+ *    append-or-overwrite modes. Column edges drag to resize.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PageHeader, Card, Button, Input, Field, Badge, EmptyState, TableSkeleton, Select, Textarea,
 } from '@/components/ui/primitives';
@@ -24,7 +27,8 @@ import { useConfirm } from '@/components/confirm-provider';
 import { useAutoRefresh } from '@/lib/use-auto-refresh';
 import { cn } from '@/lib/utils';
 import {
-  Plus, Table2, Share2, Settings2, Trash2, X, ChevronUp, ChevronDown, Users as UsersIcon,
+  Plus, Table2, Share2, Settings2, Trash2, X, ChevronUp, ChevronDown, ChevronRight,
+  Users as UsersIcon, GripVertical, Upload, FileSpreadsheet,
 } from 'lucide-react';
 
 interface Col { id: string; label: string; width?: number }
@@ -34,9 +38,25 @@ interface SheetDetail { id: string; name: string; columns: Col[]; myRole: 'owner
 interface ShareRow { id: string; email: string; role: string }
 
 const DEFAULT_COL_WIDTH = 170;
+const MAX_IMPORT_ROWS = 2000;
 
 function newColId() {
   return 'c_' + Math.random().toString(36).slice(2, 8);
+}
+function normLabel(s: string) {
+  return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/** Parsed state for the import flow (file already read client-side). */
+interface ImportDraft {
+  fileName: string;
+  sheetNames: string[];
+  sheetName: string;
+  hasHeader: boolean;
+  grid: string[][];
+  /** file column index -> sheet column id, '__new__', or '__skip__' */
+  mapping: Record<number, string>;
+  mode: 'append' | 'overwrite';
 }
 
 export default function WorksheetsPage() {
@@ -58,8 +78,21 @@ export default function WorksheetsPage() {
   const [colDraft, setColDraft] = useState<Col[]>([]);
   const [sheetNameDraft, setSheetNameDraft] = useState('');
 
-  // Expanded-cell editor (double-click a cell)
-  const [expandedCell, setExpandedCell] = useState<{ rowId: string; colId: string } | null>(null);
+  // Inline row expansion (double-click a row, or its chevron)
+  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+
+  // Import flow
+  const [importDraft, setImportDraft] = useState<ImportDraft | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [parsingFile, setParsingFile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const workbookRef = useRef<any>(null); // XLSX.WorkBook of the picked file
+  const xlsxRef = useRef<any>(null); // the dynamically-imported xlsx module
+
+  // Drag-to-reorder
+  const dragFromRef = useRef<number | null>(null);
+  const [dragArmed, setDragArmed] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
 
   // ---- Refs that make saving race-proof ----
   const activeIdRef = useRef<string | null>(null);
@@ -110,7 +143,7 @@ export default function WorksheetsPage() {
   useEffect(() => { loadList(true); }, [loadList]);
   useEffect(() => {
     if (activeId) {
-      setShowShare(false); setShowColumns(false); setExpandedCell(null);
+      setShowShare(false); setShowColumns(false); setExpandedRowId(null); setImportDraft(null);
       dirtyRowsRef.current.clear();
       loadSheet(activeId);
     } else {
@@ -118,9 +151,9 @@ export default function WorksheetsPage() {
     }
   }, [activeId, loadSheet]);
 
-  // Background sync — paused entirely while anything is dirty or saving.
+  // Background sync — paused entirely while anything is dirty, saving, or dragging.
   useAutoRefresh(() => {
-    if (dirtyRowsRef.current.size > 0 || savingRef.current > 0) return;
+    if (dirtyRowsRef.current.size > 0 || savingRef.current > 0 || dragFromRef.current !== null) return;
     loadList();
     if (activeIdRef.current) loadSheet(activeIdRef.current, true);
   }, { intervalMs: 45_000 });
@@ -252,7 +285,59 @@ export default function WorksheetsPage() {
     const res = await fetch(`/api/worksheets/${detail.id}/rows/${rowId}`, { method: 'DELETE' });
     if (res.ok) {
       dirtyRowsRef.current.delete(rowId);
+      if (expandedRowId === rowId) setExpandedRowId(null);
       setDetail((d) => d ? { ...d, rows: d.rows.filter((r) => r.id !== rowId) } : d);
+    }
+  }
+
+  /* ---------- drag-to-reorder rows ---------- */
+
+  function onRowDragStart(e: React.DragEvent, index: number) {
+    dragFromRef.current = index;
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', String(index)); } catch { /* older browsers */ }
+  }
+
+  function onRowDragOver(e: React.DragEvent, index: number) {
+    if (dragFromRef.current === null) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOver !== index) setDragOver(index);
+  }
+
+  function onRowDragEnd() {
+    dragFromRef.current = null;
+    setDragArmed(null);
+    setDragOver(null);
+  }
+
+  async function onRowDrop(e: React.DragEvent, index: number) {
+    e.preventDefault();
+    const from = dragFromRef.current;
+    onRowDragEnd();
+    const d = detailRef.current;
+    if (from === null || from === index || !d) return;
+    const rows = [...d.rows];
+    const [moved] = rows.splice(from, 1);
+    rows.splice(index, 0, moved);
+    setDetail((cur) => cur ? { ...cur, rows } : cur);
+    // Persist the full order — GET returns rows by sort_order, so this
+    // sticks for everyone the sheet is shared with.
+    savingRef.current += 1;
+    try {
+      const res = await fetch(`/api/worksheets/${d.id}/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rowIds: rows.map((r) => r.id) }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        toast.error(j.error || 'Could not save the new row order — it may reset on refresh.');
+      }
+    } catch {
+      toast.error('Network error saving the row order — it may reset on refresh.');
+    } finally {
+      savingRef.current -= 1;
     }
   }
 
@@ -298,6 +383,7 @@ export default function WorksheetsPage() {
     if (!detail) return;
     setShowShare((v) => !v);
     setShowColumns(false);
+    setImportDraft(null);
     const res = await fetch(`/api/worksheets/${detail.id}/shares`, { cache: 'no-store' });
     const j = await res.json();
     if (res.ok) setShares(j.data ?? []);
@@ -334,6 +420,7 @@ export default function WorksheetsPage() {
     if (!detail) return;
     setShowColumns((v) => !v);
     setShowShare(false);
+    setImportDraft(null);
     setColDraft(detail.columns.map((c) => ({ ...c })));
   }
 
@@ -355,28 +442,182 @@ export default function WorksheetsPage() {
     loadList();
   }
 
+  /* ---------- import from Google Sheets / Excel / CSV ---------- */
+
+  async function handleImportFile(file: File) {
+    if (!detail) return;
+    setParsingFile(true);
+    try {
+      const XLSX = await import('xlsx');
+      xlsxRef.current = XLSX;
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      workbookRef.current = wb;
+      const sheetNames = wb.SheetNames ?? [];
+      if (!sheetNames.length) { toast.error('That file has no sheets in it.'); return; }
+      const draft = buildDraftForSheet(wb, sheetNames[0], true, file.name, sheetNames);
+      if (!draft) { toast.error('That sheet looks empty — nothing to import.'); return; }
+      setImportDraft(draft);
+      setShowShare(false); setShowColumns(false);
+    } catch {
+      toast.error('Could not read that file. Export it as .xlsx or .csv and try again.');
+    } finally {
+      setParsingFile(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
+  /** Parse one tab of the workbook into a grid + an auto column mapping. */
+  function buildDraftForSheet(
+    wb: any, sheetName: string, hasHeader: boolean, fileName: string, sheetNames: string[]
+  ): ImportDraft | null {
+    const d = detailRef.current;
+    if (!d || !xlsxRef.current) return null;
+    const ws = wb.Sheets[sheetName];
+    if (!ws) return null;
+    // sheet_to_json with header:1 → array-of-arrays; raw:false keeps dates
+    // and numbers as the formatted text the user sees in Sheets/Excel.
+    const grid: string[][] = xlsxRef.current.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' })
+      .map((r: any[]) => r.map((v) => (v == null ? '' : String(v))));
+    if (!grid.length) return null;
+    return {
+      fileName, sheetNames, sheetName, hasHeader, grid,
+      mapping: buildAutoMapping(grid, hasHeader, d.columns, d.myRole === 'owner'),
+      mode: 'append',
+    };
+  }
+
+  /** Match file headers to sheet columns by name; unmatched become new columns (owner) or are skipped. */
+  function buildAutoMapping(grid: string[][], hasHeader: boolean, cols: Col[], owner: boolean): Record<number, string> {
+    const width = Math.max(...grid.map((r) => r.length), 0);
+    const headers = hasHeader ? (grid[0] ?? []) : [];
+    const byLabel = new Map(cols.map((c) => [normLabel(c.label), c.id]));
+    const used = new Set<string>();
+    const mapping: Record<number, string> = {};
+    for (let i = 0; i < width; i++) {
+      const h = normLabel(headers[i] ?? '');
+      const match = h && byLabel.get(h);
+      if (match && !used.has(match)) {
+        mapping[i] = match;
+        used.add(match);
+      } else if (owner) {
+        mapping[i] = '__new__';
+      } else {
+        // Editors can't add columns; fall back to unclaimed columns in order.
+        const free = cols.find((c) => !used.has(c.id));
+        if (free && !hasHeader) { mapping[i] = free.id; used.add(free.id); }
+        else mapping[i] = '__skip__';
+      }
+    }
+    return mapping;
+  }
+
+  function switchImportSheet(sheetName: string) {
+    const wb = workbookRef.current;
+    const cur = importDraft;
+    if (!wb || !cur) return;
+    const draft = buildDraftForSheet(wb, sheetName, cur.hasHeader, cur.fileName, cur.sheetNames);
+    if (draft) setImportDraft({ ...draft, mode: cur.mode });
+    else toast.error('That tab looks empty.');
+  }
+
+  function toggleImportHeader(hasHeader: boolean) {
+    const cur = importDraft;
+    const d = detailRef.current;
+    if (!cur || !d) return;
+    setImportDraft({
+      ...cur, hasHeader,
+      mapping: buildAutoMapping(cur.grid, hasHeader, d.columns, d.myRole === 'owner'),
+    });
+  }
+
+  const importStats = useMemo(() => {
+    if (!importDraft || !detail) return null;
+    const dataRows = importDraft.hasHeader ? importDraft.grid.slice(1) : importDraft.grid;
+    const width = Math.max(...importDraft.grid.map((r) => r.length), 0);
+    const mappedIdx = Array.from({ length: width }, (_, i) => i)
+      .filter((i) => importDraft.mapping[i] && importDraft.mapping[i] !== '__skip__');
+    const nonEmpty = dataRows.filter((r) => mappedIdx.some((i) => (r[i] ?? '').trim() !== ''));
+    const newCols = mappedIdx.filter((i) => importDraft.mapping[i] === '__new__').length;
+    return { width, dataRows, nonEmpty, mappedCount: mappedIdx.length, newCols };
+  }, [importDraft, detail]);
+
+  async function runImport() {
+    const d = detailRef.current;
+    if (!d || !importDraft || !importStats) return;
+    if (!importStats.mappedCount) { toast.error('Map at least one column before importing.'); return; }
+    if (!importStats.nonEmpty.length) { toast.error('No rows with data to import.'); return; }
+    if (importStats.nonEmpty.length > MAX_IMPORT_ROWS) {
+      toast.error(`That's ${importStats.nonEmpty.length.toLocaleString()} rows — the limit per import is ${MAX_IMPORT_ROWS.toLocaleString()}. Split the file and import in parts.`);
+      return;
+    }
+    if (importDraft.mode === 'overwrite') {
+      const ok = await confirm({
+        title: 'Overwrite this sheet\'s rows?',
+        description: `All ${d.rows.length} existing row${d.rows.length === 1 ? '' : 's'} on "${d.name}" will be replaced by the ${importStats.nonEmpty.length} imported row${importStats.nonEmpty.length === 1 ? '' : 's'}. Only this sheet is affected — nothing else in the system is touched.`,
+        confirmLabel: 'Overwrite rows',
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+
+    // Build new columns (owner only) and the index→column-id mapping.
+    const headers = importDraft.hasHeader ? (importDraft.grid[0] ?? []) : [];
+    const finalMap: Record<number, string> = {};
+    const newCols: Col[] = [];
+    for (let i = 0; i < importStats.width; i++) {
+      const m = importDraft.mapping[i];
+      if (!m || m === '__skip__') continue;
+      if (m === '__new__') {
+        const id = newColId();
+        newCols.push({ id, label: (headers[i] ?? '').trim() || `Column ${i + 1}` });
+        finalMap[i] = id;
+      } else {
+        finalMap[i] = m;
+      }
+    }
+    const columnsPayload = newCols.length
+      ? [...d.columns.map((c) => ({ id: c.id, label: c.label, ...(c.width ? { width: Math.round(c.width) } : {}) })), ...newCols]
+      : undefined;
+
+    const rowsPayload = importStats.nonEmpty.map((r) => {
+      const cells: Record<string, string> = {};
+      for (const [idxStr, colId] of Object.entries(finalMap)) {
+        const v = (r[Number(idxStr)] ?? '').toString().slice(0, 4000);
+        if (v !== '') cells[colId] = v;
+      }
+      return cells;
+    });
+
+    setImporting(true);
+    try {
+      const res = await fetch(`/api/worksheets/${d.id}/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: importDraft.mode, ...(columnsPayload ? { columns: columnsPayload } : {}), rows: rowsPayload }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(j.error || 'Import failed — nothing was changed.'); return; }
+      toast.success(`Imported ${rowsPayload.length.toLocaleString()} row${rowsPayload.length === 1 ? '' : 's'} from ${importDraft.fileName}.`);
+      setImportDraft(null);
+      workbookRef.current = null;
+      await loadSheet(d.id);
+      loadList();
+    } catch {
+      toast.error('Network error during import — check the sheet before retrying.');
+    } finally {
+      setImporting(false);
+    }
+  }
+
   const ownSheets = useMemo(() => sheets.filter((s) => s.myRole === 'owner'), [sheets]);
   const sharedSheets = useMemo(() => sheets.filter((s) => s.myRole !== 'owner'), [sheets]);
-
-  // Expanded-cell context (for the dialog)
-  const expandedCtx = useMemo(() => {
-    if (!expandedCell || !detail) return null;
-    const row = detail.rows.find((r) => r.id === expandedCell.rowId);
-    const col = detail.columns.find((c) => c.id === expandedCell.colId);
-    if (!row || !col) return null;
-    return { row, col };
-  }, [expandedCell, detail]);
-
-  function closeExpanded() {
-    if (expandedCell && canEdit) saveRowNow(expandedCell.rowId);
-    setExpandedCell(null);
-  }
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Worksheets"
-        description="Your own sheets for tracking outside and co-brokered deals — completely separate from your funded deals and volume. Double-click a cell to expand it; drag column edges to resize."
+        description="Your own sheets for tracking outside and co-brokered deals — completely separate from your funded deals and volume. Drag the grip to reorder rows, double-click a row to expand it, drag column edges to resize."
         actions={<Button onClick={createSheet}><Plus className="h-4 w-4" /> New sheet</Button>}
       />
 
@@ -433,6 +674,20 @@ export default function WorksheetsPage() {
                 )}
                 <span className="text-xs text-muted-foreground">{detail.rows.length} row{detail.rows.length === 1 ? '' : 's'}</span>
                 <div className="ml-auto flex items-center gap-1.5">
+                  {canEdit && (
+                    <>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".xlsx,.xls,.csv,.tsv,.ods"
+                        className="hidden"
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportFile(f); }}
+                      />
+                      <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={parsingFile}>
+                        <Upload className="h-3.5 w-3.5" /> {parsingFile ? 'Reading…' : 'Import'}
+                      </Button>
+                    </>
+                  )}
                   {isOwner && (
                     <>
                       <Button size="sm" variant="outline" onClick={openShare}>
@@ -448,6 +703,102 @@ export default function WorksheetsPage() {
                   )}
                 </div>
               </div>
+
+              {/* Import panel */}
+              {importDraft && importStats && canEdit && (
+                <Card className="p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold">
+                    <FileSpreadsheet className="h-4 w-4 text-primary" /> Import “{importDraft.fileName}”
+                    <button onClick={() => { setImportDraft(null); workbookRef.current = null; }} className="ml-auto p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground" title="Cancel import">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2">
+                    {importDraft.sheetNames.length > 1 && (
+                      <Field label="Tab" className="w-[180px]">
+                        <Select className="h-9" value={importDraft.sheetName} onChange={(e) => switchImportSheet(e.target.value)}>
+                          {importDraft.sheetNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                        </Select>
+                      </Field>
+                    )}
+                    <Field label="First row" className="w-[170px]">
+                      <Select className="h-9" value={importDraft.hasHeader ? 'header' : 'data'} onChange={(e) => toggleImportHeader(e.target.value === 'header')}>
+                        <option value="header">Column names</option>
+                        <option value="data">Data (no header)</option>
+                      </Select>
+                    </Field>
+                    <Field label="Mode" className="w-[220px]">
+                      <Select
+                        className="h-9"
+                        value={importDraft.mode}
+                        onChange={(e) => setImportDraft({ ...importDraft, mode: e.target.value as 'append' | 'overwrite' })}
+                      >
+                        <option value="append">Append below existing rows</option>
+                        {isOwner && <option value="overwrite">Overwrite existing rows</option>}
+                      </Select>
+                    </Field>
+                  </div>
+
+                  {/* Column mapping + preview */}
+                  <div className="overflow-x-auto rounded-lg border border-border">
+                    <table className="text-xs border-collapse" style={{ width: 'max-content', minWidth: '100%' }}>
+                      <thead>
+                        <tr className="bg-muted/40 border-b border-border">
+                          {Array.from({ length: importStats.width }, (_, i) => (
+                            <th key={i} className="px-2 py-2 text-left font-medium border-l border-border/50 first:border-l-0 min-w-[150px] align-top">
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 truncate max-w-[180px]">
+                                {importDraft.hasHeader ? ((importDraft.grid[0]?.[i] ?? '').trim() || `Column ${i + 1}`) : `Column ${i + 1}`}
+                              </div>
+                              <Select
+                                className="h-7 text-xs w-full max-w-[180px]"
+                                value={importDraft.mapping[i] ?? '__skip__'}
+                                onChange={(e) => setImportDraft({ ...importDraft, mapping: { ...importDraft.mapping, [i]: e.target.value } })}
+                              >
+                                {detail.columns.map((c) => <option key={c.id} value={c.id}>→ {c.label}</option>)}
+                                {isOwner && <option value="__new__">＋ Add as new column</option>}
+                                <option value="__skip__">Skip this column</option>
+                              </Select>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/50">
+                        {importStats.dataRows.slice(0, 5).map((r, ri) => (
+                          <tr key={ri}>
+                            {Array.from({ length: importStats.width }, (_, i) => (
+                              <td key={i} className={cn(
+                                'px-2 py-1.5 border-l border-border/40 first:border-l-0 max-w-[200px] truncate',
+                                (importDraft.mapping[i] ?? '__skip__') === '__skip__' && 'opacity-40 line-through'
+                              )}>
+                                {r[i] ?? ''}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                    <span>
+                      <span className="font-semibold text-foreground">{importStats.nonEmpty.length.toLocaleString()}</span> row{importStats.nonEmpty.length === 1 ? '' : 's'} with data
+                      {importStats.dataRows.length > importStats.nonEmpty.length && ` (${(importStats.dataRows.length - importStats.nonEmpty.length).toLocaleString()} empty skipped)`}
+                    </span>
+                    <span>{importStats.mappedCount} of {importStats.width} columns mapped{importStats.newCols > 0 && ` · ${importStats.newCols} new column${importStats.newCols === 1 ? '' : 's'} will be added`}</span>
+                    <span>
+                      {importDraft.mode === 'append'
+                        ? `Will be added after your ${detail.rows.length} existing row${detail.rows.length === 1 ? '' : 's'}.`
+                        : `Will REPLACE all ${detail.rows.length} existing row${detail.rows.length === 1 ? '' : 's'} on this sheet.`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" onClick={runImport} disabled={importing}>
+                      <Upload className="h-3.5 w-3.5" /> {importing ? 'Importing…' : `Import ${importStats.nonEmpty.length.toLocaleString()} rows`}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setImportDraft(null); workbookRef.current = null; }}>Cancel</Button>
+                  </div>
+                </Card>
+              )}
 
               {/* Share panel */}
               {showShare && isOwner && (
@@ -546,7 +897,7 @@ export default function WorksheetsPage() {
                   <table className="text-sm border-collapse" style={{ width: 'max-content', minWidth: '100%' }}>
                     <thead>
                       <tr className="bg-muted/40 border-b border-border">
-                        <th className="w-9 px-2 py-2 text-left text-[10px] font-semibold text-muted-foreground">#</th>
+                        <th className="w-[52px] px-2 py-2 text-left text-[10px] font-semibold text-muted-foreground">#</th>
                         {detail.columns.map((c) => (
                           <th
                             key={c.id}
@@ -567,46 +918,118 @@ export default function WorksheetsPage() {
                     </thead>
                     <tbody className="divide-y divide-border/50">
                       {detail.rows.map((row, ri) => (
-                        <tr key={row.id} className="group hover:bg-muted/20">
-                          <td className="px-2 py-1 text-[11px] text-muted-foreground tabular-nums">{ri + 1}</td>
-                          {detail.columns.map((c) => (
-                            <td
-                              key={c.id}
-                              className="border-l border-border/40 p-0 align-top"
-                              style={{ width: c.width ?? DEFAULT_COL_WIDTH, maxWidth: c.width ?? DEFAULT_COL_WIDTH }}
-                              onDoubleClick={() => setExpandedCell({ rowId: row.id, colId: c.id })}
-                              title="Double-click to expand"
-                            >
-                              {canEdit ? (
-                                <input
-                                  value={row.cells[c.id] ?? ''}
-                                  onChange={(e) => setCell(row.id, c.id, e.target.value)}
-                                  onBlur={() => saveRowNow(row.id)}
-                                  onKeyDown={(e) => { if (e.key === 'Enter') saveRowNow(row.id); }}
-                                  className="w-full bg-transparent px-2.5 py-1.5 text-[13px] outline-none focus:bg-primary/[0.04] focus:ring-1 focus:ring-inset focus:ring-ring/40 tabular-nums truncate"
-                                />
-                              ) : (
-                                <div className="px-2.5 py-1.5 text-[13px] tabular-nums truncate">{row.cells[c.id] ?? ''}</div>
+                        <Fragment key={row.id}>
+                          <tr
+                            className={cn(
+                              'group hover:bg-muted/20 transition-colors',
+                              expandedRowId === row.id && 'bg-primary/[0.04]',
+                              dragOver === ri && dragFromRef.current !== null && dragFromRef.current !== ri && 'bg-primary/10'
+                            )}
+                            draggable={canEdit && dragArmed === ri}
+                            onDragStart={(e) => onRowDragStart(e, ri)}
+                            onDragOver={(e) => onRowDragOver(e, ri)}
+                            onDrop={(e) => onRowDrop(e, ri)}
+                            onDragEnd={onRowDragEnd}
+                            onDoubleClick={() => setExpandedRowId((v) => v === row.id ? null : row.id)}
+                          >
+                            <td className="px-1 py-1 text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">
+                              <span className="inline-flex items-center gap-0.5">
+                                {canEdit && (
+                                  <span
+                                    onMouseDown={() => setDragArmed(ri)}
+                                    onMouseUp={() => setDragArmed(null)}
+                                    title="Drag to reorder"
+                                    className="cursor-grab active:cursor-grabbing p-0.5 rounded text-muted-foreground/40 group-hover:text-muted-foreground hover:bg-muted"
+                                  >
+                                    <GripVertical className="h-3.5 w-3.5" />
+                                  </span>
+                                )}
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setExpandedRowId((v) => v === row.id ? null : row.id); }}
+                                  title={expandedRowId === row.id ? 'Collapse row' : 'Expand row'}
+                                  className="p-0.5 rounded hover:bg-muted text-muted-foreground/50 group-hover:text-muted-foreground"
+                                >
+                                  <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', expandedRowId === row.id && 'rotate-90')} />
+                                </button>
+                                {ri + 1}
+                              </span>
+                            </td>
+                            {detail.columns.map((c) => (
+                              <td
+                                key={c.id}
+                                className="border-l border-border/40 p-0 align-top"
+                                style={{ width: c.width ?? DEFAULT_COL_WIDTH, maxWidth: c.width ?? DEFAULT_COL_WIDTH }}
+                                title="Double-click to expand the row"
+                              >
+                                {canEdit ? (
+                                  <input
+                                    value={row.cells[c.id] ?? ''}
+                                    onChange={(e) => setCell(row.id, c.id, e.target.value)}
+                                    onBlur={() => saveRowNow(row.id)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') saveRowNow(row.id); }}
+                                    className="w-full bg-transparent px-2.5 py-1.5 text-[13px] outline-none focus:bg-primary/[0.04] focus:ring-1 focus:ring-inset focus:ring-ring/40 tabular-nums truncate"
+                                  />
+                                ) : (
+                                  <div className="px-2.5 py-1.5 text-[13px] tabular-nums truncate">{row.cells[c.id] ?? ''}</div>
+                                )}
+                              </td>
+                            ))}
+                            <td className="px-1 py-1 text-center">
+                              {canEdit && (
+                                <button
+                                  onClick={() => deleteRow(row.id)}
+                                  className="p-1 rounded text-muted-foreground/0 group-hover:text-muted-foreground hover:!text-rose-500 hover:bg-muted transition-colors"
+                                  title="Delete row"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
                               )}
                             </td>
-                          ))}
-                          <td className="px-1 py-1 text-center">
-                            {canEdit && (
-                              <button
-                                onClick={() => deleteRow(row.id)}
-                                className="p-1 rounded text-muted-foreground/0 group-hover:text-muted-foreground hover:!text-rose-500 hover:bg-muted transition-colors"
-                                title="Delete row"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </td>
-                        </tr>
+                          </tr>
+                          {/* Inline expansion — the row opens directly beneath itself. */}
+                          {expandedRowId === row.id && (
+                            <tr className="bg-muted/[0.15]">
+                              <td colSpan={detail.columns.length + 2} className="p-0 border-l-2 border-l-primary/70">
+                                <div className="px-4 py-3 animate-row-expand">
+                                  <div className="flex items-center justify-between mb-2.5">
+                                    <div className="text-xs font-semibold text-muted-foreground">Row {ri + 1}</div>
+                                    <button
+                                      onClick={() => { if (canEdit) saveRowNow(row.id); setExpandedRowId(null); }}
+                                      className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
+                                      title="Collapse row"
+                                    >
+                                      <X className="h-4 w-4" />
+                                    </button>
+                                  </div>
+                                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                    {detail.columns.map((c) => (
+                                      <Field key={c.id} label={c.label}>
+                                        {canEdit ? (
+                                          <Textarea
+                                            rows={2}
+                                            value={row.cells[c.id] ?? ''}
+                                            onChange={(e) => setCell(row.id, c.id, e.target.value)}
+                                            onBlur={() => saveRowNow(row.id)}
+                                            className="text-[13px] leading-relaxed min-h-[52px]"
+                                          />
+                                        ) : (
+                                          <div className="text-[13px] leading-relaxed whitespace-pre-wrap rounded-lg border border-border bg-card px-3 py-2 min-h-[40px]">
+                                            {row.cells[c.id] || <span className="text-muted-foreground">—</span>}
+                                          </div>
+                                        )}
+                                      </Field>
+                                    ))}
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       ))}
                       {detail.rows.length === 0 && (
                         <tr>
                           <td colSpan={detail.columns.length + 2} className="px-4 py-8 text-center text-sm text-muted-foreground">
-                            {canEdit ? 'Empty sheet — add your first row.' : 'This sheet is empty.'}
+                            {canEdit ? 'Empty sheet — add your first row, or use Import to bring in a spreadsheet.' : 'This sheet is empty.'}
                           </td>
                         </tr>
                       )}
@@ -625,48 +1048,6 @@ export default function WorksheetsPage() {
             </div>
           )}
         </>
-      )}
-
-      {/* Expanded-cell editor — double-click any cell to see/edit the whole
-          value without horizontal scrolling. Saves on close. */}
-      {expandedCtx && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-          onClick={closeExpanded}
-        >
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-fade-in" />
-          <div
-            className="relative bg-card rounded-xl border border-border max-w-lg w-full p-5 space-y-3 animate-modal-in [box-shadow:var(--shadow-xl)]"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-          >
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold">{expandedCtx.col.label}</div>
-              <button onClick={closeExpanded} className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            {canEdit ? (
-              <Textarea
-                autoFocus
-                rows={7}
-                value={expandedCtx.row.cells[expandedCtx.col.id] ?? ''}
-                onChange={(e) => setCell(expandedCtx.row.id, expandedCtx.col.id, e.target.value)}
-                className="text-sm leading-relaxed"
-              />
-            ) : (
-              <div className="text-sm leading-relaxed whitespace-pre-wrap max-h-[50vh] overflow-y-auto rounded-lg border border-border bg-muted/20 px-3 py-2.5">
-                {expandedCtx.row.cells[expandedCtx.col.id] || <span className="text-muted-foreground">Empty</span>}
-              </div>
-            )}
-            {canEdit && (
-              <div className="flex justify-end">
-                <Button size="sm" onClick={closeExpanded}>Done</Button>
-              </div>
-            )}
-          </div>
-        </div>
       )}
     </div>
   );

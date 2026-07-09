@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import {
   ShoppingBag, Send, Inbox, Briefcase, Users, TrendingUp, Calculator, BookOpen, FileText,
   Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle, ClipboardList, Search,
-  Handshake, Gift, FileSignature, Table2,
+  Handshake, Gift, FileSignature, Table2, ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { GlobalSearch } from '@/components/global-search';
@@ -333,6 +333,28 @@ function SidebarBody({
   const isAdmin = user.role === 'company_admin' || user.role === 'master_admin';
   const userInitial = (user.name || user.email || 'U').charAt(0).toUpperCase();
 
+  // Collapsible sections — collapsed set persists per-browser so the nav
+  // opens exactly how the user left it. The active page's item stays
+  // visible even inside a collapsed section, so you never lose your place.
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('sidebar:collapsed-sections');
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) setCollapsedSections(new Set(arr.filter((x) => typeof x === 'string')));
+      }
+    } catch { /* first visit / blocked storage — start expanded */ }
+  }, []);
+  function toggleSection(id: string) {
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      try { localStorage.setItem('sidebar:collapsed-sections', JSON.stringify(Array.from(next))); } catch { /* private mode */ }
+      return next;
+    });
+  }
+
   // Open tasks assigned to me — drives the red badge on the Tasks nav item
   // so a broker sees at a glance that something was assigned to them.
   // Polled every 60s; cheap endpoint, no push infra needed.
@@ -450,16 +472,29 @@ function SidebarBody({
           Settings → Sidebar order. Sections with no visible items are
           dropped automatically. */}
       <nav className="flex-1 overflow-y-auto px-3 py-4">
-        {visibleSections.map((section) => (
+        {visibleSections.map((section) => {
+          const isCollapsed = !!section.label && collapsedSections.has(section.id);
+          return (
           <div key={section.id} className="mb-5">
             {section.label && (
-              <div className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-                {section.label}
-              </div>
+              <button
+                onClick={() => toggleSection(section.id)}
+                className="w-full flex items-center justify-between px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 hover:text-muted-foreground transition-colors group/section"
+                title={isCollapsed ? 'Expand section' : 'Collapse section'}
+              >
+                <span>{section.label}</span>
+                <ChevronDown className={cn(
+                  'h-3 w-3 opacity-0 group-hover/section:opacity-100 transition-all',
+                  isCollapsed && '-rotate-90 opacity-60'
+                )} />
+              </button>
             )}
             <div className="space-y-0.5">
               {section.items.map((item) => {
                 const active = pathname === item.href || pathname.startsWith(item.href + '/');
+                // Collapsed sections hide everything except the page you're
+                // currently on, so context never disappears.
+                if (isCollapsed && !active) return null;
                 const Icon = item.icon;
                 return (
                   <Link
