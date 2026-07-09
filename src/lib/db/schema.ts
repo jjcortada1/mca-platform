@@ -1118,6 +1118,59 @@ export const notifications = pgTable(
   (t) => ({ userIdx: index('notifications_user_idx').on(t.userId, t.createdAt) })
 );
 
+/* ---------- Worksheets ----------
+   Personal, Google-Sheets-style tracking sheets. Deliberately SEPARATE from
+   deals/funded volume — nothing here feeds any analytics. A user owns their
+   sheets and can share individual sheets (view or edit) with any email that
+   already exists as a user in the system — including users from OTHER
+   companies. That cross-tenant reach is intentional and scoped to explicit
+   per-sheet shares only. */
+
+export const worksheets = pgTable(
+  'worksheets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ownerUserId: uuid('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 200 }).notNull(),
+    // Column definitions: [{ id, label }] — fully user-customizable.
+    columns: jsonb('columns').$type<{ id: string; label: string }[]>().notNull().default(sql`'[]'::jsonb`),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ ownerIdx: index('worksheets_owner_idx').on(t.ownerUserId) })
+);
+
+export const worksheetRows = pgTable(
+  'worksheet_rows',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    worksheetId: uuid('worksheet_id').notNull().references(() => worksheets.id, { onDelete: 'cascade' }),
+    // Cell values keyed by column id: { [colId]: string }.
+    cells: jsonb('cells').$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ sheetIdx: index('worksheet_rows_sheet_idx').on(t.worksheetId) })
+);
+
+export const worksheetShares = pgTable(
+  'worksheet_shares',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    worksheetId: uuid('worksheet_id').notNull().references(() => worksheets.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    email: varchar('email', { length: 320 }).notNull(), // snapshot for display
+    role: varchar('role', { length: 10 }).notNull().default('view'), // 'view' | 'edit'
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ sheetIdx: index('worksheet_shares_sheet_idx').on(t.worksheetId) })
+);
+
 /* ---------- E-sign (Dropbox Sign) ----------
    Per-company Dropbox Sign config + a log of sent signature requests, so a
    rep can type a name + email and fire off the application template. */

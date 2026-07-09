@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import {
   ShoppingBag, Send, Inbox, Briefcase, Users, TrendingUp, Calculator, BookOpen, FileText,
   Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle, ClipboardList, Search,
-  Handshake, Gift, FileSignature,
+  Handshake, Gift, FileSignature, Table2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { GlobalSearch } from '@/components/global-search';
@@ -63,6 +63,9 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { href: '/doc-request',  label: 'Doc Request',    icon: FileText,    perm: 'calculator.use' },
   // Bonuses — which funders are running bonuses, the window, and conditions.
   { href: '/bonuses',      label: 'Bonuses',        icon: Gift,        perm: 'deals.view' },
+  // Worksheets — personal Google-Sheets-style tracking, separate from all
+  // deal/funded analytics, shareable per-sheet across companies.
+  { href: '/worksheets',   label: 'Worksheets',     icon: Table2,      perm: 'deals.view' },
   { href: '/info',         label: 'Info',           icon: BookOpen,    perm: 'info.view' },
   // Tasks — company + broker to-dos with teams/leaders. Gated by the most
   // basic permission every user has so the tab shows for everyone.
@@ -78,6 +81,10 @@ export const DEFAULT_CATEGORIES: { id: string; label: string; items: string[] }[
   {
     id: 'commissions', label: 'Commissions',
     items: ['/commissions', '/payments', '/accounting', '/preview'],
+  },
+  {
+    id: 'sheets', label: 'Sheets',
+    items: ['/worksheets'],
   },
   {
     id: 'resources', label: 'Resources',

@@ -1,3 +1,23 @@
+# Update — July 2026 (round 20) — Worksheets
+
+## Worksheets (new "Sheets" section in the sidebar)
+- **Google-Sheets-style personal sheets** for tracking deals you work with
+  people at other companies — completely **separate from your funded deals,
+  funded volume, and every analytic** (own storage, feeds nothing).
+- **Multiple sheets as tabs** across the top, just like Google Sheets. Add a
+  sheet with +, rename it inline, delete it (with confirm).
+- **Customizable columns** per sheet: rename, add, remove, and reorder from
+  the Columns panel. Defaults: Deal, Partner/Company, Amount, Status, Notes.
+- **Spreadsheet editing**: click any cell and type — saves as you go. Add
+  rows at the bottom; delete rows on hover. Live-updates every 45s so shared
+  viewers see changes.
+- **Per-sheet sharing by email** — view-only or can-edit. The email must
+  already have an account in the system, and **accounts at other companies
+  work** — that's the point. They see ONLY the sheet(s) you shared, nothing
+  else of yours, and they get a notification when you share.
+
+---
+
 # Update — July 2026 (round 19) — design-system overhaul
 
 **Zero functional change.** No API, database, permission, calculation, or

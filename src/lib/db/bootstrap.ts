@@ -228,6 +228,39 @@ const STATEMENTS: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at)`,
 
+  // ---- worksheets: personal sheets + per-sheet cross-company shares ----
+  `CREATE TABLE IF NOT EXISTS worksheets (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    name varchar(200) NOT NULL,
+    columns jsonb NOT NULL DEFAULT '[]'::jsonb,
+    sort_order integer NOT NULL DEFAULT 0,
+    is_deleted boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS worksheets_owner_idx ON worksheets (owner_user_id)`,
+  `CREATE TABLE IF NOT EXISTS worksheet_rows (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    worksheet_id uuid NOT NULL REFERENCES worksheets(id) ON DELETE CASCADE,
+    cells jsonb NOT NULL DEFAULT '{}'::jsonb,
+    sort_order integer NOT NULL DEFAULT 0,
+    created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS worksheet_rows_sheet_idx ON worksheet_rows (worksheet_id)`,
+  `CREATE TABLE IF NOT EXISTS worksheet_shares (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    worksheet_id uuid NOT NULL REFERENCES worksheets(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    email varchar(320) NOT NULL,
+    role varchar(10) NOT NULL DEFAULT 'view',
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS worksheet_shares_sheet_idx ON worksheet_shares (worksheet_id)`,
+
   // ---- e-sign / Dropbox Sign (additive) ----
   `CREATE TABLE IF NOT EXISTS esign_config (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
