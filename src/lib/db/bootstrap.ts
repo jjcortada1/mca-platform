@@ -61,6 +61,8 @@ const STATEMENTS: string[] = [
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
   `ALTER TABLE funded_email_contacts ADD COLUMN IF NOT EXISTS is_default boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE esign_requests ADD COLUMN IF NOT EXISTS application_url text`,
+  `ALTER TABLE companies ADD COLUMN IF NOT EXISTS sidebar_hidden_items jsonb`,
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS is_deleted boolean NOT NULL DEFAULT false`,
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS offer_amount numeric(14,2)`,
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS net_amount numeric(14,2)`,

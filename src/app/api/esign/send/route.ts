@@ -25,6 +25,8 @@ export async function GET() {
         recipientEmail: esignRequests.recipientEmail,
         status: esignRequests.status,
         createdAt: esignRequests.createdAt,
+        applicationUrl: esignRequests.applicationUrl,
+        createdBy: esignRequests.createdBy,
         senderName: users.name,
       })
       .from(esignRequests)
@@ -121,6 +123,9 @@ export async function POST(req: NextRequest) {
       recipientName: titleCaseName(body.name.trim()),
       recipientEmail: body.email.trim().toLowerCase(),
       signatureRequestId: null,
+      // Snapshot the exact link that was emailed so it stays copyable on
+      // the record even if the company link changes later.
+      applicationUrl: cfg.applicationUrl,
       status: 'sent',
       createdBy: ctx.user.id,
     }).returning();

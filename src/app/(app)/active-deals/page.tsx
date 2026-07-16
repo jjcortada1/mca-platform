@@ -13,6 +13,8 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useConfirm } from '@/components/confirm-provider';
 import { useAutoRefresh } from '@/lib/use-auto-refresh';
 import { DealEconomics } from '@/components/deal-economics';
+import { DateRangeFilter } from '@/components/date-range-filter';
+import { inDateRange, type DateRangeValue } from '@/lib/date-range';
 
 interface Deal {
   id: string;
@@ -98,6 +100,9 @@ export default function ActiveDealsPage() {
   const [repFilter, setRepFilter] = useState<string>('');
   // Sort key — 'recent' (default), 'oldest', or 'rep' (group by rep name).
   const [sortKey, setSortKey] = useState<'recent' | 'oldest' | 'rep'>('recent');
+  // Standard date-range filter (Today / This week / Last month / custom…),
+  // filtering on createdAt — the date the table's Date column shows.
+  const [dateFilter, setDateFilter] = useState<DateRangeValue>({ preset: 'all' });
   // Current user identity for the "mine" filter shortcut.
   const [me, setMe] = useState<{ id: string; role: string } | null>(null);
   const isAdmin = me?.role === 'master_admin' || me?.role === 'company_admin';
@@ -333,6 +338,10 @@ export default function ActiveDealsPage() {
   const filtered = useMemo(() => {
     let arr = deals.filter((d) => !HIDDEN_FROM_ACTIVE.has(d.status));
     if (statusFilter !== 'all') arr = arr.filter((d) => d.status === statusFilter);
+    // Date-range filter — on createdAt, the date the table's Date column shows.
+    if (dateFilter.preset !== 'all') {
+      arr = arr.filter((d) => inDateRange(new Date(d.createdAt).getTime(), dateFilter));
+    }
     // Rep filter — '' = all reps (admin default); 'mine' = current user;
     // any other value = specific rep id. The /api/deals endpoint already
     // enforces server-side scoping for non-admin users; this client filter
@@ -371,7 +380,7 @@ export default function ActiveDealsPage() {
       arr = [...arr].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
     }
     return arr;
-  }, [deals, statusFilter, search, repFilter, me, sortKey, reps]);
+  }, [deals, statusFilter, dateFilter, search, repFilter, me, sortKey, reps]);
 
   const counts = useMemo(() => {
     const pipeline = deals.filter((d) => !HIDDEN_FROM_ACTIVE.has(d.status));
@@ -441,6 +450,7 @@ export default function ActiveDealsPage() {
           {/* Sort key — including by rep so admins can see who's working
               what at a glance. Default "recent" matches the prior behavior
               so the page doesn't feel different to existing users. */}
+          <DateRangeFilter value={dateFilter} onChange={setDateFilter} />
           <select
             value={sortKey}
             onChange={(e) => setSortKey(e.target.value as 'recent' | 'oldest' | 'rep')}

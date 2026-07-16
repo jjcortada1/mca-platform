@@ -19,8 +19,10 @@
  *   - Single recipient (no funder fan-out).
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { computeEconomics } from '@/lib/calculator/economics';
+import { DealEconomics } from '@/components/deal-economics';
 import {
   Card, CardHeader, CardTitle, CardContent, CardDescription,
   Button, Input, Textarea, Field, PageHeader,
@@ -181,6 +183,65 @@ export default function FundedEmailPage() {
     () => files.reduce((acc, f) => acc + f.size, 0),
     [files]
   );
+
+  /* ---------- built-in MCA calculator ----------
+     Reads the funding amount / factor rate / term straight out of the
+     template fields as you type, shows the live economics strip, and
+     AUTO-FILLS empty payback / payment fields. Auto-filled fields keep
+     updating until you type into them yourself (then your value wins). */
+  const autoFilledRef = useRef<Set<number>>(new Set());
+
+  const econInput = useMemo(() => {
+    const fieldVal = (re: RegExp, exclude?: RegExp) => {
+      const idx = (tmpl?.fields ?? []).findIndex((f) => {
+        const label = (f.label || '').toLowerCase();
+        return re.test(label) && !(exclude && exclude.test(label));
+      });
+      return idx >= 0 ? (values[idx] ?? '') : '';
+    };
+    const termRaw = fieldVal(/term/);
+    const termCount = termRaw.match(/[\d,.]+/)?.[0]?.replace(/,/g, '') ?? '';
+    const termMode = /week/i.test(termRaw) ? 'weekly' as const
+      : /day|daily/i.test(termRaw) ? 'daily' as const : null;
+    // Fee only when it plausibly reads as a percentage (≤ 50) — a dollar
+    // figure in a "Fees" field must not be applied as a 5,000% haircut.
+    const feeRaw = fieldVal(/fee/);
+    const feeNum = Number(feeRaw.replace(/[$,%\s]/g, ''));
+    return {
+      fundedAmount: fieldVal(/fund|advance|amount/, /payback|payment/),
+      factorRate: fieldVal(/factor|rate/),
+      feePct: Number.isFinite(feeNum) && feeNum > 0 && feeNum <= 50 ? String(feeNum) : '',
+      termMode,
+      termCount,
+    };
+  }, [values, tmpl]);
+
+  useEffect(() => {
+    if (!tmpl) return;
+    const e = computeEconomics(econInput);
+    setValues((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      (tmpl.fields ?? []).forEach((f, i) => {
+        const label = (f.label || '').toLowerCase();
+        const isPayback = /payback/.test(label);
+        const isPayment = /payment/.test(label) && !/number|count|#|frequency/.test(label) && !isPayback;
+        if (!isPayback && !isPayment) return;
+        const derived = isPayback ? e.totalPayback : e.paymentAmount;
+        const canWrite = !prev[i] || autoFilledRef.current.has(i);
+        if (!canWrite) return;
+        if (derived !== null) {
+          const v = derived.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          if (next[i] !== v) { next[i] = v; autoFilledRef.current.add(i); changed = true; }
+        } else if (autoFilledRef.current.has(i) && next[i]) {
+          next[i] = ''; // inputs no longer derivable → clear the stale auto-fill
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [econInput, tmpl]);
 
   /** Your starred default recipients, comma-joined (empty string if none). */
   function defaultRecipients(): string {
@@ -476,11 +537,20 @@ export default function FundedEmailPage() {
                     // template OR auto-detected when the label mentions "date".
                     type={isDateField(f) ? 'date' : 'text'}
                     value={values[i] ?? ''}
-                    onChange={(e) => setValues({ ...values, [i]: e.target.value })}
+                    onChange={(e) => {
+                      // Typing into a field makes it YOURS — the built-in
+                      // calculator stops overwriting it from then on.
+                      autoFilledRef.current.delete(i);
+                      setValues({ ...values, [i]: e.target.value });
+                    }}
                   />
                 </Field>
               ))}
             </div>
+            {/* Built-in MCA calculator — reads funding / rate / term from the
+                fields above and shows the full economics live. Payback and
+                payment fields auto-fill from these numbers. */}
+            <DealEconomics className="mt-3" input={econInput} />
           </CardContent>
         </Card>
       )}

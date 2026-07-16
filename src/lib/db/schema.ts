@@ -97,6 +97,11 @@ export const companies = pgTable('companies', {
   // built-in defaults. Additive — null = no overrides, every tab uses its
   // default label/icon.
   sidebarItemOverrides: jsonb('sidebar_item_overrides').$type<Record<string, { label?: string; icon?: string }>>(),
+  // Tools the COMPANY ADMIN hid for their own company (hrefs). Unlike
+  // enabledNavItems (platform-owner allowlist, null = all), this is a
+  // self-service blocklist the admin manages from Settings → Sidebar.
+  // null/empty = nothing hidden. Additive.
+  sidebarHiddenItems: jsonb('sidebar_hidden_items').$type<string[]>(),
   // ---- Funded-deal celebration settings ----------------------------------
   // Triggered when a deal status flips to 'funded' (from /active-deals,
   // /portfolio, or the deal API). Admin can edit, preview, and disable
@@ -1210,6 +1215,10 @@ export const esignRequests = pgTable(
     recipientName: varchar('recipient_name', { length: 200 }).notNull(),
     recipientEmail: varchar('recipient_email', { length: 320 }).notNull(),
     signatureRequestId: varchar('signature_request_id', { length: 120 }),
+    // Snapshot of the application link that was actually emailed — kept on
+    // the row so it can be copied later even if the company's saved link
+    // changes afterward.
+    applicationUrl: text('application_url'),
     status: varchar('status', { length: 30 }).notNull().default('sent'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

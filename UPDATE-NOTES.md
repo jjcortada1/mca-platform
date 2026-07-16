@@ -1,3 +1,75 @@
+# Update — July 2026 (round 24) — Reverse consolidation sheet v2, date filters, calculator revamp, drag-and-drop, sidebar controls, and the missed items
+
+## Reverse Consolidation Sheet — reworked to your spec
+- Title now reads **"Reverse Consolidation — {company name}"** (no more
+  "Offer"), and the "Prepared by …" footer is gone.
+- **Term can be daily or weekly** (toggle at the top of the Breakdown card);
+  labels follow: **Current Daily/Weekly Payment** (shown in red) and **New
+  Daily/Weekly Payment** (in green), with **Savings in green** — enter it as
+  a **percentage or dollar amount** (%/$ toggle), or let it auto-compute
+  from current vs new payment ("40% savings").
+- **Disbursements are their own count**: enter how many there are (e.g. 28)
+  — the term doesn't decide it — and that many rows open up with editable
+  amounts (pre-split evenly from the funding). The date column says
+  **Estimated date**.
+- The printed schedule is **tightened into side-by-side columns** so the
+  whole sheet — breakdown, positions, schedule, requirements — fits
+  together on one page.
+
+## Funded email — built-in MCA calculator (the missed item)
+- The calculator now lives **inside the funded email workflow** too: as you
+  type the funding amount, rate, and term into the template fields, the
+  economics strip appears below them and **payback / payment fields
+  auto-fill** with the computed numbers (with commas). The moment you type
+  into an auto-filled field yourself, your value wins and stays.
+
+## Date filters — Submissions + Active Deals
+- Both toolbars get the standard date filter: **Today, Yesterday, This
+  Week, Last Week, This Month, Last Month, Last 7 Days, Last 30 Days,
+  Specific date, Custom range**. Submissions filter on the latest funder
+  send date; Active Deals on the deal's created date (the Date column).
+
+## Deal Calculator — compact rebuild
+- The big top band (payment/day, total payback, net) is **removed**. One
+  clean **Deal breakdown**: Funding Amount, Origination Fee, Term, Payment,
+  Cost of Capital, Net, **Funding Fee (new input)**, Commission Percentage,
+  Commission Dollar Amount. Inputs and results sit side by side in a
+  contained column instead of stretching across the page. Cost of capital
+  now correctly includes both fees (payback − net).
+
+## Drag-and-drop reordering
+- **Funder tiers** (Settings): drag the grip to reorder — arrows stay as a
+  fallback.
+- **Sidebar items** (Settings → Sidebar): drag items to reorder inside a
+  section.
+- **Worksheet tabs**: drag Sheet 2 before Sheet 1 — the order saves
+  automatically (your own sheets; shared tabs stay grouped after).
+
+## Sidebar — hide/show tools for YOUR company
+- In Settings → Sidebar, every item now has an **eye toggle**: hide a tool
+  and it disappears from the sidebar for everyone in your company; show it
+  again anytime. This is separate from the platform-owner feature access —
+  it's your own company's control. (Worksheets can't be hidden — sheets are
+  shared across companies and hiding the tab strands invited users.)
+
+## Send Application — delete + copy link
+- Every recent application now stores **the exact link that was emailed**
+  and shows a **copy button** for it.
+- **Delete** any recent application record (with confirmation). You can
+  delete records you sent; admins can delete any.
+
+## Worksheets — copy buttons
+- Expand any row and every field has a **one-press copy button** — copy
+  that exact message/value without selecting text.
+
+## Fonts — verified consistent
+- Audited every font declaration: the platform already uses **one font
+  (Inter) everywhere** — navigation, tables, forms, buttons, modals,
+  dashboards, mobile — plus a single monospace companion for IDs/numbers.
+  Nothing inconsistent was found; no change needed.
+
+---
+
 # Update — July 2026 (round 23) — Enterprise Round A: funded email safety, refinance, live deal math, smarter matching, reverse consolidation sheet
 
 ## Funded email — the merchant can never be emailed by accident

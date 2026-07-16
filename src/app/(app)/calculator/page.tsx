@@ -73,19 +73,24 @@ function ForwardCalc({ rules }: { rules: { threshold: number; commissionPct: num
   const [funding, setFunding] = useState<number | ''>('');
   const [factorRate, setFactorRate] = useState('');
   const [origPct, setOrigPct] = useState('');
+  const [fundingFeePct, setFundingFeePct] = useState('');
   const [nPay, setNPay] = useState('');
   const [freq, setFreq] = useState<Freq>('daily');
 
   const fund = funding === '' ? 0 : funding;
   const fr = parseFloat(factorRate) || 0;
   const orig = parseFloat(origPct) || 0;
+  const ffee = parseFloat(fundingFeePct) || 0;
   const n = parseFloat(nPay) || 0;
 
-  // Math (true MCA structure: 5 business days/wk)
+  // Math (true MCA structure: 5 business days/wk). Both fees come off the
+  // top, so net = funding − origination − funding fee, and the merchant's
+  // true cost of capital = payback − net.
   const payback = fund * fr;
   const fee = fund * (orig / 100);
-  const net = fund - fee;
-  const totalCost = payback - fund;
+  const fundingFee = fund * (ffee / 100);
+  const net = fund - fee - fundingFee;
+  const totalCost = payback - net;
 
   // Term in business days (always)
   const termBusinessDays = freq === 'daily' ? n : n * BUSINESS_DAYS_PER_WEEK;
@@ -95,12 +100,7 @@ function ForwardCalc({ rules }: { rules: { threshold: number; commissionPct: num
   // Per-payment amount
   const paymentAmount = n ? payback / n : 0;
 
-  // Daily / weekly / monthly equivalents (for both directions of view)
-  const dailyEquiv = termBusinessDays > 0 ? payback / termBusinessDays : 0;
-  const weeklyEquiv = termWeeks > 0 ? payback / termWeeks : 0;
-  const monthlyEquiv = termMonths > 0 ? payback / termMonths : 0;
-
-  // Commission from rules table (descending walk)
+  // Commission from rules table (highest threshold ≤ factor rate wins)
   let commissionPct = 0;
   if (rules.length && fr > 0) {
     const sorted = [...rules].sort((a, b) => a.threshold - b.threshold);
@@ -116,55 +116,45 @@ function ForwardCalc({ rules }: { rules: { threshold: number; commissionPct: num
     setFunding('');
     setFactorRate('');
     setOrigPct('');
+    setFundingFeePct('');
     setNPay('');
   }
 
   const fmt = (x: number) => (!isFinite(x) || !x ? '—' : formatCurrency(x));
   const termLabel = !n
     ? '—'
-    : `${termBusinessDays} business days · ${termWeeks.toFixed(1)} weeks · ${termMonths.toFixed(2)} months`;
+    : `${termBusinessDays} business days · ${termWeeks.toFixed(1)} wks · ${termMonths.toFixed(1)} mo`;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-5">
-      {/* Inputs (2 cols on lg) */}
-      <div className="lg:col-span-2">
-        <Card>
-          <CardContent className="p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold">Inputs</div>
-              <Button variant="ghost" size="sm" onClick={clear}>Clear</Button>
-            </div>
+    // Compact, connected layout: inputs and the single breakdown sit side by
+    // side in a contained column — no full-width stretch, no top KPI band.
+    <div className="grid gap-4 md:grid-cols-2 max-w-4xl">
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-semibold">Deal inputs</div>
+            <Button variant="ghost" size="sm" onClick={clear}>Clear</Button>
+          </div>
 
-            <Field label="Funding amount">
-              <MoneyInput
-                value={funding}
-                onValueChange={setFunding}
-                decimals={2}
-                placeholder="100,000.00"
+          <Field label="Funding amount">
+            <MoneyInput
+              value={funding}
+              onValueChange={setFunding}
+              decimals={2}
+              placeholder="100,000.00"
+            />
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Factor rate">
+              <Input
+                type="number"
+                step="0.001"
+                placeholder="1.45"
+                value={factorRate}
+                onChange={(e) => setFactorRate(e.target.value)}
               />
             </Field>
-
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Factor rate">
-                <Input
-                  type="number"
-                  step="0.001"
-                  placeholder="1.45"
-                  value={factorRate}
-                  onChange={(e) => setFactorRate(e.target.value)}
-                />
-              </Field>
-              <Field label="Origination fee %">
-                <Input
-                  type="number"
-                  step="0.1"
-                  placeholder="3"
-                  value={origPct}
-                  onChange={(e) => setOrigPct(e.target.value)}
-                />
-              </Field>
-            </div>
-
             <Field label="Number of payments">
               <Input
                 type="number"
@@ -173,58 +163,74 @@ function ForwardCalc({ rules }: { rules: { threshold: number; commissionPct: num
                 onChange={(e) => setNPay(e.target.value)}
               />
             </Field>
-
-            <Field label="Payment frequency">
-              <div className="grid grid-cols-2 gap-2">
-                {(['daily', 'weekly'] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setFreq(m)}
-                    className={cn(
-                      'px-4 py-2.5 rounded border-2 text-sm font-medium transition',
-                      freq === m
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
-                    )}
-                  >
-                    {m === 'daily' ? 'Daily (M–F)' : 'Weekly'}
-                  </button>
-                ))}
-              </div>
+            <Field label="Origination fee %">
+              <Input
+                type="number"
+                step="0.1"
+                placeholder="3"
+                value={origPct}
+                onChange={(e) => setOrigPct(e.target.value)}
+              />
             </Field>
+            <Field label="Funding fee %">
+              <Input
+                type="number"
+                step="0.1"
+                placeholder="0"
+                value={fundingFeePct}
+                onChange={(e) => setFundingFeePct(e.target.value)}
+              />
+            </Field>
+          </div>
 
-            <div className="text-[10px] text-muted-foreground/80 leading-relaxed pt-2 border-t border-border">
-              MCA standard: 5 business days/week · 4 weeks/month · 52 weeks/year
+          <Field label="Payment frequency">
+            <div className="grid grid-cols-2 gap-2">
+              {(['daily', 'weekly'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setFreq(m)}
+                  className={cn(
+                    'px-3 py-2 rounded border text-sm font-medium transition',
+                    freq === m
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
+                  )}
+                >
+                  {m === 'daily' ? 'Daily (M–F)' : 'Weekly'}
+                </button>
+              ))}
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </Field>
 
-      {/* Results (3 cols on lg) */}
-      <div className="lg:col-span-3 space-y-4">
-        {/* Top KPIs */}
-        <div className="grid grid-cols-3 gap-3">
-          <Kpi label={`Payment / ${freq === 'daily' ? 'day' : 'week'}`} value={fmt(paymentAmount)} primary />
-          <Kpi label="Total payback" value={fmt(payback)} />
-          <Kpi label="Net to merchant" value={fmt(net)} />
-        </div>
+          <div className="text-[10px] text-muted-foreground/80 leading-relaxed pt-2 border-t border-border">
+            MCA standard: 5 business days/week · 4 weeks/month · 52 weeks/year
+          </div>
+        </CardContent>
+      </Card>
 
-        {/* Detail rows */}
-        <Card>
-          <CardContent className="p-0 divide-y divide-border">
-            <Row label="Funding amount" value={fmt(fund)} />
-            <Row label="Origination fee" value={fmt(fee)} hint={orig ? `${orig}%` : undefined} />
-            <Row label="Total cost of capital" value={fmt(totalCost)} />
-            <Row label="Term length" value={termLabel} />
-            <Row label="Daily payment equivalent"  value={fmt(dailyEquiv)} hint="payback ÷ business days" />
-            <Row label="Weekly payment equivalent" value={fmt(weeklyEquiv)} hint="payback ÷ weeks" />
-            <Row label="Monthly payment equivalent" value={fmt(monthlyEquiv)} hint="payback ÷ months" />
-            <Row label="Commission %" value={commissionPct ? `${commissionPct.toFixed(1)}%` : '—'} />
-            <Row label="Commission $" value={fmt(commission)} bold />
-          </CardContent>
-        </Card>
-      </div>
+      {/* One clean breakdown — no separate KPI band. */}
+      <Card className="self-start">
+        <CardContent className="p-0">
+          <div className="px-4 pt-3 pb-2 text-sm font-semibold border-b border-border">Deal breakdown</div>
+          <div className="divide-y divide-border/70">
+            <Row label="Funding Amount" value={fmt(fund)} />
+            <Row label="Origination Fee" value={fmt(fee)} hint={orig ? `${orig}%` : undefined} />
+            <Row label="Term" value={termLabel} />
+            <Row
+              label={`Payment (${freq === 'daily' ? 'per business day' : 'per week'})`}
+              value={fmt(paymentAmount)}
+              hint={payback ? `total payback ${fmt(payback)}` : undefined}
+              bold
+            />
+            <Row label="Cost of Capital" value={fmt(totalCost)} hint="payback − net" />
+            <Row label="Net" value={fmt(net)} />
+            <Row label="Funding Fee" value={fmt(fundingFee)} hint={ffee ? `${ffee}%` : undefined} />
+            <Row label="Commission Percentage" value={commissionPct ? `${commissionPct.toFixed(1)}%` : '—'} />
+            <Row label="Commission Dollar Amount" value={fmt(commission)} bold />
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

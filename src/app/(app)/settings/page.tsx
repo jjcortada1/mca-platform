@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Card, CardHeader, CardTitle, CardContent, CardDescription,
   Button, Input, Textarea, Field, Label, Badge, PageHeader,
@@ -9,7 +9,8 @@ import { useToast } from '@/components/toast';
 import {
   Palette, Mail, Send, FileText, DollarSign, Layers, ListChecks,
   Users as UsersIcon, GitBranch, Database, ShieldCheck, Menu as MenuIcon,
-  Trash2, Sparkles, Crown, Plus, UserCircle, Building2,
+  Trash2, Sparkles, Crown, Plus, UserCircle, Building2, GripVertical,
+  Eye, EyeOff,
 } from 'lucide-react';
 import Link from 'next/link';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -1114,6 +1115,10 @@ function TiersSection() {
   const [tiers, setTiers] = useState<Tier[]>([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState('');
+  // Drag-to-reorder state (drag is primary; the arrows stay as a keyboard-
+  // friendly alternative).
+  const tierDragFrom = useRef<number | null>(null);
+  const [tierDragOver, setTierDragOver] = useState<number | null>(null);
 
   async function load() {
     setLoading(true);
@@ -1160,11 +1165,7 @@ function TiersSection() {
     toast.success('Tier renamed.');
   }
 
-  async function move(idx: number, dir: -1 | 1) {
-    const newIdx = idx + dir;
-    if (newIdx < 0 || newIdx >= tiers.length) return;
-    const reordered = [...tiers];
-    [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
+  async function persistOrder(reordered: Tier[]) {
     setTiers(reordered);
     const res = await fetch('/api/funder-tiers/reorder', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1176,18 +1177,63 @@ function TiersSection() {
     }
   }
 
+  async function move(idx: number, dir: -1 | 1) {
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= tiers.length) return;
+    const reordered = [...tiers];
+    [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
+    await persistOrder(reordered);
+  }
+
+  function dropTier(to: number) {
+    const from = tierDragFrom.current;
+    tierDragFrom.current = null;
+    setTierDragOver(null);
+    if (from === null || from === to) return;
+    const reordered = [...tiers];
+    const [moved] = reordered.splice(from, 1);
+    reordered.splice(to, 0, moved);
+    persistOrder(reordered);
+  }
+
   if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Funder tiers</CardTitle>
-        <CardDescription>Categorize funders (e.g., A-paper, Subprime, Reverse, Real Estate). Drag with arrows to reorder.</CardDescription>
+        <CardDescription>Categorize funders (e.g., A-paper, Subprime, Reverse, Real Estate). Drag the grip to reorder (arrows work too).</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="space-y-1.5">
           {tiers.map((t, i) => (
-            <div key={t.id} className="flex items-center gap-1.5 group">
+            <div
+              key={t.id}
+              draggable
+              onDragStart={(e) => {
+                tierDragFrom.current = i;
+                e.dataTransfer.effectAllowed = 'move';
+                try { e.dataTransfer.setData('text/plain', String(i)); } catch { /* older browsers */ }
+              }}
+              onDragOver={(e) => {
+                if (tierDragFrom.current === null) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (tierDragOver !== i) setTierDragOver(i);
+              }}
+              onDrop={(e) => { e.preventDefault(); dropTier(i); }}
+              onDragEnd={() => { tierDragFrom.current = null; setTierDragOver(null); }}
+              className={cn(
+                'flex items-center gap-1.5 group rounded-md transition-shadow',
+                tierDragOver === i && tierDragFrom.current !== null && tierDragFrom.current !== i && 'ring-2 ring-primary/50'
+              )}
+            >
+              <span
+                title="Drag to reorder"
+                className="cursor-grab active:cursor-grabbing p-1 text-muted-foreground/40 group-hover:text-muted-foreground"
+              >
+                <GripVertical className="h-4 w-4" />
+              </span>
               <div className="flex flex-col">
                 <button
                   onClick={() => move(i, -1)}
@@ -3045,6 +3091,12 @@ function SidebarOrderSection() {
   const [overrides, setOverrides] = useState<Record<string, { label?: string; icon?: string }>>({});
   // Which item's inline editor is open. Stores the href. Null = closed.
   const [editingItem, setEditingItem] = useState<string | null>(null);
+  // Tools hidden for YOUR OWN company (hrefs). Toggle with the eye button —
+  // hidden tools disappear from the sidebar for everyone in the company.
+  const [hidden, setHidden] = useState<string[]>([]);
+  // Drag-to-reorder items within a section (drag is primary; arrows remain).
+  const itemDragFrom = useRef<{ cat: number; idx: number } | null>(null);
+  const [itemDragOver, setItemDragOver] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/settings/sidebar-order', { cache: 'no-store' })
@@ -3054,6 +3106,7 @@ function SidebarOrderSection() {
         const savedCats = j?.data?.categories as EditCategory[] | null;
         const savedOrder = j?.data?.order as string[] | null;
         const savedOv = j?.data?.itemOverrides as Record<string, { label?: string; icon?: string }> | null;
+        const savedHidden = j?.data?.hiddenNavItems as string[] | null;
         if (Array.isArray(savedCats) && savedCats.length) {
           setCats(savedCats.map((c) => ({
             id: c.id, label: c.label, items: [...(c.items ?? [])],
@@ -3064,9 +3117,28 @@ function SidebarOrderSection() {
           setCats([{ id: 'menu', label: 'Menu', items: [...savedOrder] }]);
         }
         if (savedOv && typeof savedOv === 'object') setOverrides(savedOv);
+        if (Array.isArray(savedHidden)) setHidden(savedHidden);
       })
       .finally(() => setLoaded(true));
   }, []);
+
+  function toggleHidden(href: string) {
+    setHidden((prev) => prev.includes(href) ? prev.filter((h) => h !== href) : [...prev, href]);
+  }
+
+  function dropItem(catIdx: number, itemIdx: number) {
+    const from = itemDragFrom.current;
+    itemDragFrom.current = null;
+    setItemDragOver(null);
+    if (!from || from.cat !== catIdx || from.idx === itemIdx) return;
+    const cat = cats[catIdx];
+    const items = [...cat.items];
+    const [moved] = items.splice(from.idx, 1);
+    items.splice(itemIdx, 0, moved);
+    const next = [...cats];
+    next[catIdx] = { ...cat, items };
+    setCats(next);
+  }
 
   // Helper: update one item's override. Empty values clear that field; if
   // both label and icon end up empty, the entire override entry is removed
@@ -3177,6 +3249,7 @@ function SidebarOrderSection() {
         categories: payload,
         order: null,
         itemOverrides: Object.keys(trimmedOverrides).length > 0 ? trimmedOverrides : null,
+        hiddenNavItems: hidden.length > 0 ? hidden : null,
       }),
     });
     setSaving(false);
@@ -3193,7 +3266,7 @@ function SidebarOrderSection() {
     const res = await fetch('/api/settings/sidebar-order', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ categories: null, order: null, itemOverrides: null }),
+      body: JSON.stringify({ categories: null, order: null, itemOverrides: null, hiddenNavItems: null }),
     });
     setResetting(false);
     if (!res.ok) {
@@ -3203,6 +3276,7 @@ function SidebarOrderSection() {
     }
     setCats(DEFAULT_CATEGORIES.map((c) => ({ ...c, items: [...c.items] })));
     setOverrides({});
+    setHidden([]);
     toast.success('Reset to default. Refresh to see the change.');
   }
 
@@ -3217,7 +3291,7 @@ function SidebarOrderSection() {
         <CardHeader>
           <CardTitle className="text-base">Sidebar sections</CardTitle>
           <CardDescription>
-            Group menu items into categories. The order and the names you set apply company-wide — every user (admins and reps) sees the same sidebar. Each user only sees the items their permissions allow.
+            Group menu items into categories, drag items to reorder them, and use the eye to show or hide tools for your company. Everything applies company-wide — every user (admins and reps) sees the same sidebar. Each user only sees the items their permissions allow.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -3273,9 +3347,39 @@ function SidebarOrderSection() {
                   const DisplayIcon = resolveIcon(ov.icon, item.icon as Parameters<typeof resolveIcon>[1]);
                   const isEditing = editingItem === href;
                   const isCustomized = !!(ov.label || ov.icon);
+                  const isHidden = hidden.includes(href);
+                  const dragKey = `${catIdx}:${itemIdx}`;
                   return (
-                    <div key={href} className="rounded border border-border">
+                    <div
+                      key={href}
+                      draggable
+                      onDragStart={(e) => {
+                        itemDragFrom.current = { cat: catIdx, idx: itemIdx };
+                        e.dataTransfer.effectAllowed = 'move';
+                        try { e.dataTransfer.setData('text/plain', href); } catch { /* older browsers */ }
+                      }}
+                      onDragOver={(e) => {
+                        const from = itemDragFrom.current;
+                        if (!from || from.cat !== catIdx) return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        if (itemDragOver !== dragKey) setItemDragOver(dragKey);
+                      }}
+                      onDrop={(e) => { e.preventDefault(); dropItem(catIdx, itemIdx); }}
+                      onDragEnd={() => { itemDragFrom.current = null; setItemDragOver(null); }}
+                      className={cn(
+                        'rounded border border-border transition-shadow',
+                        itemDragOver === dragKey && 'ring-2 ring-primary/50',
+                        isHidden && 'opacity-55'
+                      )}
+                    >
                       <div className="flex items-center gap-2 p-1.5">
+                        <span
+                          title="Drag to reorder within this section"
+                          className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground"
+                        >
+                          <GripVertical className="h-4 w-4" />
+                        </span>
                         <div className="flex flex-col">
                           <button
                             onClick={() => moveItem(catIdx, itemIdx, -1)}
@@ -3298,7 +3402,26 @@ function SidebarOrderSection() {
                               custom
                             </span>
                           )}
+                          {isHidden && (
+                            <span className="text-[9px] uppercase font-semibold text-amber-700 bg-amber-500/10 px-1 rounded">
+                              hidden
+                            </span>
+                          )}
                         </div>
+                        {/* Show/hide for YOUR company — worksheets can't be
+                            hidden (cross-company sheet sharing needs it). */}
+                        {href !== '/worksheets' && (
+                          <button
+                            onClick={() => toggleHidden(href)}
+                            title={isHidden ? 'Hidden from your company — click to show' : 'Visible — click to hide from your company'}
+                            className={cn(
+                              'h-6 px-1.5 rounded text-xs',
+                              isHidden ? 'text-amber-600 hover:bg-amber-500/10' : 'text-muted-foreground hover:bg-muted'
+                            )}
+                          >
+                            {isHidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          </button>
+                        )}
                         {/* Edit (rename + change icon) — opens an inline editor */}
                         <button
                           onClick={() => setEditingItem(isEditing ? null : href)}

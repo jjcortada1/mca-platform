@@ -11,6 +11,8 @@ import { exportCSV } from '@/lib/csv-export';
 import { useToast } from '@/components/toast';
 import { useAutoRefresh } from '@/lib/use-auto-refresh';
 import { useConfirm } from '@/components/confirm-provider';
+import { DateRangeFilter } from '@/components/date-range-filter';
+import { inDateRange, type DateRangeValue } from '@/lib/date-range';
 
 interface SubmissionFunder {
   id: string;
@@ -112,6 +114,10 @@ export default function SubmissionsPage() {
   // Time window: 'all' or a specific 'YYYY-MM'. Buckets by the submission's
   // most recent funder submission date (falling back to createdAt).
   const [monthFilter, setMonthFilter] = useState<string>('all');
+  // Standard date-range filter (Today / This week / Last month / custom…) —
+  // same presets as Active Deals, filtering on the same effective date the
+  // month bucketing uses.
+  const [dateFilter, setDateFilter] = useState<DateRangeValue>({ preset: 'all' });
   // Search across deal name / merchant name / funder names.
   const [search, setSearch] = useState('');
 
@@ -342,14 +348,19 @@ export default function SubmissionsPage() {
   // The date a submission "belongs to" for month bucketing: the most recent
   // funder submission (that's when activity happened), else the row's
   // createdAt as a fallback for rows with no funder timestamps.
-  function submissionMonthKey(r: SubmissionRow): string {
+  function submissionDateMs(r: SubmissionRow): number {
     let latest = 0;
     for (const f of r.funders) {
       const t = new Date(f.submittedAt).getTime();
       if (!isNaN(t) && t > latest) latest = t;
     }
     if (!latest) latest = new Date(r.createdAt).getTime();
-    if (isNaN(latest) || !latest) return '';
+    return isNaN(latest) ? 0 : latest;
+  }
+
+  function submissionMonthKey(r: SubmissionRow): string {
+    const latest = submissionDateMs(r);
+    if (!latest) return '';
     const d = new Date(latest);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   }
@@ -378,6 +389,9 @@ export default function SubmissionsPage() {
     }
     if (monthFilter !== 'all') {
       out = out.filter((r) => submissionMonthKey(r) === monthFilter);
+    }
+    if (dateFilter.preset !== 'all') {
+      out = out.filter((r) => inDateRange(submissionDateMs(r), dateFilter));
     }
     const q = search.trim().toLowerCase();
     if (q) {
@@ -414,7 +428,7 @@ export default function SubmissionsPage() {
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, repFilter, monthFilter, sortBy, search]);
+  }, [rows, repFilter, monthFilter, dateFilter, sortBy, search]);
 
   return (
     <div className="space-y-6 p-6">
@@ -510,8 +524,9 @@ export default function SubmissionsPage() {
             )}
           </div>
 
-          {/* Month + sort + search on the right */}
-          <div className="flex items-center gap-2 sm:ml-auto">
+          {/* Date range + month + sort + search on the right */}
+          <div className="flex items-center gap-2 sm:ml-auto flex-wrap">
+            <DateRangeFilter value={dateFilter} onChange={setDateFilter} />
             <select
               value={monthFilter}
               onChange={(e) => setMonthFilter(e.target.value)}

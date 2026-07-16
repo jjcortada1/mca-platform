@@ -1,20 +1,18 @@
 'use client';
 /**
- * Reverse Consolidation Sheet — builds a client-facing offer for a
+ * Reverse Consolidation Sheet — builds a client-facing breakdown for a
  * weekly-disbursement funding consolidation.
  *
- * How a reverse consolidation works (and what this sheet presents): the
- * funder advances the total, but instead of one lump sum the merchant
- * receives scheduled WEEKLY DISBURSEMENTS while their existing MCA
- * positions get paid down — so the offer shows the topline economics,
- * the positions (funders + balances) being consolidated, the week-by-week
- * disbursement schedule, and the requirements to fund.
- *
- * Every economics line can be shown/hidden, requirements are fully
- * editable (contracts from each funder with a balance are auto-suggested),
- * and "Generate PDF" opens a print-ready branded document (company name +
- * logo) the browser saves as PDF. Nothing here writes to the database —
- * a draft is kept in localStorage so work isn't lost on refresh.
+ * The document is titled "Reverse Consolidation — {deal/company name}".
+ * Economics show the CURRENT payment (red) vs the NEW payment (green) with
+ * the savings highlighted in green — % or $, your choice. Term can be
+ * entered in days or weeks. The disbursement schedule takes an explicit
+ * NUMBER OF DISBURSEMENTS (not assumed from the term), shows ESTIMATED
+ * dates, and prints tightly in side-by-side columns so the whole offer
+ * fits on one sheet. Every economics line can be shown/hidden; the
+ * requirements list auto-suggests contracts from each funder with a
+ * balance. Nothing is written to the database — a draft lives in
+ * localStorage so refreshing never loses work.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -46,22 +44,19 @@ function addDays(d: Date, days: number): Date {
 function fmtDate(d: Date): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
+function chunk<T>(arr: T[], n: number): T[][] {
+  const per = Math.ceil(arr.length / n);
+  return Array.from({ length: Math.min(n, arr.length) }, (_, i) => arr.slice(i * per, (i + 1) * per))
+    .filter((c) => c.length);
+}
 
 interface FunderRow { id: string; name: string; balance: string }
-interface ScheduleRow { week: number; date: string; amount: string }
+interface ScheduleRow { num: number; date: string; amount: string }
 
-const ECON_FIELDS = [
-  { key: 'funding', label: 'Total Funding Amount' },
-  { key: 'payback', label: 'Total Payback' },
-  { key: 'rate', label: 'Rate' },
-  { key: 'term', label: 'Term (weeks)' },
-  { key: 'weeklyPayment', label: 'Weekly Payment' },
-  { key: 'savings', label: 'Estimated Savings' },
-] as const;
-type EconKey = typeof ECON_FIELDS[number]['key'];
+type EconKey = 'funding' | 'payback' | 'rate' | 'term' | 'currentPayment' | 'newPayment' | 'savings';
 
 const DEFAULT_REQUIREMENTS = ['Driver’s license', 'Voided check'];
-const DRAFT_KEY = 'reverse-consol-sheet:v1';
+const DRAFT_KEY = 'reverse-consol-sheet:v2';
 
 let rowSeq = 0;
 function rid() { return `r${Date.now().toString(36)}_${rowSeq++}`; }
@@ -77,19 +72,34 @@ export function ReverseConsolidationBuilder({
 
   const [dealName, setDealName] = useState('');
   const [econ, setEcon] = useState<Record<EconKey, string>>({
-    funding: '', payback: '', rate: '', term: '', weeklyPayment: '', savings: '',
+    funding: '', payback: '', rate: '', term: '', currentPayment: '', newPayment: '', savings: '',
   });
   const [shown, setShown] = useState<Record<EconKey, boolean>>({
-    funding: true, payback: true, rate: true, term: true, weeklyPayment: true, savings: true,
+    funding: true, payback: true, rate: true, term: true, currentPayment: true, newPayment: true, savings: true,
   });
+  // Term unit: daily terms count business days; weekly terms count weeks.
+  const [termUnit, setTermUnit] = useState<'daily' | 'weekly'>('weekly');
+  // Savings entered as a percent ("40" → 40% savings) or a dollar amount.
+  const [savingsMode, setSavingsMode] = useState<'percent' | 'dollar'>('percent');
   const [funders, setFunders] = useState<FunderRow[]>([{ id: rid(), name: '', balance: '' }]);
   const [startDate, setStartDate] = useState('');
+  const [numDisbursements, setNumDisbursements] = useState('');
   const [schedule, setSchedule] = useState<ScheduleRow[]>([]);
   const [requirements, setRequirements] = useState<string[]>(DEFAULT_REQUIREMENTS);
   const [newReq, setNewReq] = useState('');
-  // Contract requirements the user explicitly deleted — never auto re-added.
   const removedAutoReqsRef = useRef<Set<string>>(new Set());
   const restoredRef = useRef(false);
+
+  const payLabel = termUnit === 'daily' ? 'Daily' : 'Weekly';
+  const ECON_FIELDS: { key: EconKey; label: string }[] = [
+    { key: 'funding', label: 'Total Funding Amount' },
+    { key: 'payback', label: 'Total Payback' },
+    { key: 'rate', label: 'Rate' },
+    { key: 'term', label: 'Term' },
+    { key: 'currentPayment', label: `Current ${payLabel} Payment` },
+    { key: 'newPayment', label: `New ${payLabel} Payment` },
+    { key: 'savings', label: 'Savings' },
+  ];
 
   /* ---------- draft persistence (localStorage, no DB) ---------- */
   useEffect(() => {
@@ -101,8 +111,11 @@ export function ReverseConsolidationBuilder({
           if (typeof d.dealName === 'string') setDealName(d.dealName);
           if (d.econ) setEcon((cur) => ({ ...cur, ...d.econ }));
           if (d.shown) setShown((cur) => ({ ...cur, ...d.shown }));
+          if (d.termUnit === 'daily' || d.termUnit === 'weekly') setTermUnit(d.termUnit);
+          if (d.savingsMode === 'percent' || d.savingsMode === 'dollar') setSavingsMode(d.savingsMode);
           if (Array.isArray(d.funders) && d.funders.length) setFunders(d.funders);
           if (typeof d.startDate === 'string') setStartDate(d.startDate);
+          if (typeof d.numDisbursements === 'string') setNumDisbursements(d.numDisbursements);
           if (Array.isArray(d.schedule)) setSchedule(d.schedule);
           if (Array.isArray(d.requirements)) setRequirements(d.requirements);
         }
@@ -115,42 +128,67 @@ export function ReverseConsolidationBuilder({
     const t = setTimeout(() => {
       try {
         localStorage.setItem(DRAFT_KEY, JSON.stringify({
-          dealName, econ, shown, funders, startDate, schedule, requirements,
+          dealName, econ, shown, termUnit, savingsMode, funders, startDate, numDisbursements, schedule, requirements,
         }));
       } catch { /* storage full/blocked */ }
     }, 400);
     return () => clearTimeout(t);
-  }, [dealName, econ, shown, funders, startDate, schedule, requirements]);
+  }, [dealName, econ, shown, termUnit, savingsMode, funders, startDate, numDisbursements, schedule, requirements]);
 
-  /* ---------- derived economics (suggestions, never overriding typed values) ---------- */
+  /* ---------- derived economics (suggestions, typed values always win) ---------- */
   const derived = useMemo(() => {
     const funding = parseNum(econ.funding);
     const payback = parseNum(econ.payback);
     const rate = parseNum(econ.rate);
     const term = parseNum(econ.term);
+    const effPayback = payback ?? (funding && rate ? Math.round(funding * rate * 100) / 100 : null);
+    const nPayments = term && term > 0 ? Math.round(term) : null;
+    const newPayment = parseNum(econ.newPayment)
+      ?? (effPayback && nPayments ? Math.round((effPayback / nPayments) * 100) / 100 : null);
+    const current = parseNum(econ.currentPayment);
+    const savingsPct = current && newPayment && current > 0
+      ? Math.round((1 - newPayment / current) * 1000) / 10
+      : null;
+    const savingsDollar = current && newPayment ? Math.round((current - newPayment) * 100) / 100 : null;
     return {
       rate: rate ?? (funding && payback && funding > 0 ? Math.round((payback / funding) * 10000) / 10000 : null),
-      payback: payback ?? (funding && rate ? Math.round(funding * rate * 100) / 100 : null),
-      weeklyPayment: parseNum(econ.weeklyPayment)
-        ?? ((payback ?? (funding && rate ? funding * rate : null)) && term && term > 0
-          ? Math.round(((payback ?? (funding! * rate!)) / term) * 100) / 100
-          : null),
+      payback: effPayback,
+      newPayment,
+      savingsPct,
+      savingsDollar,
     };
   }, [econ]);
 
   /** Effective display value per econ line — typed value wins, else derived. */
   function econValue(key: EconKey): string {
     const typed = econ[key];
+    if (key === 'savings') {
+      const n = parseNum(typed);
+      if (typed.trim()) {
+        if (n === null) return typed; // free text allowed
+        return savingsMode === 'percent' ? `${n}% savings` : `${money(n)} per ${payLabel.toLowerCase()} payment`;
+      }
+      if (savingsMode === 'percent' && derived.savingsPct !== null && derived.savingsPct > 0) return `${derived.savingsPct}% savings`;
+      if (savingsMode === 'dollar' && derived.savingsDollar !== null && derived.savingsDollar > 0) return `${money(derived.savingsDollar)} per ${payLabel.toLowerCase()} payment`;
+      return '';
+    }
     if (typed.trim()) {
       const n = parseNum(typed);
       if (key === 'rate') return n !== null ? n.toFixed(n < 10 ? 2 : 0) : typed;
-      if (key === 'term') return n !== null ? `${n} weeks` : typed;
-      return n !== null ? money(n) : typed; // free text allowed (e.g. savings note)
+      if (key === 'term') return n !== null ? `${n} ${termUnit === 'daily' ? 'days' : 'weeks'}` : typed;
+      return n !== null ? money(n) : typed;
     }
     if (key === 'rate' && derived.rate !== null) return derived.rate.toFixed(2);
     if (key === 'payback' && derived.payback !== null) return money(derived.payback);
-    if (key === 'weeklyPayment' && derived.weeklyPayment !== null) return money(derived.weeklyPayment);
+    if (key === 'newPayment' && derived.newPayment !== null) return money(derived.newPayment);
     return '';
+  }
+
+  /** Tone per econ line for the colored presentation. */
+  function econTone(key: EconKey): 'red' | 'green' | undefined {
+    if (key === 'currentPayment') return 'red';
+    if (key === 'newPayment' || key === 'savings') return 'green';
+    return undefined;
   }
 
   /* ---------- funders + auto requirements ---------- */
@@ -159,8 +197,6 @@ export function ReverseConsolidationBuilder({
     [funders]
   );
 
-  // Auto-suggest "Contracts from X" for every funder with a balance. Lines
-  // the user deleted stay deleted; renames update in place.
   useEffect(() => {
     if (!restoredRef.current) return;
     const wanted = funders
@@ -187,21 +223,26 @@ export function ReverseConsolidationBuilder({
   /* ---------- disbursement schedule ---------- */
   function generateSchedule() {
     const funding = parseNum(econ.funding);
-    const term = parseNum(econ.term);
-    if (!funding || !term || term < 1) {
-      toast.error('Enter the total funding amount and the term (weeks) first.');
+    const count = parseNum(numDisbursements);
+    if (!count || count < 1 || count > 260) {
+      toast.error('Enter how many disbursements there are (the term doesn’t decide this — you do).');
       return;
     }
-    const weeks = Math.round(term);
-    const per = Math.floor((funding / weeks) * 100) / 100;
+    const n = Math.round(count);
+    const per = funding ? Math.floor((funding / n) * 100) / 100 : null;
     const start = startDate ? new Date(`${startDate}T00:00:00`) : new Date();
     const rows: ScheduleRow[] = [];
     let allocated = 0;
-    for (let w = 0; w < weeks; w++) {
-      // Final week absorbs the rounding remainder so the total is exact.
-      const amount = w === weeks - 1 ? Math.round((funding - allocated) * 100) / 100 : per;
-      allocated += amount;
-      rows.push({ week: w + 1, date: fmtDate(addDays(start, w * 7)), amount: String(amount) });
+    for (let i = 0; i < n; i++) {
+      // Equal split as a starting point (last row absorbs rounding) — every
+      // amount is editable, since real disbursements rarely stay uniform.
+      let amount = '';
+      if (per !== null && funding) {
+        const a = i === n - 1 ? Math.round((funding - allocated) * 100) / 100 : per;
+        allocated += a;
+        amount = String(a);
+      }
+      rows.push({ num: i + 1, date: fmtDate(addDays(start, i * 7)), amount });
     }
     setSchedule(rows);
   }
@@ -213,42 +254,53 @@ export function ReverseConsolidationBuilder({
 
   /* ---------- print / PDF ---------- */
   function generatePdf() {
-    if (!dealName.trim()) { toast.error('Enter the deal name first — it headlines the offer.'); return; }
+    if (!dealName.trim()) { toast.error('Enter the deal / company name first — it headlines the sheet.'); return; }
     const econRows = ECON_FIELDS
       .filter((f) => shown[f.key] && econValue(f.key))
-      .map((f) => `<tr><td class="k">${esc(f.label)}</td><td class="v">${esc(econValue(f.key))}</td></tr>`)
+      .map((f) => {
+        const tone = econTone(f.key);
+        const cls = tone === 'red' ? ' style="color:#dc2626"' : tone === 'green' ? ' style="color:#16a34a"' : '';
+        return `<tr><td class="k">${esc(f.label)}</td><td class="v"${cls}>${esc(econValue(f.key))}</td></tr>`;
+      })
       .join('');
     const funderRows = funders
       .filter((f) => f.name.trim() || parseNum(f.balance) !== null)
       .map((f) => `<tr><td>${esc(f.name.trim() || '—')}</td><td class="v">${esc(money(parseNum(f.balance)))}</td></tr>`)
       .join('');
-    const schedRows = schedule
-      .map((r) => `<tr><td>Week ${r.week}</td><td>${esc(r.date)}</td><td class="v">${esc(money(parseNum(r.amount)))}</td></tr>`)
+    // Schedule prints in side-by-side columns so the whole thing stays tight
+    // on one sheet even with 28+ disbursements.
+    const schedCols = chunk(schedule, schedule.length > 18 ? 3 : schedule.length > 8 ? 2 : 1)
+      .map((col) => `<table class="sched"><tr><th>#</th><th>Est. date</th><th style="text-align:right">Amount</th></tr>${
+        col.map((r) => `<tr><td>${r.num}</td><td>${esc(r.date)}</td><td class="v">${esc(money(parseNum(r.amount)))}</td></tr>`).join('')
+      }</table>`)
       .join('');
     const reqRows = requirements.filter((r) => r.trim()).map((r) => `<li>${esc(r)}</li>`).join('');
     const today = fmtDate(new Date());
 
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(dealName)} — Reverse Consolidation Offer</title>
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Reverse Consolidation — ${esc(dealName)}</title>
 <style>
   * { box-sizing: border-box; margin: 0; }
-  body { font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827; padding: 48px 56px; font-size: 13px; line-height: 1.5; }
-  .head { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 2px solid #111827; padding-bottom: 16px; margin-bottom: 24px; }
+  body { font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827; padding: 40px 48px; font-size: 13px; line-height: 1.45; }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 2px solid #111827; padding-bottom: 14px; margin-bottom: 20px; }
   .brand { display: flex; align-items: center; gap: 14px; }
-  .brand img { height: 48px; width: auto; max-width: 180px; object-fit: contain; }
+  .brand img { height: 46px; width: auto; max-width: 180px; object-fit: contain; }
   .brand .name { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
   .date { color: #6b7280; font-size: 12px; }
-  h1 { font-size: 16px; margin: 0 0 2px; }
-  .sub { color: #6b7280; margin-bottom: 20px; }
-  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; margin: 22px 0 8px; }
+  h1 { font-size: 17px; margin: 0 0 2px; }
+  .sub { color: #6b7280; margin-bottom: 16px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; margin: 18px 0 6px; }
   table { width: 100%; border-collapse: collapse; }
-  td, th { padding: 7px 10px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+  td, th { padding: 5px 9px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; font-size: 12.5px; }
   td.k { color: #374151; width: 55%; }
   td.v { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
   tr.total td { border-top: 2px solid #111827; border-bottom: none; font-weight: 700; }
+  .schedwrap { display: flex; gap: 18px; align-items: flex-start; }
+  table.sched { flex: 1; }
+  table.sched td, table.sched th { padding: 3.5px 8px; font-size: 12px; }
+  .schedtotal { margin-top: 6px; text-align: right; font-weight: 700; font-size: 12.5px; }
   ul { padding-left: 18px; }
-  li { margin: 3px 0; }
-  .note { margin-top: 26px; color: #6b7280; font-size: 11px; border-top: 1px solid #e5e7eb; padding-top: 12px; }
-  @media print { body { padding: 24px 28px; } }
+  li { margin: 2.5px 0; }
+  @media print { body { padding: 20px 26px; } }
 </style></head><body>
   <div class="head">
     <div class="brand">
@@ -257,24 +309,21 @@ export function ReverseConsolidationBuilder({
     </div>
     <div class="date">${esc(today)}</div>
   </div>
-  <h1>Reverse Consolidation Offer — ${esc(dealName)}</h1>
+  <h1>Reverse Consolidation — ${esc(dealName)}</h1>
   <div class="sub">Funding consolidation structured on weekly disbursements.</div>
 
-  ${econRows ? `<h2>Offer Breakdown</h2><table>${econRows}</table>` : ''}
+  ${econRows ? `<h2>Breakdown</h2><table>${econRows}</table>` : ''}
 
   ${funderRows ? `<h2>Positions Being Consolidated</h2><table>
     <tr><th>Funder</th><th style="text-align:right">Balance</th></tr>${funderRows}
     <tr class="total"><td>Total balances</td><td class="v">${esc(money(funderTotal))}</td></tr>
   </table>` : ''}
 
-  ${schedRows ? `<h2>Weekly Disbursement Schedule</h2><table>
-    <tr><th>Week</th><th>Date</th><th style="text-align:right">Disbursement</th></tr>${schedRows}
-    <tr class="total"><td colspan="2">Total disbursed</td><td class="v">${esc(money(scheduleTotal))}</td></tr>
-  </table>` : ''}
+  ${schedule.length ? `<h2>Disbursement Schedule (${schedule.length} weekly disbursements)</h2>
+    <div class="schedwrap">${schedCols}</div>
+    <div class="schedtotal">Total disbursed: ${esc(money(scheduleTotal))}</div>` : ''}
 
   ${reqRows ? `<h2>Requirements to Fund</h2><ul>${reqRows}</ul>` : ''}
-
-  <div class="note">Prepared by ${esc(companyName)} on ${esc(today)}. This offer summary is for discussion purposes; final terms are set by the funding agreement.</div>
 <script>window.onload = function(){ window.print(); };</script>
 </body></html>`;
 
@@ -286,21 +335,39 @@ export function ReverseConsolidationBuilder({
 
   function clearAll() {
     setDealName('');
-    setEcon({ funding: '', payback: '', rate: '', term: '', weeklyPayment: '', savings: '' });
-    setShown({ funding: true, payback: true, rate: true, term: true, weeklyPayment: true, savings: true });
+    setEcon({ funding: '', payback: '', rate: '', term: '', currentPayment: '', newPayment: '', savings: '' });
+    setShown({ funding: true, payback: true, rate: true, term: true, currentPayment: true, newPayment: true, savings: true });
+    setTermUnit('weekly');
+    setSavingsMode('percent');
     setFunders([{ id: rid(), name: '', balance: '' }]);
     setStartDate('');
+    setNumDisbursements('');
     setSchedule([]);
     setRequirements(DEFAULT_REQUIREMENTS);
     removedAutoReqsRef.current.clear();
     try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
   }
 
+  function econPlaceholder(key: EconKey): string {
+    switch (key) {
+      case 'funding': return '150,000';
+      case 'payback': return `auto: ${derived.payback !== null ? money(derived.payback) : 'funding × rate'}`;
+      case 'rate': return `auto: ${derived.rate !== null ? derived.rate.toFixed(2) : 'payback ÷ funding'}`;
+      case 'term': return termUnit === 'daily' ? 'e.g. 120 (days)' : 'e.g. 26 (weeks)';
+      case 'currentPayment': return `what they pay per ${payLabel.toLowerCase() === 'daily' ? 'day' : 'week'} now`;
+      case 'newPayment': return `auto: ${derived.newPayment !== null ? money(derived.newPayment) : 'payback ÷ term'}`;
+      case 'savings': return savingsMode === 'percent'
+        ? `auto: ${derived.savingsPct !== null && derived.savingsPct > 0 ? `${derived.savingsPct}%` : 'from current vs new'}`
+        : `auto: ${derived.savingsDollar !== null && derived.savingsDollar > 0 ? money(derived.savingsDollar) : 'from current vs new'}`;
+      default: return '';
+    }
+  }
+
   return (
     <div className="space-y-4 max-w-5xl">
       <PageHeader
         title="Reverse Consolidation Sheet"
-        description="Build a clean, branded offer for a weekly-disbursement consolidation: economics, positions being consolidated, disbursement schedule, and requirements to fund — then generate a PDF."
+        description="Build a clean, branded sheet for a weekly-disbursement consolidation: breakdown, positions, disbursement schedule, and requirements to fund — then generate a PDF."
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={clearAll}><RotateCcw className="h-4 w-4" /> Clear</Button>
@@ -317,7 +384,7 @@ export function ReverseConsolidationBuilder({
               <div className="text-sm font-semibold flex items-center gap-2">
                 <FileText className="h-4 w-4 text-primary" /> Deal
               </div>
-              <Field label="Deal name" required>
+              <Field label="Deal / company name" required>
                 <Input value={dealName} onChange={(e) => setDealName(e.target.value)} placeholder="e.g. ABC Logistics LLC" />
               </Field>
             </CardContent>
@@ -325,35 +392,64 @@ export function ReverseConsolidationBuilder({
 
           <Card>
             <CardContent className="p-4 space-y-3">
-              <div className="text-sm font-semibold">Offer economics</div>
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold">Breakdown</div>
+                <div className="flex items-center gap-1 text-xs">
+                  <span className="text-muted-foreground mr-1">Payments:</span>
+                  {(['weekly', 'daily'] as const).map((u) => (
+                    <button
+                      key={u}
+                      onClick={() => setTermUnit(u)}
+                      className={cn('px-2 py-1 rounded border text-xs font-medium transition',
+                        termUnit === u ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground')}
+                    >
+                      {u === 'weekly' ? 'Weekly' : 'Daily'}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <p className="text-xs text-muted-foreground">
-                Enter what you have — rate, payback, and weekly payment auto-derive from the others. The eye toggles what shows on the offer.
+                Enter what you have — rate, payback, the new payment, and savings auto-derive. The eye toggles what shows on the sheet.
               </p>
               <div className="space-y-2">
                 {ECON_FIELDS.map((f) => (
                   <div key={f.key} className="flex items-center gap-2">
                     <button
                       onClick={() => setShown((s) => ({ ...s, [f.key]: !s[f.key] }))}
-                      title={shown[f.key] ? 'Shown on the offer — click to hide' : 'Hidden from the offer — click to show'}
+                      title={shown[f.key] ? 'Shown on the sheet — click to hide' : 'Hidden from the sheet — click to show'}
                       className={cn('p-1.5 rounded-md transition-colors shrink-0',
                         shown[f.key] ? 'text-primary hover:bg-primary/10' : 'text-muted-foreground/40 hover:bg-muted')}
                     >
                       {shown[f.key] ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                     </button>
-                    <div className="w-40 text-xs font-medium shrink-0">{f.label}</div>
+                    <div className={cn(
+                      'w-44 text-xs font-medium shrink-0',
+                      econTone(f.key) === 'red' && 'text-red-600 dark:text-red-400',
+                      econTone(f.key) === 'green' && 'text-emerald-600 dark:text-emerald-400',
+                    )}>
+                      {f.label}
+                    </div>
                     <Input
                       className={cn('h-8 flex-1', !shown[f.key] && 'opacity-50')}
                       value={econ[f.key]}
                       onChange={(e) => setEcon((cur) => ({ ...cur, [f.key]: e.target.value }))}
-                      placeholder={
-                        f.key === 'funding' ? '150,000'
-                        : f.key === 'payback' ? `auto: ${derived.payback !== null ? money(derived.payback) : 'funding × rate'}`
-                        : f.key === 'rate' ? `auto: ${derived.rate !== null ? derived.rate.toFixed(2) : 'payback ÷ funding'}`
-                        : f.key === 'term' ? '26'
-                        : f.key === 'weeklyPayment' ? `auto: ${derived.weeklyPayment !== null ? money(derived.weeklyPayment) : 'payback ÷ weeks'}`
-                        : 'e.g. $2,400/week vs current payments'
-                      }
+                      placeholder={econPlaceholder(f.key)}
                     />
+                    {f.key === 'savings' && (
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        {(['percent', 'dollar'] as const).map((m) => (
+                          <button
+                            key={m}
+                            onClick={() => setSavingsMode(m)}
+                            title={m === 'percent' ? 'Savings as a percentage' : 'Savings as a dollar amount'}
+                            className={cn('px-1.5 py-1 rounded border text-xs font-semibold transition',
+                              savingsMode === m ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground')}
+                          >
+                            {m === 'percent' ? '%' : '$'}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -406,35 +502,48 @@ export function ReverseConsolidationBuilder({
           <Card>
             <CardContent className="p-4 space-y-3">
               <div className="text-sm font-semibold">Weekly disbursement schedule</div>
+              <p className="text-xs text-muted-foreground">
+                You choose how many disbursements — the term doesn&apos;t decide it. Amounts start as an even split of the funding and every one is editable. Dates are estimates.
+              </p>
               <div className="flex flex-wrap items-end gap-2">
+                <Field label="# of disbursements" className="w-[150px]">
+                  <Input
+                    className="h-8"
+                    inputMode="numeric"
+                    value={numDisbursements}
+                    onChange={(e) => setNumDisbursements(e.target.value)}
+                    placeholder="e.g. 28"
+                  />
+                </Field>
                 <Field label="First disbursement" className="w-[170px]">
                   <Input type="date" className="h-8" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
                 </Field>
                 <Button size="sm" variant="outline" onClick={generateSchedule}>
-                  Generate from funding ÷ term
+                  Generate {numDisbursements ? `${numDisbursements} rows` : 'schedule'}
                 </Button>
               </div>
               {schedule.length > 0 && (
                 <div className="rounded-lg border border-border overflow-hidden">
-                  <div className="max-h-56 overflow-y-auto">
+                  <div className="max-h-64 overflow-y-auto">
                     <table className="w-full text-xs">
                       <thead className="bg-muted/40 sticky top-0">
                         <tr className="text-left">
-                          <th className="px-3 py-1.5 font-semibold">Week</th>
-                          <th className="px-3 py-1.5 font-semibold">Date</th>
+                          <th className="px-3 py-1.5 font-semibold">#</th>
+                          <th className="px-3 py-1.5 font-semibold">Estimated date</th>
                           <th className="px-3 py-1.5 font-semibold text-right">Amount</th>
                           <th className="w-8"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/50">
                         {schedule.map((r, i) => (
-                          <tr key={r.week}>
-                            <td className="px-3 py-1">Week {r.week}</td>
+                          <tr key={r.num}>
+                            <td className="px-3 py-1">{r.num}</td>
                             <td className="px-3 py-1 text-muted-foreground">{r.date}</td>
                             <td className="px-1 py-0.5 text-right">
                               <input
                                 value={r.amount}
                                 onChange={(e) => setSchedule((arr) => arr.map((x, xi) => xi === i ? { ...x, amount: e.target.value } : x))}
+                                placeholder="amount"
                                 className="w-24 text-right bg-transparent px-2 py-0.5 rounded outline-none focus:ring-1 focus:ring-ring/40 tabular-nums"
                               />
                             </td>
@@ -442,7 +551,7 @@ export function ReverseConsolidationBuilder({
                               <button
                                 onClick={() => setSchedule((arr) => arr.filter((_, xi) => xi !== i))}
                                 className="p-0.5 rounded text-muted-foreground/40 hover:text-rose-500"
-                                title="Remove week"
+                                title="Remove disbursement"
                               >
                                 <Trash2 className="h-3 w-3" />
                               </button>
@@ -453,7 +562,7 @@ export function ReverseConsolidationBuilder({
                     </table>
                   </div>
                   <div className="px-3 py-1.5 border-t border-border bg-muted/20 text-xs flex justify-between">
-                    <span className="text-muted-foreground">Total disbursed</span>
+                    <span className="text-muted-foreground">Total disbursed ({schedule.length})</span>
                     <span className="font-semibold tabular-nums">{money(scheduleTotal)}</span>
                   </div>
                 </div>
@@ -510,7 +619,7 @@ export function ReverseConsolidationBuilder({
         {/* ---- RIGHT: live preview ---- */}
         <Card className="lg:sticky lg:top-4">
           <CardContent className="p-5">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold mb-3">Offer preview</div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold mb-3">Sheet preview</div>
             <div className="rounded-lg border border-border bg-card p-5 space-y-4 text-sm">
               <div className="flex items-center justify-between gap-3 border-b-2 border-foreground pb-3">
                 <div className="flex items-center gap-3 min-w-0">
@@ -521,18 +630,24 @@ export function ReverseConsolidationBuilder({
                 <div className="text-xs text-muted-foreground shrink-0">{fmtDate(new Date())}</div>
               </div>
               <div>
-                <div className="font-semibold">Reverse Consolidation Offer{dealName ? ` — ${dealName}` : ''}</div>
+                <div className="font-semibold">Reverse Consolidation{dealName ? ` — ${dealName}` : ''}</div>
                 <div className="text-xs text-muted-foreground">Funding consolidation structured on weekly disbursements.</div>
               </div>
 
               {ECON_FIELDS.some((f) => shown[f.key] && econValue(f.key)) && (
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Offer breakdown</div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Breakdown</div>
                   <div className="divide-y divide-border/60">
                     {ECON_FIELDS.filter((f) => shown[f.key] && econValue(f.key)).map((f) => (
                       <div key={f.key} className="flex justify-between py-1">
                         <span className="text-muted-foreground">{f.label}</span>
-                        <span className="font-semibold tabular-nums">{econValue(f.key)}</span>
+                        <span className={cn(
+                          'font-semibold tabular-nums',
+                          econTone(f.key) === 'red' && 'text-red-600 dark:text-red-400',
+                          econTone(f.key) === 'green' && 'text-emerald-600 dark:text-emerald-400',
+                        )}>
+                          {econValue(f.key)}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -560,12 +675,20 @@ export function ReverseConsolidationBuilder({
               {schedule.length > 0 && (
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">
-                    Weekly disbursements — {schedule.length} weeks, {money(scheduleTotal)} total
+                    Disbursement schedule — {schedule.length} weekly disbursements, {money(scheduleTotal)} total
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    {schedule.slice(0, 3).map((r) => `Wk ${r.week}: ${money(parseNum(r.amount))}`).join(' · ')}
-                    {schedule.length > 3 && ` · … · Wk ${schedule[schedule.length - 1].week}: ${money(parseNum(schedule[schedule.length - 1].amount))}`}
-                    <span className="block mt-0.5">(full schedule appears on the PDF)</span>
+                  {/* Tight side-by-side columns, mirroring the printed sheet. */}
+                  <div className="grid grid-cols-2 gap-x-4 text-xs">
+                    {chunk(schedule, 2).map((col, ci) => (
+                      <div key={ci} className="divide-y divide-border/40">
+                        {col.map((r) => (
+                          <div key={r.num} className="flex justify-between gap-2 py-0.5">
+                            <span className="text-muted-foreground shrink-0">#{r.num} · {r.date}</span>
+                            <span className="font-medium tabular-nums">{money(parseNum(r.amount))}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

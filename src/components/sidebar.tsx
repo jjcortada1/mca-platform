@@ -391,6 +391,8 @@ function SidebarBody({
   const [itemOverrides, setItemOverrides] = useState<Record<string, { label?: string; icon?: string }> | null>(null);
   // Feature access set by the platform owner for this company. null = all.
   const [enabledNavItems, setEnabledNavItems] = useState<string[] | null>(null);
+  // Tools the COMPANY ADMIN hid for their own company. null = nothing hidden.
+  const [hiddenNavItems, setHiddenNavItems] = useState<string[] | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetch('/api/settings/sidebar-order', { cache: 'no-store' })
@@ -401,10 +403,12 @@ function SidebarBody({
         const c = j?.data?.categories;
         const ov = j?.data?.itemOverrides;
         const en = j?.data?.enabledNavItems;
+        const hid = j?.data?.hiddenNavItems;
         if (Array.isArray(o)) setSavedOrder(o);
         if (Array.isArray(c)) setSavedCategories(c);
         if (ov && typeof ov === 'object') setItemOverrides(ov);
         if (Array.isArray(en)) setEnabledNavItems(en);
+        if (Array.isArray(hid)) setHiddenNavItems(hid);
       })
       .catch(() => { /* fall through to default order */ });
     return () => { cancelled = true; };
@@ -433,14 +437,16 @@ function SidebarBody({
     savedCategories,
     savedOrder,
     // Visible when: the user has the permission (admins pass everything)
-    // AND the feature is enabled for this company (platform-owner control).
+    // AND the feature is enabled for this company (platform-owner control)
+    // AND the company admin hasn't hidden it (self-service control).
     // EXCEPTION: /worksheets is a PERSONAL, cross-company feature — sheets
     // can be shared to users at other companies, so it must never disappear
     // because of a company's feature-access list (a rep at another company
     // couldn't find a sheet shared with him for exactly this reason).
     (item) =>
       (isAdmin || user.permissions.includes(item.perm)) &&
-      (item.href === '/worksheets' || enabledNavItems === null || enabledNavItems.includes(item.href)),
+      (item.href === '/worksheets' || enabledNavItems === null || enabledNavItems.includes(item.href)) &&
+      (item.href === '/worksheets' || !hiddenNavItems || !hiddenNavItems.includes(item.href)),
   );
 
   return (

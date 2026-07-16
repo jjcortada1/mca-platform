@@ -26,6 +26,7 @@ export async function GET() {
         sidebarOrder: companies.sidebarOrder,
         sidebarCategories: companies.sidebarCategories,
         sidebarItemOverrides: companies.sidebarItemOverrides,
+        sidebarHiddenItems: companies.sidebarHiddenItems,
         enabledNavItems: companies.enabledNavItems,
       })
       .from(companies)
@@ -36,6 +37,8 @@ export async function GET() {
         order: row?.sidebarOrder ?? null,
         categories: row?.sidebarCategories ?? null,
         itemOverrides: row?.sidebarItemOverrides ?? null,
+        // Company-admin-controlled: tools hidden for THIS company.
+        hiddenNavItems: row?.sidebarHiddenItems ?? null,
         // Platform-owner-controlled feature access. null = everything.
         enabledNavItems: row?.enabledNavItems ?? null,
       },
@@ -64,6 +67,9 @@ const schema = z.object({
   // Keyed by href. We cap key count at 60 so a runaway payload can't blow
   // up the row even if every conceivable nav item gets an override.
   itemOverrides: z.record(z.string().max(80), overrideSchema).nullable().optional(),
+  // Tools the admin hides for their OWN company. Omit to leave unchanged;
+  // null or [] clears all hides.
+  hiddenNavItems: z.array(z.string().max(80)).max(40).nullable().optional(),
 });
 
 export async function PUT(req: NextRequest) {
@@ -119,17 +125,31 @@ export async function PUT(req: NextRequest) {
       if (Object.keys(cleanedOverrides).length === 0) cleanedOverrides = null;
     }
 
+    // Hidden tools — company-admin self-service. '/worksheets' can't be
+    // hidden this way (sheets are shared cross-company; hiding the tab
+    // strands users who were shared a sheet — same reason it's exempt from
+    // the platform feature-access list).
+    let cleanedHidden: string[] | null | undefined = undefined;
+    if (body.hiddenNavItems !== undefined) {
+      cleanedHidden = body.hiddenNavItems === null
+        ? null
+        : Array.from(new Set(body.hiddenNavItems.map(cleanHref).filter(validHref)))
+            .filter((h) => h !== '/worksheets');
+      if (cleanedHidden && cleanedHidden.length === 0) cleanedHidden = null;
+    }
+
     await db.update(companies)
       .set({
         sidebarOrder: cleanedOrder,
         sidebarCategories: cleanedCategories,
         sidebarItemOverrides: cleanedOverrides,
+        ...(cleanedHidden !== undefined ? { sidebarHiddenItems: cleanedHidden } : {}),
         updatedAt: new Date(),
       })
       .where(eq(companies.id, ctx.companyId));
     return NextResponse.json({
       ok: true,
-      data: { order: cleanedOrder, categories: cleanedCategories, itemOverrides: cleanedOverrides },
+      data: { order: cleanedOrder, categories: cleanedCategories, itemOverrides: cleanedOverrides, hiddenNavItems: cleanedHidden ?? null },
     });
   } catch (e) { return apiError(e); }
 }

@@ -10,8 +10,9 @@ import {
   Button, Input, Textarea, Field, Badge, EmptyState,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
+import { useConfirm } from '@/components/confirm-provider';
 import { useAutoRefresh } from '@/lib/use-auto-refresh';
-import { FileSignature, Send } from 'lucide-react';
+import { FileSignature, Send, Copy, Trash2 } from 'lucide-react';
 
 interface EsignRow {
   id: string;
@@ -19,11 +20,13 @@ interface EsignRow {
   recipientEmail: string;
   status: string;
   createdAt: string;
+  applicationUrl?: string | null;
   senderName: string | null;
 }
 
 export default function EsignPage() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [rows, setRows] = useState<EsignRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
@@ -61,6 +64,31 @@ export default function EsignPage() {
     } finally {
       setSending(false);
     }
+  }
+
+  async function copyLink(r: EsignRow) {
+    if (!r.applicationUrl) return;
+    try {
+      await navigator.clipboard.writeText(r.applicationUrl);
+      toast.success('Application link copied.');
+    } catch {
+      toast.error('Could not copy — your browser blocked clipboard access.');
+    }
+  }
+
+  async function remove(r: EsignRow) {
+    const ok = await confirm({
+      title: `Delete the application record for ${r.recipientName}?`,
+      description: 'Only this history entry is removed — nothing is unsent.',
+      confirmLabel: 'Delete record',
+      destructive: true,
+    });
+    if (!ok) return;
+    const res = await fetch(`/api/esign/requests/${r.id}`, { method: 'DELETE' });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { toast.error(j.error || 'Could not delete.'); return; }
+    setRows((arr) => arr.filter((x) => x.id !== r.id));
+    toast.success('Record deleted.');
   }
 
   return (
@@ -102,13 +130,29 @@ export default function EsignPage() {
           ) : (
             <div className="divide-y divide-border/60">
               {rows.map((r) => (
-                <div key={r.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                <div key={r.id} className="group flex items-center gap-3 px-4 py-2.5 text-sm">
                   <span className="font-medium">{r.recipientName}</span>
                   <span className="text-muted-foreground truncate">{r.recipientEmail}</span>
-                  <span className="ml-auto flex items-center gap-3 shrink-0">
+                  <span className="ml-auto flex items-center gap-2 shrink-0">
                     {r.senderName && <span className="text-[11px] text-muted-foreground">by {r.senderName}</span>}
                     <Badge className="bg-blue-100 text-blue-800 border-blue-200 capitalize">{r.status}</Badge>
                     <span className="text-[11px] text-muted-foreground tabular-nums">{new Date(r.createdAt).toLocaleDateString()}</span>
+                    {r.applicationUrl && (
+                      <button
+                        onClick={() => copyLink(r)}
+                        title="Copy the application link that was sent"
+                        className="p-1 rounded text-muted-foreground/50 group-hover:text-muted-foreground hover:!text-foreground hover:bg-muted transition-colors"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => remove(r)}
+                      title="Delete this record"
+                      className="p-1 rounded text-muted-foreground/50 group-hover:text-muted-foreground hover:!text-rose-500 hover:bg-muted transition-colors"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </span>
                 </div>
               ))}

@@ -28,7 +28,7 @@ import { useAutoRefresh } from '@/lib/use-auto-refresh';
 import { cn } from '@/lib/utils';
 import {
   Plus, Table2, Share2, Settings2, Trash2, X, ChevronUp, ChevronDown, ChevronRight,
-  Users as UsersIcon, GripVertical, Upload, FileSpreadsheet,
+  Users as UsersIcon, GripVertical, Upload, FileSpreadsheet, Copy,
 } from 'lucide-react';
 
 interface Col { id: string; label: string; width?: number }
@@ -89,10 +89,14 @@ export default function WorksheetsPage() {
   const workbookRef = useRef<any>(null); // XLSX.WorkBook of the picked file
   const xlsxRef = useRef<any>(null); // the dynamically-imported xlsx module
 
-  // Drag-to-reorder
+  // Drag-to-reorder (rows)
   const dragFromRef = useRef<number | null>(null);
   const [dragArmed, setDragArmed] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
+
+  // Drag-to-reorder (sheet TABS — own sheets only; shared tabs stay put)
+  const tabDragFromRef = useRef<number | null>(null);
+  const [tabDragOver, setTabDragOver] = useState<number | null>(null);
 
   // ---- Refs that make saving race-proof ----
   const activeIdRef = useRef<string | null>(null);
@@ -613,6 +617,40 @@ export default function WorksheetsPage() {
   const ownSheets = useMemo(() => sheets.filter((s) => s.myRole === 'owner'), [sheets]);
   const sharedSheets = useMemo(() => sheets.filter((s) => s.myRole !== 'owner'), [sheets]);
 
+  /* ---------- sheet-tab drag reorder (own sheets) ---------- */
+
+  async function dropTab(to: number) {
+    const from = tabDragFromRef.current;
+    tabDragFromRef.current = null;
+    setTabDragOver(null);
+    if (from === null || from === to) return;
+    const own = [...ownSheets];
+    const [moved] = own.splice(from, 1);
+    own.splice(to, 0, moved);
+    setSheets([...own, ...sharedSheets]);
+    try {
+      const res = await fetch('/api/worksheets/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sheetIds: own.map((s) => s.id) }),
+      });
+      if (!res.ok) toast.error('Could not save the tab order — it may reset on refresh.');
+    } catch {
+      toast.error('Network error saving the tab order.');
+    }
+  }
+
+  /** Copy one cell's text to the clipboard. */
+  async function copyCell(text: string, label: string) {
+    if (!text) { toast.error(`${label} is empty — nothing to copy.`); return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label} copied.`);
+    } catch {
+      toast.error('Could not copy — your browser blocked clipboard access.');
+    }
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -632,10 +670,32 @@ export default function WorksheetsPage() {
         />
       ) : (
         <>
-          {/* Sheet tabs */}
+          {/* Sheet tabs — drag your own tabs to reorder them (Sheet 2 before
+              Sheet 1, etc.); the order saves automatically. */}
           <div className="flex items-end gap-1 border-b border-border overflow-x-auto pb-px">
-            {ownSheets.map((s) => (
-              <SheetTab key={s.id} sheet={s} active={activeId === s.id} onClick={() => setActiveId(s.id)} />
+            {ownSheets.map((s, i) => (
+              <div
+                key={s.id}
+                draggable
+                onDragStart={(e) => {
+                  tabDragFromRef.current = i;
+                  e.dataTransfer.effectAllowed = 'move';
+                  try { e.dataTransfer.setData('text/plain', String(i)); } catch { /* older browsers */ }
+                }}
+                onDragOver={(e) => {
+                  if (tabDragFromRef.current === null) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (tabDragOver !== i) setTabDragOver(i);
+                }}
+                onDrop={(e) => { e.preventDefault(); dropTab(i); }}
+                onDragEnd={() => { tabDragFromRef.current = null; setTabDragOver(null); }}
+                className={cn('shrink-0 rounded-t-lg transition-shadow',
+                  tabDragOver === i && tabDragFromRef.current !== null && tabDragFromRef.current !== i &&
+                  'ring-2 ring-primary/50')}
+              >
+                <SheetTab sheet={s} active={activeId === s.id} onClick={() => setActiveId(s.id)} />
+              </div>
             ))}
             {sharedSheets.length > 0 && <div className="mx-1.5 mb-2 h-4 w-px bg-border shrink-0" />}
             {sharedSheets.map((s) => (
@@ -1003,7 +1063,18 @@ export default function WorksheetsPage() {
                                   </div>
                                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                                     {detail.columns.map((c) => (
-                                      <Field key={c.id} label={c.label}>
+                                      <div key={c.id} className="space-y-1">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-xs font-medium text-muted-foreground">{c.label}</span>
+                                          {/* One-press copy for this exact value. */}
+                                          <button
+                                            onClick={() => copyCell(row.cells[c.id] ?? '', c.label)}
+                                            title={`Copy ${c.label}`}
+                                            className="p-1 rounded text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-colors"
+                                          >
+                                            <Copy className="h-3.5 w-3.5" />
+                                          </button>
+                                        </div>
                                         {canEdit ? (
                                           <Textarea
                                             rows={2}
@@ -1017,7 +1088,7 @@ export default function WorksheetsPage() {
                                             {row.cells[c.id] || <span className="text-muted-foreground">—</span>}
                                           </div>
                                         )}
-                                      </Field>
+                                      </div>
                                     ))}
                                   </div>
                                 </div>
