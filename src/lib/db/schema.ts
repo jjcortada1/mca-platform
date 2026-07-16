@@ -397,6 +397,12 @@ export const deals = pgTable(
     // etc). Surfaced in the funded-deal expand view AND in the rep
     // commissions view so reps see the deal context next to their pay.
     fundedNotes: text('funded_notes'),
+    // Refinance chain: when this deal was created by refinancing another
+    // funded deal, this points at the ORIGINAL deal. The original stays in
+    // Funded Deals with fundedSubStatus='refinanced'; this link preserves
+    // the full history in both directions. ON DELETE SET NULL so removing
+    // an old deal never cascades into the refi.
+    refinancedFromDealId: uuid('refinanced_from_deal_id'),
     /**
      * Submission intake — the structured context broker wants funders to
      * see when shopping. Stored as JSONB so we can evolve the shape
@@ -691,6 +697,10 @@ export const fundedEmailContacts = pgTable(
     email: varchar('email', { length: 255 }).notNull(),
     company: varchar('company', { length: 200 }),
     notes: text('notes'),
+    // Default recipient(s): contacts flagged here are pre-filled into the
+    // funded email "To" field. The merchant's email is NEVER auto-filled —
+    // funded emails are internal and must not accidentally reach merchants.
+    isDefault: boolean('is_default').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   }

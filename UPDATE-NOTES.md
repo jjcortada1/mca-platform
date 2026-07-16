@@ -1,3 +1,86 @@
+# Update — July 2026 (round 23) — Enterprise Round A: funded email safety, refinance, live deal math, smarter matching, reverse consolidation sheet
+
+## Funded email — the merchant can never be emailed by accident
+- **Fixed the recipient bug**: selecting a deal used to put the merchant's
+  email straight into the To field. That auto-fill is gone completely.
+- **Default recipients**: on Funded email → Contacts, **star any contact**
+  to make them a default — their address pre-fills the To field on every
+  funded email (multiple stars = multiple recipients).
+- **Backstop guard**: if a recipient or CC matches the attached deal's
+  merchant email, sending stops with an explicit "This would email the
+  MERCHANT" confirmation.
+- **Autofill mappings fixed**: "Merchant email" fields now get the email,
+  "Merchant cell/phone" the phone, "First/Last name" the right name part,
+  "Business/Company/DBA" the business name, and the generic merchant-name
+  fields the full name. (Before, anything containing "merchant" got the
+  name — including email and cell fields — and phone was never mapped.)
+- The rep selector is labeled "On behalf of rep" and still auto-picks the
+  deal's assigned rep.
+
+## Refinance — logged from the funded deal, in place
+- On Funded Deals, **Refinance…** now opens a form right there: merchant
+  info carries over automatically (shown read-only), you enter ONLY the new
+  funding details, with the payback/payment/net math computed live as you
+  type.
+- On save: a **new funded deal is created directly** (it never routes back
+  through Active Deals), linked to the original; the **original stays in
+  Funded Deals** marked Refinanced and treated as paid off through the
+  refi (optional payoff amount recorded). The rep gets a notification.
+- The new deal counts as a new funded deal, per your call.
+
+## Live deal math everywhere funding details are entered
+- New shared calculation engine: total payback, payment (per business day /
+  per week), fee amount, net to merchant, cost of capital ($ and %), and
+  commission $ **recompute instantly as you type** — in the Mark Funded
+  modal, the Funded Deals editor, and the Refinance form. Dollar values
+  format with commas and two decimals.
+
+## Shop & Submit — matching and reliability
+- Renamed **Deal Profile → Deal Intake Form** and **Positions → Open
+  Positions**; dropdown placeholders say **Select** instead of Pick.
+- **Matching starts from your first selection** — pick just Open Positions
+  and funders filter immediately; every field you add refines the results.
+  Unfilled fields are skipped (never treated as $0 revenue).
+- **Open-positions rule confirmed and labeled**: merchant's open positions
+  ≤ funder max = eligible (2 open vs max 2 qualifies; 3 vs 2 doesn't) —
+  the reasons text now spells out the comparison.
+- **Industry matching fixed**: deal industries and funder restrictions are
+  now compared through a normalizer (case, spacing, plurals) plus an alias
+  map (Trucking≡Transportation, Restaurants≡Restaurant, Medical≡Healthcare,
+  Contractor≡Construction, and more) — stored values are never rewritten,
+  so nothing breaks on existing deals.
+- **Credit dropdown order**: Unknown first, then Below 600, then ascending.
+- **Silent send failure fixed**: pressing Send with no funders selected
+  used to do nothing; now it tells you exactly what's missing. Your form
+  draft still survives failures for retry.
+- **No more flashing**: match results stay on screen while a refresh is in
+  flight, with a **centered "Matching funders…" indicator** over the panel
+  instead of a note at the bottom.
+
+## Funders — duplicate action removed
+- The funder quick view had Edit at the top and "Edit full details" at the
+  bottom opening the same editor. One Edit button now, in the header.
+
+## NEW: Reverse Consolidation Sheet (sidebar → Resources)
+- Build a client-facing offer for a weekly-disbursement consolidation:
+  funding, payback, rate, term, weekly payment, savings — **each line can
+  be shown or hidden** with the eye toggle; rate/payback/weekly payment
+  auto-derive from what you enter.
+- Add the **funders and balances** being consolidated (total computed), and
+  generate the **week-by-week disbursement schedule** (funding ÷ term, last
+  week absorbs rounding; every amount editable; pick the first date).
+- **Requirements to Fund**: starts with driver's license + voided check,
+  and **auto-adds "Contracts from X"** for every funder with a balance —
+  add, edit, or remove any line.
+- **Generate PDF** produces a clean branded document — your company name
+  and uploaded logo on top — via the browser's print-to-PDF. A live
+  preview shows the offer as you build it. Nothing is stored in the
+  database; your draft is kept in the browser so refreshing doesn't lose it.
+- Note: if your company uses the feature-access list (master settings),
+  enable "Reverse Consolidation" there to show the tab.
+
+---
+
 # Update — July 2026 (round 22) — Enterprise round 1: Sheets behaviors, import, sidebar, security audit
 
 ## Worksheets — drag rows to reorder

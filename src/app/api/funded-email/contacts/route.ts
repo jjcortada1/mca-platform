@@ -20,6 +20,8 @@ const upsertSchema = z.object({
   email: z.string().email().max(255).toLowerCase().trim(),
   company: z.string().max(200).optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
+  // Default recipients are pre-filled into the funded email "To" field.
+  isDefault: z.boolean().optional(),
 });
 
 export async function GET() {
@@ -45,6 +47,7 @@ export async function POST(req: NextRequest) {
           email: body.email,
           company: body.company?.trim() || null,
           notes: body.notes?.trim() || null,
+          ...(body.isDefault !== undefined ? { isDefault: body.isDefault } : {}),
           updatedAt: new Date(),
         })
         .where(and(
@@ -62,6 +65,7 @@ export async function POST(req: NextRequest) {
       email: body.email,
       company: body.company?.trim() || null,
       notes: body.notes?.trim() || null,
+      isDefault: body.isDefault ?? false,
     }).returning();
     return NextResponse.json({ ok: true, data: created });
   } catch (e) { return apiError(e); }

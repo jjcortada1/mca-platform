@@ -22,12 +22,14 @@ export type CreditTier = 'unknown' | 'under_550' | '550_599' | '600_649' | '650_
 export type DealType = 'standard_mca' | 'reverse_consolidation';
 
 export interface DealCriteria {
-  monthlyRevenue: number;
+  // null/undefined = not provided yet → the check is SKIPPED (matching can
+  // start from the first field the user fills in, refining as they go).
+  monthlyRevenue?: number | null;
   // EITHER legacy enum:
   creditScore?: CreditTier;
   // OR numeric floor (preferred — comes from match_options.meta.minScore):
   creditScoreValue?: number | null;
-  positions: number;
+  positions?: number | null;
   industry: string; // 'other' = ignore
   state: string; // 'other' = ignore
   dealType: DealType;
@@ -113,6 +115,57 @@ function fmtMoney(n: number): string {
   return `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 }
 
+/**
+ * Industry normalization — the single source of truth for comparing a
+ * deal's industry against a funder's restriction list.
+ *
+ * Restrictions are typed/imported as free text over time ("Trucking",
+ * "trucking ", "Restaurants", "restaurant"), while deal industries come
+ * from the match-options VALUE ("trucking", "restaurant"). Raw string
+ * equality silently missed near-matches. We normalize BOTH sides:
+ *   1. lowercase, trim, strip everything non-alphanumeric
+ *   2. drop a trailing plural 's' (restaurants ≡ restaurant)
+ *   3. map known aliases to one canonical key
+ * Stored values are NEVER rewritten — normalization happens only at
+ * compare time, so editing an industry can't break existing deals.
+ */
+const INDUSTRY_ALIASES: Record<string, string> = {
+  trucking: 'transportation',
+  transport: 'transportation',
+  logistic: 'transportation',
+  autotransport: 'transportation',
+  restaurantsbars: 'restaurant',
+  foodservice: 'restaurant',
+  foodbeverage: 'restaurant',
+  bar: 'restaurant',
+  medicalhealthcare: 'healthcare',
+  medical: 'healthcare',
+  healthservice: 'healthcare',
+  constructioncontractor: 'construction',
+  contractor: 'construction',
+  generalcontractor: 'construction',
+  ecommerce: 'retail',
+  onlineretail: 'retail',
+  retailstore: 'retail',
+  lawfirm: 'legal',
+  attorney: 'legal',
+  lawyer: 'legal',
+  realtor: 'realestate',
+  autorepair: 'automotive',
+  autosale: 'automotive',
+  cardealer: 'automotive',
+  usedcardealer: 'automotive',
+  cannabisdispensary: 'cannabis',
+  dispensary: 'cannabis',
+  cbd: 'cannabis',
+};
+
+export function normalizeIndustry(raw: string): string {
+  let s = (raw || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  if (s.length > 3 && s.endsWith('s')) s = s.slice(0, -1);
+  return INDUSTRY_ALIASES[s] ?? s;
+}
+
 function dealScoreFloor(criteria: DealCriteria): number | null {
   // Numeric floor wins if explicitly provided
   if (criteria.creditScoreValue !== undefined && criteria.creditScoreValue !== null) {
@@ -161,22 +214,28 @@ export function matchFunder(criteria: DealCriteria, funder: FunderForMatching): 
     }
   }
 
-  // Revenue (uses effective)
-  if (criteria.monthlyRevenue < effectiveMinRevenue) {
-    matched = false;
-    reasons.push(`Min revenue ${fmtMoney(effectiveMinRevenue)}, deal has ${fmtMoney(criteria.monthlyRevenue)}`);
-    reasonCodes.push('revenue_too_low');
-  } else {
-    reasons.push(`Revenue OK (min ${fmtMoney(effectiveMinRevenue)})`);
+  // Revenue (uses effective) — skipped entirely when not provided yet.
+  if (criteria.monthlyRevenue !== null && criteria.monthlyRevenue !== undefined) {
+    if (criteria.monthlyRevenue < effectiveMinRevenue) {
+      matched = false;
+      reasons.push(`Min revenue ${fmtMoney(effectiveMinRevenue)}, deal has ${fmtMoney(criteria.monthlyRevenue)}`);
+      reasonCodes.push('revenue_too_low');
+    } else {
+      reasons.push(`Revenue OK (min ${fmtMoney(effectiveMinRevenue)})`);
+    }
   }
 
-  // Positions (uses effective)
-  if (criteria.positions > effectiveMaxPositions) {
-    matched = false;
-    reasons.push(`Max positions ${effectiveMaxPositions}${funder.tierName ? ` in ${funder.tierName}` : ''}, deal has ${criteria.positions}`);
-    reasonCodes.push('positions_too_high');
-  } else {
-    reasons.push(`Positions OK (max ${effectiveMaxPositions}${funder.tierName ? ` in ${funder.tierName}` : ''})`);
+  // Open positions (uses effective) — merchant's current active positions
+  // vs the funder's max. AT the max still qualifies (<= passes); only MORE
+  // than the max excludes. Skipped when not provided yet.
+  if (criteria.positions !== null && criteria.positions !== undefined) {
+    if (criteria.positions > effectiveMaxPositions) {
+      matched = false;
+      reasons.push(`Max positions ${effectiveMaxPositions}${funder.tierName ? ` in ${funder.tierName}` : ''}, deal has ${criteria.positions} open`);
+      reasonCodes.push('positions_too_high');
+    } else {
+      reasons.push(`Open positions OK (${criteria.positions} ≤ max ${effectiveMaxPositions}${funder.tierName ? ` in ${funder.tierName}` : ''})`);
+    }
   }
 
   // Credit — score-floor comparison (uses effective)
@@ -203,10 +262,13 @@ export function matchFunder(criteria: DealCriteria, funder: FunderForMatching): 
     }
   }
 
-  // Industry restrictions (funder-level only)
+  // Industry restrictions (funder-level only) — compared through
+  // normalizeIndustry so case, spacing, plurals, and known aliases
+  // ("Trucking" vs "transportation") can't cause a silent mismatch.
   if (criteria.industry && criteria.industry !== 'other') {
-    const restricted = funder.restrictedIndustries.map((i) => i.toLowerCase());
-    if (restricted.includes(criteria.industry.toLowerCase())) {
+    const dealInd = normalizeIndustry(criteria.industry);
+    const restricted = funder.restrictedIndustries.map(normalizeIndustry);
+    if (dealInd && restricted.includes(dealInd)) {
       matched = false;
       reasons.push(`Funder does not lend to ${criteria.industry}`);
       reasonCodes.push('restricted_industry');

@@ -12,6 +12,7 @@ import { computePaydown, buildPaymentSchedule, DEAL_STATUS_META, DEAL_STATUS_OPT
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useConfirm } from '@/components/confirm-provider';
 import { useAutoRefresh } from '@/lib/use-auto-refresh';
+import { DealEconomics } from '@/components/deal-economics';
 
 interface Deal {
   id: string;
@@ -1557,6 +1558,18 @@ function MarkFundedModal({
                 </select>
               </Field>
             </div>
+            {/* Live economics — payback / payment / net / cost of capital
+                recompute instantly as the funding numbers are typed. */}
+            <DealEconomics
+              className="mt-3"
+              input={{
+                fundedAmount: form.fundedAmount,
+                factorRate: form.factorRate,
+                feePct: form.feePct,
+                termMode: form.termMode,
+                termCount: form.termCount,
+              }}
+            />
           </section>
 
           <section>

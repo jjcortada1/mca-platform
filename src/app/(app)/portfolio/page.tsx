@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Card, CardContent, PageHeader, Input, Button, CurrencyInput, PercentInput } from '@/components/ui/primitives';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/toast';
@@ -14,6 +13,7 @@ import { FundedApprovalsCard } from '@/components/funded-approvals-card';
 import { useAutoRefresh } from '@/lib/use-auto-refresh';
 import { computePaydown } from '@/lib/deals/paydown';
 import { formatCalendarDate, toDateInput } from '@/lib/dates';
+import { DealEconomics } from '@/components/deal-economics';
 
 interface Deal {
   id: string;
@@ -30,6 +30,8 @@ interface Deal {
   businessState?: string | null;
   businessZip?: string | null;
   industry?: string | null;
+  // Set when this deal was created by refinancing an earlier funded deal.
+  refinancedFromDealId?: string | null;
   status: string;
   fundedAmount: string | null;
   feePct: string | null;
@@ -556,6 +558,7 @@ export default function PortfolioPage() {
                   onUpdated={(patched) => {
                     setDeals((arr) => arr.map((d) => d.id === deal.id ? { ...d, ...patched } : d));
                   }}
+                  onRefinanced={loadDeals}
                   onRequestDelete={() => setDeleting({ dealId: deal.id, name: deal.name })}
                 />
               ))}
@@ -670,6 +673,7 @@ function FundedDealRow({
   funders,
   forceExpand,
   onUpdated,
+  onRefinanced,
   onRequestDelete,
 }: {
   deal: Deal;
@@ -683,6 +687,8 @@ function FundedDealRow({
    */
   forceExpand?: boolean;
   onUpdated: (patch: Partial<Deal>) => void;
+  /** Reload the whole list — a refinance creates a NEW deal the parent must fetch. */
+  onRefinanced: () => void;
   onRequestDelete: () => void;
 }) {
   // Own toast handle — FundedDealRow is a separate component, so it can't see
@@ -709,107 +715,71 @@ function FundedDealRow({
   }, [forceExpand]);
   const [editing, setEditing] = useState(!p.hasStructure);
   const [saving, setSaving] = useState(false);
-  // Refi flow state — kicks in when admin clicks "Mark as refinanced".
-  // Confirmation dialog asks for an optional payoff amount (sometimes the
-  // refi proceeds differ from the contracted balance — discount, etc),
-  // then patches the old deal (paid off + 100% collected + sub-status
-  // 'refinanced') and routes the user to /active-deals where the new
-  // deal form opens pre-filled with the merchant's contact info.
+  // Refinance flow — happens ENTIRELY here, in place. The modal shows the
+  // merchant info being carried over (read-only), asks only for the NEW
+  // funding details, and posts to /api/deals/[id]/refinance which creates
+  // the new funded deal + marks this one refinanced. The deal never goes
+  // back through Active Deals.
   const [refiOpen, setRefiOpen] = useState(false);
-  const [refiPayoff, setRefiPayoff] = useState<string>('');
   const [refiSaving, setRefiSaving] = useState(false);
-  const router = useRouter();
+  const [refi, setRefi] = useState({
+    fundedAmount: '', factorRate: '', feePct: '',
+    termMode: 'daily' as 'daily' | 'weekly', termCount: '',
+    fundingDate: toDateInput(new Date()),
+    fundedWithFunderId: '', fundedWithName: '',
+    fundedNotes: '', payoffAmount: '',
+  });
 
-  /**
-   * Mark the deal as refinanced.
-   *
-   * Steps:
-   *   1. Compute the contracted total payback (fundedAmount × factorRate)
-   *      and patch the old deal: amountCollected = totalPayback (100% paid
-   *      in), fundedSubStatus = 'refinanced'.
-   *   2. Stash the merchant pre-fill (name, phone, email, business) in
-   *      sessionStorage so /active-deals can read it and open the create
-   *      drawer with those fields populated.
-   *   3. Navigate to /active-deals?refi=1 — the page reads the sessionStorage
-   *      payload on mount, then clears it so a subsequent refresh doesn't
-   *      re-open the drawer.
-   *
-   * No new endpoints, no schema changes — uses the existing PATCH route
-   * and the existing /active-deals create drawer.
-   */
-  async function markRefinanced() {
-    // Hard guard against double-mark: if the deal is already refinanced
-    // OR if a previous mark request is still in flight, bail. The button
-    // is also hidden in the UI when subStatusKey === 'refinanced', but
-    // this is the defense-in-depth check that protects against fast
-    // double-clicks (button hidden between clicks but not yet aware of
-    // the state change in the async window).
-    if (subStatusKey === 'refinanced') {
-      setRefiOpen(false);
-      return;
-    }
+  function openRefinance() {
+    setRefi({
+      fundedAmount: '', factorRate: '', feePct: '',
+      termMode: (deal.termMode === 'weekly' ? 'weekly' : 'daily'),
+      termCount: '', fundingDate: toDateInput(new Date()),
+      fundedWithFunderId: '', fundedWithName: '', fundedNotes: '', payoffAmount: '',
+    });
+    setRefiOpen(true);
+  }
+
+  async function submitRefinance() {
+    if (subStatusKey === 'refinanced') { setRefiOpen(false); return; }
     if (refiSaving) return;
-    setRefiSaving(true);
-    const funded = Number(deal.fundedAmount ?? 0);
-    const factor = Number(deal.factorRate ?? 0);
-    const totalPayback = funded > 0 && factor > 0 ? funded * factor : Number(p.totalPayback) || 0;
-    const body: Record<string, unknown> = {
-      // 100% paid in. Keep the deal record's amountCollected synced with the
-      // contracted totalPayback so the paydown tracker shows the bar full.
-      amountCollected: totalPayback || null,
-      fundedSubStatus: 'refinanced',
-    };
-    // If the user entered an explicit payoff amount (e.g. discounted) we
-    // store it in renewalNotes for now — schema doesn't have a dedicated
-    // refi-payoff field and this preserves the actual settled number for
-    // audit. Format: "Refi payoff: $X,XXX.XX on YYYY-MM-DD"
-    if (refiPayoff && Number(refiPayoff) > 0) {
-      const today = new Date().toISOString().slice(0, 10);
-      const note = `Refi payoff: $${Number(refiPayoff).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} on ${today}`;
-      body.renewalNotes = deal.renewalNotes ? `${deal.renewalNotes}\n${note}` : note;
-    }
-    const res = await fetch(`/api/deals/${deal.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    setRefiSaving(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      toast.error(j.error || 'Could not mark deal as refinanced.');
+    if (!refi.fundedAmount || !refi.factorRate || !refi.termCount) {
+      toast.error('New funding amount, factor rate, and term are required.');
       return;
     }
-    // Optimistic local update so the row reflects the new state immediately,
-    // even before the parent's list refetches.
-    onUpdated({
-      amountCollected: totalPayback ? String(totalPayback) : deal.amountCollected,
-      fundedSubStatus: 'refinanced',
-      renewalNotes: body.renewalNotes as string | undefined ?? deal.renewalNotes,
-    });
-    // Stash pre-fill blob for /active-deals to pick up. Keys are flat so
-    // the consumer doesn't need to know the structure ahead of time.
+    setRefiSaving(true);
     try {
-      const prefill = {
-        sourceDealId: deal.id,
-        sourceDealName: deal.name,
-        merchantFirstName: deal.merchantFirstName ?? '',
-        merchantLastName: deal.merchantLastName ?? '',
-        merchantPhone: deal.merchantPhone ?? '',
-        merchantEmail: deal.merchantEmail ?? '',
-        businessName: deal.businessName ?? '',
-        businessAddress: deal.businessAddress ?? '',
-        businessCity: deal.businessCity ?? '',
-        businessState: deal.businessState ?? '',
-        businessZip: deal.businessZip ?? '',
-        industry: deal.industry ?? '',
-      };
-      sessionStorage.setItem('mca-refi-prefill', JSON.stringify(prefill));
+      const res = await fetch(`/api/deals/${deal.id}/refinance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fundedAmount: refi.fundedAmount,
+          factorRate: refi.factorRate,
+          feePct: refi.feePct || null,
+          termMode: refi.termMode,
+          termCount: refi.termCount,
+          fundingDate: refi.fundingDate || null,
+          fundedWithFunderId: refi.fundedWithFunderId || null,
+          fundedWithName: refi.fundedWithName || null,
+          fundedNotes: refi.fundedNotes || null,
+          payoffAmount: refi.payoffAmount || null,
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(j.error || 'Refinance failed — nothing was changed.');
+        return;
+      }
+      // This deal: refinanced (terminal). New deal: fetched by the parent.
+      onUpdated({ fundedSubStatus: 'refinanced' });
+      onRefinanced();
+      setRefiOpen(false);
+      toast.success(`Refinance logged — "${j.data?.name ?? 'new deal'}" was created as a funded deal, and this one stays here marked Refinanced.`);
     } catch {
-      // SessionStorage unavailable (private mode, etc) — silently skip
-      // and the user can paste merchant info manually.
+      toast.error('Network error — check the list before retrying so you don\'t log the refi twice.');
+    } finally {
+      setRefiSaving(false);
     }
-    setRefiOpen(false);
-    router.push('/active-deals?refi=1');
   }
   const [draft, setDraft] = useState<{
     fundedAmount: string;
@@ -1211,18 +1181,17 @@ function FundedDealRow({
                       </select>
                     </div>
                     <div className="flex items-center gap-3 ml-auto">
-                      {/* Mark as refinanced — terminal action: marks deal
-                          paid off + 100% collected and opens the new
-                          deal form pre-filled with merchant info.
-                          Hidden once already refinanced so there's no
-                          double-clicking the action. */}
+                      {/* Refinance — logs the refi right here: this deal
+                          stays in Funded Deals marked Refinanced, and a NEW
+                          linked funded deal is created with the merchant
+                          info carried over. Hidden once already refinanced. */}
                       {subStatusKey !== 'refinanced' && (
                         <button
-                          onClick={() => { setRefiPayoff(''); setRefiOpen(true); }}
+                          onClick={openRefinance}
                           className="text-xs font-medium text-violet-700 hover:underline"
-                          title="Mark this deal as paid off via refinance and start a new deal for the refi"
+                          title="Log a refinance: this deal stays here marked Refinanced, and a new linked funded deal is created with the merchant info carried over"
                         >
-                          Mark as refinanced
+                          Refinance…
                         </button>
                       )}
                       <button onClick={() => setEditing(true)} className="text-xs font-medium text-primary hover:underline">
@@ -1230,6 +1199,11 @@ function FundedDealRow({
                       </button>
                     </div>
                   </div>
+                  {deal.refinancedFromDealId && (
+                    <div className="text-[11px] text-violet-700 dark:text-violet-400">
+                      ↻ This deal is a refinance of an earlier funded deal (linked in its history).
+                    </div>
+                  )}
                 </>
               )}
 
@@ -1394,6 +1368,15 @@ function FundedDealRow({
                       placeholder="Anything to remember about this deal — special terms, contact-of-record, watch list, etc."
                     />
                   </div>
+                  {/* Live economics — recalculates as the numbers are typed
+                      so payback / payment / net / cost never need manual math. */}
+                  <DealEconomics input={{
+                    fundedAmount: draft.fundedAmount,
+                    factorRate: draft.factorRate,
+                    feePct: draft.feePct,
+                    termMode: draft.termMode,
+                    termCount: draft.termCount,
+                  }} />
                   <div className="flex justify-end gap-2 pt-1">
                     {p.hasStructure && (
                       <button onClick={() => setEditing(false)} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
@@ -1472,36 +1455,104 @@ function FundedDealRow({
             >
               <div className="absolute inset-0 bg-black/40" />
               <div
-                className="relative bg-card rounded-lg border border-border shadow-xl max-w-md w-full p-5 space-y-4"
+                className="relative bg-card rounded-lg border border-border shadow-xl max-w-xl w-full p-5 space-y-4 max-h-[90vh] overflow-y-auto"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="space-y-1">
-                  <div id={`refi-title-${deal.id}`} className="text-base font-semibold">Mark as refinanced?</div>
+                  <div id={`refi-title-${deal.id}`} className="text-base font-semibold">Refinance &ldquo;{deal.name}&rdquo;</div>
                   <div className="text-xs text-muted-foreground">
-                    This deal will be marked as paid off and 100% collected. We&apos;ll
-                    then take you to Active Deals to log the new refi deal with
-                    the merchant&apos;s info pre-filled.
+                    This deal stays in Funded Deals marked <span className="font-semibold text-violet-700 dark:text-violet-400">Refinanced</span> and
+                    treated as paid off. A new linked funded deal is created below — merchant info carries over automatically, you only enter the new funding.
                   </div>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
-                    Actual payoff amount (optional)
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={refiPayoff}
-                    onChange={(e) => setRefiPayoff(e.target.value)}
-                    placeholder="If different from the contracted balance"
-                    className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                  <div className="text-[11px] text-muted-foreground">
-                    Leave blank to use the contracted total payback. If the refi
-                    settled at a discount, enter the actual settled amount —
-                    we&apos;ll record it on the deal&apos;s renewal notes.
+                {/* Merchant info carried over — read-only, nothing to re-type. */}
+                <div className="rounded-lg border border-border bg-muted/25 px-3 py-2.5">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold mb-1">Carried over from this deal</div>
+                  <div className="text-[13px] font-medium">{merchant || '—'}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {[deal.merchantEmail, deal.merchantPhone].filter(Boolean).join(' · ') || 'No contact info on file'}
                   </div>
                 </div>
+
+                {/* New funding details */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <label className="space-y-1 col-span-1">
+                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">New funding $</span>
+                    <input type="text" inputMode="decimal" value={refi.fundedAmount}
+                      onChange={(e) => setRefi({ ...refi, fundedAmount: e.target.value })}
+                      placeholder="e.g. 75000"
+                      className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Factor rate</span>
+                    <input type="text" inputMode="decimal" value={refi.factorRate}
+                      onChange={(e) => setRefi({ ...refi, factorRate: e.target.value })}
+                      placeholder="e.g. 1.35"
+                      className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Fee %</span>
+                    <input type="text" inputMode="decimal" value={refi.feePct}
+                      onChange={(e) => setRefi({ ...refi, feePct: e.target.value })}
+                      placeholder="optional"
+                      className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Payments</span>
+                    <select value={refi.termMode}
+                      onChange={(e) => setRefi({ ...refi, termMode: e.target.value as 'daily' | 'weekly' })}
+                      className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm">
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold"># of payments</span>
+                    <input type="text" inputMode="numeric" value={refi.termCount}
+                      onChange={(e) => setRefi({ ...refi, termCount: e.target.value })}
+                      placeholder={refi.termMode === 'daily' ? 'business days' : 'weeks'}
+                      className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Funding date</span>
+                    <input type="date" value={refi.fundingDate}
+                      onChange={(e) => setRefi({ ...refi, fundingDate: e.target.value })}
+                      className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+                  </label>
+                  <label className="space-y-1 col-span-2">
+                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Funded with</span>
+                    <select value={refi.fundedWithFunderId}
+                      onChange={(e) => setRefi({ ...refi, fundedWithFunderId: e.target.value })}
+                      className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm">
+                      <option value="">— pick a funder (or type below) —</option>
+                      {funders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Or funder name</span>
+                    <input type="text" value={refi.fundedWithName}
+                      onChange={(e) => setRefi({ ...refi, fundedWithName: e.target.value })}
+                      placeholder="off-directory funder"
+                      className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+                  </label>
+                  <label className="space-y-1 col-span-2 sm:col-span-3">
+                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Payoff amount on the old deal (optional)</span>
+                    <input type="text" inputMode="decimal" value={refi.payoffAmount}
+                      onChange={(e) => setRefi({ ...refi, payoffAmount: e.target.value })}
+                      placeholder="If the refi settled the old balance at a different number, record it here"
+                      className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+                  </label>
+                </div>
+
+                {/* Live economics for the NEW deal as the numbers are typed. */}
+                <DealEconomics input={{
+                  fundedAmount: refi.fundedAmount,
+                  factorRate: refi.factorRate,
+                  feePct: refi.feePct,
+                  termMode: refi.termMode,
+                  termCount: refi.termCount,
+                }} />
 
                 <div className="flex justify-end gap-2 pt-2 border-t border-border">
                   <button
@@ -1514,11 +1565,11 @@ function FundedDealRow({
                   </button>
                   <button
                     type="button"
-                    onClick={markRefinanced}
+                    onClick={submitRefinance}
                     disabled={refiSaving}
                     className="h-9 px-4 rounded-md text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
                   >
-                    {refiSaving ? 'Saving…' : 'Mark refinanced & log new deal'}
+                    {refiSaving ? 'Logging refinance…' : 'Log refinance — create new funded deal'}
                   </button>
                 </div>
               </div>

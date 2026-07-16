@@ -33,7 +33,7 @@ import { Plus, X, Send, Paperclip, BookOpen } from 'lucide-react';
 interface DealOpt {
   id: string; name: string;
   merchantFirstName?: string | null; merchantLastName?: string | null;
-  merchantEmail?: string | null; businessName?: string | null;
+  merchantEmail?: string | null; merchantPhone?: string | null;
   fundedAmount?: string | null; factorRate?: string | null;
   termCount?: string | null; termMode?: string | null; assignedRepId?: string | null;
   status?: string;
@@ -59,7 +59,7 @@ function formatDateForBody(v: string): string {
   const dt = new Date(Date.UTC(y, mo - 1, d));
   return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 }
-interface SavedContact { id: string; name: string; email: string; company: string | null; notes: string | null }
+interface SavedContact { id: string; name: string; email: string; company: string | null; notes: string | null; isDefault?: boolean }
 
 export default function FundedEmailPage() {
   const toast = useToast();
@@ -102,7 +102,13 @@ export default function FundedEmailPage() {
         });
         setSubject(d.subject ?? '');
       }
-      setContacts(c?.data ?? []);
+      const contactList: SavedContact[] = c?.data ?? [];
+      setContacts(contactList);
+      // Default recipients: contacts you starred pre-fill the To field.
+      // The merchant's email is NEVER used as a default — funded emails are
+      // internal and must not accidentally reach the merchant.
+      const defaults = contactList.filter((x) => x.isDefault).map((x) => x.email);
+      if (defaults.length) setToEmail((cur) => cur || defaults.join(', '));
       setDeals((dRes?.data ?? dRes?.deals ?? []) as DealOpt[]);
       setReps(((uRes?.data ?? []) as { id: string; name: string; role: string }[])
         .filter((u) => u.role !== 'lead_source').map((u) => ({ id: u.id, name: u.name })));
@@ -116,33 +122,44 @@ export default function FundedEmailPage() {
   }
 
   /**
-   * Attaching a deal prefills whatever that deal already has: the merchant
-   * email into the recipient (if empty), the rep, and any template field
-   * whose label matches a known deal value. Nothing is overwritten if the
-   * user already typed it.
+   * Attaching a deal prefills the rep and any template field whose label
+   * matches a known deal value. Nothing is overwritten if the user already
+   * typed it.
+   *
+   * The RECIPIENT is deliberately never touched here. Funded emails are
+   * internal (lender/partner/ops) — auto-filling the merchant's email into
+   * the To field risked sending an internal funded email to the merchant.
+   * Recipients come only from your starred default contacts or manual entry.
+   *
+   * Field mapping is most-specific-first so "Merchant email" gets the EMAIL
+   * and "Merchant cell" gets the PHONE — not the merchant's name.
    */
   function selectDeal(id: string) {
     setDealId(id);
     const d = deals.find((x) => x.id === id);
     if (!d) return;
     if (d.assignedRepId) setRepId(d.assignedRepId);
-    if (!toEmail && d.merchantEmail) setToEmail(d.merchantEmail);
     const merchant = [d.merchantFirstName, d.merchantLastName].filter(Boolean).join(' ');
-    // Fill template fields by fuzzy label match.
     setValues((prev) => {
       const next = { ...prev };
       (tmpl?.fields ?? []).forEach((f, i) => {
         if (next[i]) return; // don't clobber typed values
         const label = (f.label || '').toLowerCase();
-        if (/merchant|owner|name/.test(label) && merchant) next[i] = merchant;
-        else if (/business|company|dba/.test(label) && d.businessName) next[i] = d.businessName;
+        if (/mail/.test(label) && d.merchantEmail) next[i] = d.merchantEmail;
+        else if (/cell|phone|mobile|tel\b/.test(label) && d.merchantPhone) next[i] = d.merchantPhone;
+        else if (/first\s*name/.test(label) && d.merchantFirstName) next[i] = d.merchantFirstName;
+        else if (/last\s*name/.test(label) && d.merchantLastName) next[i] = d.merchantLastName;
+        // The deal's name IS the business name in this system (there is no
+        // separate business-name column on deals).
+        else if (/business|company|dba|deal\s*name/.test(label) && d.name) next[i] = d.name;
+        else if (/merchant|owner|\bname\b/.test(label) && merchant) next[i] = merchant;
         else if (/fund|advance|amount/.test(label) && d.fundedAmount) next[i] = d.fundedAmount;
         else if (/factor|rate/.test(label) && d.factorRate) next[i] = d.factorRate;
         else if (/term/.test(label) && d.termCount) next[i] = `${d.termCount} ${d.termMode ?? ''}`.trim();
       });
       return next;
     });
-    toast.success('Deal info pulled in.');
+    toast.success('Deal info pulled into the fields — the recipient was not changed.');
   }
 
   function addCc() {
@@ -165,9 +182,14 @@ export default function FundedEmailPage() {
     [files]
   );
 
-  /** Clear the whole funded-email form back to empty. */
+  /** Your starred default recipients, comma-joined (empty string if none). */
+  function defaultRecipients(): string {
+    return contacts.filter((c) => c.isDefault).map((c) => c.email).join(', ');
+  }
+
+  /** Clear the whole funded-email form back to its defaults. */
   function clearAll() {
-    setToEmail('');
+    setToEmail(defaultRecipients());
     setCcInput('');
     setCcEmails([]);
     setValues({});
@@ -180,6 +202,27 @@ export default function FundedEmailPage() {
   async function send() {
     if (!toEmail.trim()) { toast.error('Recipient email required.'); return; }
     if (!subject.trim()) { toast.error('Subject required.'); return; }
+
+    // Backstop: if the recipient or a CC matches the attached deal's
+    // merchant email, require an explicit confirmation. Funded emails are
+    // internal — reaching the merchant should never happen by accident.
+    const attached = dealId ? deals.find((x) => x.id === dealId) : null;
+    const merchantEmail = (attached?.merchantEmail ?? '').trim().toLowerCase();
+    if (merchantEmail) {
+      const recipients = [
+        ...toEmail.split(',').map((s) => s.trim().toLowerCase()),
+        ...ccEmails.map((s) => s.toLowerCase()),
+      ].filter(Boolean);
+      if (recipients.includes(merchantEmail)) {
+        const ok = await confirm({
+          title: 'This would email the MERCHANT',
+          description: `${merchantEmail} is the merchant's email on the attached deal. Funded emails are internal — are you sure you want the merchant to receive this?`,
+          confirmLabel: 'Yes, send to the merchant',
+          destructive: true,
+        });
+        if (!ok) return;
+      }
+    }
 
     setSending(true);
     const fd = new FormData();
@@ -252,7 +295,7 @@ export default function FundedEmailPage() {
       }
     } catch { /* approval submission is best-effort; the email already sent */ }
 
-    setToEmail(''); setCcEmails([]); setCcInput('');
+    setToEmail(defaultRecipients()); setCcEmails([]); setCcInput('');
     setValues({}); setNotes(''); setFiles([]);
     setDealId(''); setRepId('');
   }
@@ -306,7 +349,7 @@ export default function FundedEmailPage() {
                 {deals.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </Field>
-            <Field label="Rep (optional)">
+            <Field label="On behalf of rep (optional)">
               <select
                 value={repId}
                 onChange={(e) => setRepId(e.target.value)}
@@ -354,7 +397,12 @@ export default function FundedEmailPage() {
                       onClick={() => pickContact(c)}
                       className="w-full text-left px-3 py-2 rounded hover:bg-card border border-transparent hover:border-border"
                     >
-                      <div className="text-sm font-medium">{c.name}{c.company ? ` · ${c.company}` : ''}</div>
+                      <div className="text-sm font-medium">
+                        {c.name}{c.company ? ` · ${c.company}` : ''}
+                        {c.isDefault && (
+                          <span className="ml-2 text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">★ Default</span>
+                        )}
+                      </div>
                       <div className="text-xs text-muted-foreground font-mono">{c.email}</div>
                     </button>
                   ))}

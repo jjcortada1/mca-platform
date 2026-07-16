@@ -45,6 +45,22 @@ const STATEMENTS: string[] = [
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS funded_with_name varchar(200)`,
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS funded_notes text`,
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS submission_intake jsonb`,
+  `ALTER TABLE deals ADD COLUMN IF NOT EXISTS refinanced_from_deal_id uuid`,
+  // Saved funded-email recipients — table may predate bootstrap coverage on
+  // some installs, so create-if-missing before altering.
+  `CREATE TABLE IF NOT EXISTS funded_email_contacts (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name varchar(200) NOT NULL,
+    email varchar(255) NOT NULL,
+    company varchar(200),
+    notes text,
+    is_default boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `ALTER TABLE funded_email_contacts ADD COLUMN IF NOT EXISTS is_default boolean NOT NULL DEFAULT false`,
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS is_deleted boolean NOT NULL DEFAULT false`,
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS offer_amount numeric(14,2)`,
   `ALTER TABLE deals ADD COLUMN IF NOT EXISTS net_amount numeric(14,2)`,

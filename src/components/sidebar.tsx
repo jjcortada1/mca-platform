@@ -57,6 +57,9 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { href: '/preview',      label: 'View as…',       icon: Users,       perm: 'commissions.manage' },
   { href: '/funders',      label: 'Funders',        icon: Users,       perm: 'funders.view' },
   { href: '/calculator',   label: 'Calculator',     icon: Calculator,  perm: 'calculator.use' },
+  // Reverse Consolidation Sheet — builds a branded, printable offer for a
+  // weekly-disbursement consolidation. Pure presentation tool (no DB writes).
+  { href: '/reverse-consolidation', label: 'Reverse Consolidation', icon: FileText, perm: 'calculator.use' },
   // Doc Request — generates a clean copy-paste message for requesting
   // contracts from a funder. Lives under the same "General / Resources"
   // bucket as Calculator + Info. No persistence; pure formatter UI.
@@ -88,7 +91,7 @@ export const DEFAULT_CATEGORIES: { id: string; label: string; items: string[] }[
   },
   {
     id: 'resources', label: 'Resources',
-    items: ['/funders', '/bonuses', '/calculator', '/doc-request', '/info', '/tasks'],
+    items: ['/funders', '/bonuses', '/calculator', '/reverse-consolidation', '/doc-request', '/info', '/tasks'],
   },
 ];
 

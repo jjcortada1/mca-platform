@@ -444,8 +444,13 @@ export default function DealShopPage() {
    * on duplicate-detection + ASCII subject mode + plain-subject funders.
    */
   async function sendNow() {
-    // At least one funder selected (directory or manual) is required.
-    if (selectedFunders.size === 0 && manualFunders.length === 0) return;
+    // At least one funder selected (directory or manual) is required. This
+    // used to fail SILENTLY — the #1 "it didn't send and I don't know why"
+    // report — so it now says exactly what's missing.
+    if (selectedFunders.size === 0 && manualFunders.length === 0) {
+      toast.error('Nothing was sent — select at least one funder on the right first.');
+      return;
+    }
     if (smtpConfigured === false) {
       toast.error('Email is not configured yet. Set up SMTP first.');
       return;
@@ -599,13 +604,13 @@ export default function DealShopPage() {
       .then((r) => r.json())
       .then((j) => {
         const grouped = j.data ?? {};
-        // Credit ranges display LOW → HIGH (Below 600 first, Above 700 last),
-        // regardless of how they're ordered in the database. Sorted by each
-        // option's minScore; "Unknown" (no score) goes last.
+        // Credit ranges display: Unknown FIRST, then Below 600, then the
+        // remaining ranges LOW → HIGH — regardless of DB order. Sorted by
+        // each option's minScore; "Unknown" (no score) leads the list.
         const creditSorted = [...(grouped.credit_range ?? [])].sort(
           (a: MatchOption, b: MatchOption) => {
-            const sa = typeof a.meta?.minScore === 'number' ? (a.meta.minScore as number) : Number.POSITIVE_INFINITY;
-            const sb = typeof b.meta?.minScore === 'number' ? (b.meta.minScore as number) : Number.POSITIVE_INFINITY;
+            const sa = typeof a.meta?.minScore === 'number' ? (a.meta.minScore as number) : Number.NEGATIVE_INFINITY;
+            const sb = typeof b.meta?.minScore === 'number' ? (b.meta.minScore as number) : Number.NEGATIVE_INFINITY;
             return sa - sb;
           }
         );
@@ -647,22 +652,24 @@ export default function DealShopPage() {
 
   async function runMatch(opts: { silent?: boolean } = {}) {
     setError(null);
-    // In live/auto mode, missing fields just clear the result instead of
-    // raising an error toast. In explicit mode (user clicked the button),
-    // we keep the old strict validation so the user sees what's missing.
-    const minimumPresent = revenueOption && position;
-    if (!minimumPresent) {
-      if (!opts.silent) {
-        if (!revenueOption) { setError('Pick a revenue range.'); return; }
-        if (!position) { setError('Pick number of positions.'); return; }
-      }
-      // Silent mode: clear any prior results so the right panel falls back
-      // to the "all funders" picker. Don't show an error.
+    // Matching starts from the FIRST piece of information — pick just Open
+    // Positions and the funder list immediately filters on that; every
+    // additional field refines it. Fields not yet filled are simply skipped
+    // by the engine (sent as null), never treated as zero.
+    const anyCriteria =
+      !!revenueOption || !!position ||
+      (industry && industry !== 'other') ||
+      (state && state !== 'other') ||
+      (creditOption && creditOption !== 'unknown');
+    if (!anyCriteria) {
+      if (!opts.silent) { setError('Pick at least one criterion to start matching.'); return; }
+      // Silent mode: nothing entered → right panel falls back to the "all
+      // funders" picker. Don't show an error.
       setResults(null);
       return;
     }
 
-    const monthlyRevenue = getRevenueValue();
+    const monthlyRevenue = revenueOption ? getRevenueValue() : null;
     const creditScoreValue = getCreditScoreValue();
 
     setLoading(true);
@@ -673,7 +680,7 @@ export default function DealShopPage() {
         body: JSON.stringify({
           monthlyRevenue,
           creditScoreValue,
-          positions: parseInt(position) || 0,
+          positions: position === '' ? null : (parseInt(position) || 0),
           industry,
           state,
           dealType,
@@ -681,8 +688,8 @@ export default function DealShopPage() {
       });
       const json = await res.json();
       if (!res.ok) {
-        if (!opts.silent) setError(json.error || 'Match failed');
-        setResults(null);
+        if (!opts.silent) { setError(json.error || 'Match failed'); setResults(null); }
+        // Silent failures keep the previous results on screen — no flash.
         return;
       }
       setResults(json);
@@ -922,8 +929,8 @@ export default function DealShopPage() {
           <CardContent className="p-4 space-y-3">
             <div className="flex items-center gap-2 pb-2 border-b border-border">
               <Search className="h-4 w-4 text-primary" />
-              <h2 className="text-sm font-semibold">Deal Profile</h2>
-              <span className="text-[10px] text-muted-foreground ml-auto">Live matching — right panel updates as you type</span>
+              <h2 className="text-sm font-semibold">Deal Intake Form</h2>
+              <span className="text-[10px] text-muted-foreground ml-auto">Live matching — funders filter from your first selection</span>
             </div>
 
             {/* Compact 2-col grid — Revenue/Credit/Position/Industry/State.
@@ -932,7 +939,7 @@ export default function DealShopPage() {
               {/* Revenue */}
               <Field label="Monthly Revenue" required>
                 <Select value={revenueOption} onChange={setRevenueOption} options={[
-                  { value: '', label: '— Pick —' },
+                  { value: '', label: '— Select —' },
                   ...revenueRanges.map((r) => ({ value: r.value, label: r.label })),
                 ]} />
               </Field>
@@ -944,10 +951,12 @@ export default function DealShopPage() {
                 } />
               </Field>
 
-              {/* Position */}
-              <Field label="Positions" required>
+              {/* Open positions — the number of ACTIVE funding positions the
+                  merchant currently has. A funder matches when open
+                  positions ≤ the funder's max (at the max still qualifies). */}
+              <Field label="Open Positions" required>
                 <Select value={position} onChange={setPosition} options={[
-                  { value: '', label: '— Pick —' },
+                  { value: '', label: '— Select —' },
                   ...positionOptions.map((p) => ({ value: p.value, label: p.label })),
                 ]} />
               </Field>
@@ -1382,12 +1391,26 @@ export default function DealShopPage() {
         </div>
         {/* ============ END LEFT COLUMN ============ */}
 
-        {/* ============ RIGHT COLUMN — FUNDER MATCHES, ALWAYS VISIBLE ============ */}
+        {/* ============ RIGHT COLUMN — FUNDER MATCHES, ALWAYS VISIBLE ============
+            `relative` so the centered matching overlay below can cover the
+            whole panel while results refresh — previous results stay on
+            screen underneath (no flash, no jump). */}
         {/* Right column is its OWN scroll container on desktop: capped to the
             viewport height and overflow-y-auto, so wheeling through a long
             funder list scrolls just this panel — the page (and the intake
             form on the left) stays put. */}
-        <div className="lg:col-span-7 space-y-3 lg:sticky lg:top-4 lg:self-start min-w-0 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
+        <div className="relative lg:col-span-7 space-y-3 lg:sticky lg:top-4 lg:self-start min-w-0 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
+          {/* Centered matching indicator — overlays the panel middle instead
+              of a tiny note at the bottom of the page. Results underneath
+              stay visible (slightly dimmed) so nothing flashes or jumps. */}
+          {loading && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+              <div className="flex items-center gap-2.5 rounded-full bg-card border border-border shadow-lg px-4 py-2 animate-fade-in">
+                <span className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                <span className="text-sm font-medium">Matching funders…</span>
+              </div>
+            </div>
+          )}
 
       {/* Results section */}
       {results && (

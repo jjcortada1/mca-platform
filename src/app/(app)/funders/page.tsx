@@ -473,9 +473,11 @@ export default function FundersPage() {
                 </div>
               )}
             </div>
+            {/* One edit entry point only — the Edit control in the header
+                above. A second "Edit full details" button here opened the
+                exact same drawer, so it was removed as a duplicate action. */}
             <div className="px-6 py-3 border-t border-border flex items-center justify-end gap-2">
               <Button variant="outline" onClick={() => setQuickView(null)}>Close</Button>
-              <Button onClick={() => { setEditing(quickView); setQuickView(null); }}>Edit full details</Button>
             </div>
           </div>
         </div>

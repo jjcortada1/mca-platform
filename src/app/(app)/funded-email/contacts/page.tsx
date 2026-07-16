@@ -7,9 +7,10 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
 import { useConfirm } from '@/components/confirm-provider';
-import { Plus, Trash2, ArrowLeft } from 'lucide-react';
+import { Plus, Trash2, ArrowLeft, Star } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-interface Contact { id: string; name: string; email: string; company: string | null; notes: string | null }
+interface Contact { id: string; name: string; email: string; company: string | null; notes: string | null; isDefault?: boolean }
 
 export default function FundedContactsPage() {
   const toast = useToast();
@@ -43,6 +44,20 @@ export default function FundedContactsPage() {
     load();
   }
 
+  /** Star/unstar a contact as a default recipient (pre-filled into "To"). */
+  async function toggleDefault(c: Contact) {
+    const res = await fetch('/api/funded-email/contacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...c, isDefault: !c.isDefault }),
+    });
+    if (!res.ok) { toast.error('Could not update the default flag.'); return; }
+    setContacts((arr) => arr.map((x) => x.id === c.id ? { ...x, isDefault: !c.isDefault } : x));
+    toast.success(!c.isDefault
+      ? `${c.name} is now a default recipient — funded emails will pre-fill their address.`
+      : `${c.name} removed from default recipients.`);
+  }
+
   async function remove(id: string) {
     if (!(await confirm({ title: 'Delete this contact?', confirmLabel: 'Delete', destructive: true }))) return;
     const res = await fetch('/api/funded-email/contacts', {
@@ -62,7 +77,7 @@ export default function FundedContactsPage() {
           <ArrowLeft className="h-4 w-4" /> Back to funded email
         </Link>
       </div>
-      <PageHeader title="Funded email contacts" description="Your private contacts list — used when picking who to send a funded email to." />
+      <PageHeader title="Funded email contacts" description="Your private contacts list — used when picking who to send a funded email to. Star a contact to make them a DEFAULT recipient: their address pre-fills the To field on every funded email (the merchant's email is never auto-filled)." />
 
       <Button onClick={() => setEditing({ name: '', email: '', company: '', notes: '' })}>
         <Plus className="h-4 w-4 mr-1.5" /> Add contact
@@ -93,6 +108,7 @@ export default function FundedContactsPage() {
             <table className="w-full text-sm">
               <thead className="bg-muted/30 border-b border-border">
                 <tr className="text-left">
+                  <th className="px-4 py-2 font-medium w-14">Default</th>
                   <th className="px-4 py-2 font-medium">Name</th>
                   <th className="px-4 py-2 font-medium">Email</th>
                   <th className="px-4 py-2 font-medium">Company</th>
@@ -102,6 +118,18 @@ export default function FundedContactsPage() {
               <tbody>
                 {contacts.map((c) => (
                   <tr key={c.id} className="border-t border-border hover:bg-muted/20 cursor-pointer" onClick={() => setEditing(c)}>
+                    <td className="px-4 py-2">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleDefault(c); }}
+                        title={c.isDefault ? 'Remove as default recipient' : 'Make default recipient (pre-fills the To field)'}
+                        className={cn(
+                          'p-1 rounded hover:bg-muted transition-colors',
+                          c.isDefault ? 'text-amber-500' : 'text-muted-foreground/40 hover:text-muted-foreground'
+                        )}
+                      >
+                        <Star className={cn('h-4 w-4', c.isDefault && 'fill-current')} />
+                      </button>
+                    </td>
                     <td className="px-4 py-2">{c.name}</td>
                     <td className="px-4 py-2 text-muted-foreground font-mono text-xs">{c.email}</td>
                     <td className="px-4 py-2 text-muted-foreground">{c.company ?? '—'}</td>

@@ -111,11 +111,14 @@ export const createTierSchema = z.object({
 /* ---------- Deal Shop ---------- */
 
 export const dealShopMatchSchema = z.object({
-  monthlyRevenue: z.number().nonnegative(),
+  // Nullable so matching can start from the FIRST criterion entered —
+  // fields the user hasn't filled yet are sent as null and skipped by the
+  // engine (never treated as $0 revenue / 0 positions).
+  monthlyRevenue: z.number().nonnegative().nullable().optional(),
   // Either legacy enum (back-compat) or new numeric floor from match_options.meta.minScore
   creditScore: creditTier.optional(),
   creditScoreValue: z.number().nullable().optional(),
-  positions: z.number().int().nonnegative(),
+  positions: z.number().int().nonnegative().nullable().optional(),
   industry: z.string().max(100).default('other'),
   // 'other' (or any 2-letter code) — 'other' means skip state filtering
   state: z.string().max(10).default('other'),
