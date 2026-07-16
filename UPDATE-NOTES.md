@@ -1,3 +1,48 @@
+# Update — July 2026 (round 25) — REBUILD ROUND 1: dark command-center shell + icon rail, plus the five mini fixes
+
+## THE NEW SHELL (Rebuild Round 1 of the authorized teardown)
+- **Dark command-center is now the default look.** Layered dark surfaces,
+  blue accent, ambient glow — the full premium dark theme that was already
+  engineered is now ON by default. Anyone who prefers light clicks the
+  **sun/moon toggle** (bottom of the rail on desktop, top bar on mobile)
+  once and their choice sticks per browser.
+- **The wide text sidebar is gone on desktop** — replaced by a **slim icon
+  rail**: grouped glowing icons with flyout labels on hover, an accent
+  indicator + glow on the active page, your logo on top, and search (⌘K),
+  notifications, theme toggle, settings, and your account (hover for
+  sign-out) at the bottom. Everything the old sidebar did — permissions,
+  your custom order/renames/icons, feature access, hidden tools, the tasks
+  badge — drives the rail through the exact same rules. Mobile keeps the
+  full-label drawer.
+- Next rebuild rounds put Shop & Submit and Active Deals on the new system
+  as full page rebuilds.
+
+## The five fixes you listed
+- **Funded email — rep picker in the right place**: the template field
+  labeled "Rep" (down in the Information section) is now a **dropdown of
+  your reps**. Picking one fills the email line AND ties the funded-deal
+  approval to that rep; it stays in sync with the deal you attach.
+- **Funded Deals — business name shows**: the expanded view's "Business
+  name" was always blank (it read a database column that never existed);
+  it now shows the deal's business name. Pause payments, payment
+  modification, amount collected (% paid in), and every funding detail
+  remain editable under "Edit funding details".
+- **Syndication — every rep sees every posted deal**: the board's APIs were
+  already company-wide, but the sidebar tab was gated on a permission some
+  reps' accounts lacked — so teammates never saw the board at all. The tab
+  now shows for every non-lead-source user (admins can still disable
+  syndication company-wide via enable/hide).
+- **Shop & Submit — tier guide**: give each tier a description in
+  Settings → Funder tiers (new field), and brokers get a **"Tier guide"**
+  button on the results panel explaining what each tier means while they
+  shop. (Bonus bug found here: tier renames had been silently failing due
+  to an API method mismatch — fixed.)
+- **Reverse consolidation — always one page**: the PDF auto-densifies
+  (smaller type, tighter rows, up to 4 side-by-side schedule columns, print
+  margins tuned) so the sheet never spills onto a second page.
+
+---
+
 # Update — July 2026 (round 24) — Reverse consolidation sheet v2, date filters, calculator revamp, drag-and-drop, sidebar controls, and the missed items
 
 ## Reverse Consolidation Sheet — reworked to your spec

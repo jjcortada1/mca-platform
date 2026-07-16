@@ -1107,7 +1107,7 @@ function UsersSection() {
 
 /* -------- Funder tiers -------- */
 
-interface Tier { id: string; name: string; sortOrder: number }
+interface Tier { id: string; name: string; description?: string | null; sortOrder: number }
 
 function TiersSection() {
   const toast = useToast();
@@ -1163,6 +1163,16 @@ function TiersSection() {
       return;
     }
     toast.success('Tier renamed.');
+  }
+
+  /** Save the tier's description — shown to brokers as a reference on Shop & Submit. */
+  async function saveDescription(id: string, description: string) {
+    const res = await fetch(`/api/funder-tiers/${id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: description.trim() || null }),
+    });
+    if (!res.ok) { toast.error('Could not save the description.'); load(); return; }
+    toast.success('Tier description saved.');
   }
 
   async function persistOrder(reordered: Tier[]) {
@@ -1252,11 +1262,18 @@ function TiersSection() {
                   ▼
                 </button>
               </div>
-              <Input
-                defaultValue={t.name}
-                onBlur={(e) => { if (e.target.value !== t.name) rename(t.id, e.target.value); }}
-                className="flex-1"
-              />
+              <div className="flex-1 space-y-1">
+                <Input
+                  defaultValue={t.name}
+                  onBlur={(e) => { if (e.target.value !== t.name) rename(t.id, e.target.value); }}
+                />
+                <Input
+                  defaultValue={t.description ?? ''}
+                  onBlur={(e) => { if (e.target.value !== (t.description ?? '')) saveDescription(t.id, e.target.value); }}
+                  placeholder="What this tier means — shown to brokers on Shop & Submit (e.g. 650+ credit, max 2 positions, cheapest money)"
+                  className="h-8 text-xs"
+                />
+              </div>
               <Button variant="ghost" size="sm" onClick={() => remove(t)}>Delete</Button>
             </div>
           ))}

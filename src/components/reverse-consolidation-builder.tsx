@@ -267,20 +267,26 @@ export function ReverseConsolidationBuilder({
       .filter((f) => f.name.trim() || parseNum(f.balance) !== null)
       .map((f) => `<tr><td>${esc(f.name.trim() || '—')}</td><td class="v">${esc(money(parseNum(f.balance)))}</td></tr>`)
       .join('');
-    // Schedule prints in side-by-side columns so the whole thing stays tight
-    // on one sheet even with 28+ disbursements.
-    const schedCols = chunk(schedule, schedule.length > 18 ? 3 : schedule.length > 8 ? 2 : 1)
+    // Schedule prints in side-by-side columns (up to 4) so the whole sheet
+    // ALWAYS consolidates onto one page, even with 28+ disbursements.
+    const schedColCount = schedule.length > 36 ? 4 : schedule.length > 18 ? 3 : schedule.length > 8 ? 2 : 1;
+    const schedCols = chunk(schedule, schedColCount)
       .map((col) => `<table class="sched"><tr><th>#</th><th>Est. date</th><th style="text-align:right">Amount</th></tr>${
         col.map((r) => `<tr><td>${r.num}</td><td>${esc(r.date)}</td><td class="v">${esc(money(parseNum(r.amount)))}</td></tr>`).join('')
       }</table>`)
       .join('');
+    // Dense mode shrinks type + padding when there's a lot of content, so
+    // the document never spills onto a second page.
+    const contentLoad = schedule.length + funders.length * 2 + requirements.length * 1.5;
+    const dense = contentLoad > 34;
     const reqRows = requirements.filter((r) => r.trim()).map((r) => `<li>${esc(r)}</li>`).join('');
     const today = fmtDate(new Date());
 
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Reverse Consolidation — ${esc(dealName)}</title>
 <style>
+  @page { size: letter; margin: 0.35in; }
   * { box-sizing: border-box; margin: 0; }
-  body { font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827; padding: 40px 48px; font-size: 13px; line-height: 1.45; }
+  body { font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827; padding: 40px 48px; font-size: ${dense ? '11.5px' : '13px'}; line-height: ${dense ? '1.3' : '1.45'}; }
   .head { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 2px solid #111827; padding-bottom: 14px; margin-bottom: 20px; }
   .brand { display: flex; align-items: center; gap: 14px; }
   .brand img { height: 46px; width: auto; max-width: 180px; object-fit: contain; }
@@ -290,17 +296,17 @@ export function ReverseConsolidationBuilder({
   .sub { color: #6b7280; margin-bottom: 16px; }
   h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; margin: 18px 0 6px; }
   table { width: 100%; border-collapse: collapse; }
-  td, th { padding: 5px 9px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; font-size: 12.5px; }
+  td, th { padding: ${dense ? '2.5px 7px' : '5px 9px'}; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; font-size: ${dense ? '11px' : '12.5px'}; }
   td.k { color: #374151; width: 55%; }
   td.v { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
   tr.total td { border-top: 2px solid #111827; border-bottom: none; font-weight: 700; }
   .schedwrap { display: flex; gap: 18px; align-items: flex-start; }
   table.sched { flex: 1; }
-  table.sched td, table.sched th { padding: 3.5px 8px; font-size: 12px; }
+  table.sched td, table.sched th { padding: ${dense ? '1.5px 6px' : '3.5px 8px'}; font-size: ${dense ? '10.5px' : '12px'}; }
   .schedtotal { margin-top: 6px; text-align: right; font-weight: 700; font-size: 12.5px; }
   ul { padding-left: 18px; }
   li { margin: 2.5px 0; }
-  @media print { body { padding: 20px 26px; } }
+  @media print { body { padding: ${dense ? '8px 14px' : '20px 26px'}; } h2 { margin: ${dense ? '10px 0 4px' : '18px 0 6px'}; } }
 </style></head><body>
   <div class="head">
     <div class="brand">

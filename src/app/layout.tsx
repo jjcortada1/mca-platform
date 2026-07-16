@@ -83,13 +83,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="format-detection" content="telephone=no" />
-        {/* Pre-paint theme script. Defaults to LIGHT mode (JJ reverted the
-            dark-default). Dark mode is still available as an opt-in via the
-            sidebar toggle, but it's no longer applied unless the user has
-            explicitly chosen it. */}
+        {/* Pre-paint theme script. DARK is the default (the command-center
+            look, per the authorized front-end rebuild). Light mode remains
+            one click away via the toggle on the rail / mobile top bar, and
+            the choice persists per browser — so anyone who prefers light
+            flips once and keeps it. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('mca-theme');var r=document.documentElement;if(t==='dark'){r.classList.add('dark');}else{r.classList.remove('dark');}}catch(e){}})();`,
+            __html: `(function(){try{var t=localStorage.getItem('mca-theme');var r=document.documentElement;if(t==='light'){r.classList.remove('dark');}else{r.classList.add('dark');}}catch(e){}})();`,
           }}
         />
       </head>

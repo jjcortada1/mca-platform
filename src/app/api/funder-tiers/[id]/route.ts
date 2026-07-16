@@ -19,6 +19,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   } catch (e) { return apiError(e); }
 }
 
+/**
+ * PUT — alias of PATCH. The Settings tier editor has always sent PUT while
+ * only PATCH existed, so renames were silently failing with 405.
+ */
+export const PUT = PATCH;
+
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const ctx = await requireTenantContext();

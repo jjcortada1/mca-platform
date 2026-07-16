@@ -237,6 +237,9 @@ export const funderTiers = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 100 }).notNull(),
+    // What this tier MEANS (e.g. "A-paper: 650+ credit, 2 max positions,
+    // cheapest money"). Shown to brokers as a reference while shopping.
+    description: text('description'),
     sortOrder: integer('sort_order').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

@@ -1097,15 +1097,18 @@ function FundedDealRow({
                   </div>
 
                   {/* Merchant + business contact info — pulled directly from
-                      the deal record; nothing computed. */}
-                  {(deal.merchantFirstName || deal.merchantLastName || deal.merchantEmail || deal.merchantPhone || deal.businessName) && (
+                      the deal record; nothing computed. The deal's NAME is
+                      the business name in this system (there is no separate
+                      business-name column), so it displays here instead of
+                      the perpetual "—" it used to show. */}
+                  {(
                     <>
                       <SectionLabel>Merchant &amp; business</SectionLabel>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                         <Detail label="Merchant" value={`${deal.merchantFirstName ?? ''} ${deal.merchantLastName ?? ''}`.trim() || '—'} />
                         <Detail label="Phone" value={deal.merchantPhone || '—'} />
                         <Detail label="Email" value={deal.merchantEmail || '—'} />
-                        <Detail label="Business name" value={deal.businessName || '—'} />
+                        <Detail label="Business name" value={deal.businessName || deal.name || '—'} />
                         {(deal.businessAddress || deal.businessCity || deal.businessState || deal.businessZip) && (
                           <Detail
                             label="Business address"

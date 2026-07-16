@@ -80,6 +80,9 @@ export default function DealShopPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTier, setActiveTier] = useState<string>('all');
+  // Tier reference guide (name + admin-written description per tier).
+  const [tierGuide, setTierGuide] = useState<{ id: string; name: string; description: string | null }[]>([]);
+  const [showTierGuide, setShowTierGuide] = useState(false);
   // Same idea but for the no-match manual picker fallback. Tracks which
   // tier chip is active so the broker can scope the manual list to just
   // one tier when they already know they want to shop "A-Paper only."
@@ -631,6 +634,15 @@ export default function DealShopPage() {
         list.forEach((f) => m.set(f.id, f));
         setFunderMap(m);
       })
+      .catch(() => {});
+
+    // Tier guide — names + admin descriptions for the "what does each tier
+    // mean" reference panel.
+    fetch('/api/funder-tiers', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => setTierGuide((j.data ?? []).map((t: { id: string; name: string; description?: string | null }) => ({
+        id: t.id, name: t.name, description: t.description ?? null,
+      }))))
       .catch(() => {});
   }, []);
 
@@ -1423,8 +1435,24 @@ export default function DealShopPage() {
         ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-between px-1 gap-3 flex-wrap">
-              <div className="text-xs uppercase tracking-wider font-semibold text-muted-foreground/80">
-                Results — {totalMatched} qualifying, {totalExcluded} excluded
+              <div className="flex items-center gap-2">
+                <div className="text-xs uppercase tracking-wider font-semibold text-muted-foreground/80">
+                  Results — {totalMatched} qualifying, {totalExcluded} excluded
+                </div>
+                {tierGuide.some((t) => t.description) && (
+                  <button
+                    onClick={() => setShowTierGuide((v) => !v)}
+                    className={cn(
+                      'text-[11px] font-medium px-2 py-0.5 rounded-full border transition-colors',
+                      showTierGuide
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'border-border text-muted-foreground hover:text-foreground'
+                    )}
+                    title="What each tier means"
+                  >
+                    Tier guide
+                  </button>
+                )}
               </div>
               {totalMatched > 0 && (
                 <div className="flex items-center gap-3 text-xs">
@@ -1442,6 +1470,20 @@ export default function DealShopPage() {
                 </div>
               )}
             </div>
+
+            {/* Tier guide — what each tier MEANS, straight from the admin's
+                descriptions in Settings → Funder tiers. A broker shopping a
+                deal can check it without leaving the page. */}
+            {showTierGuide && tierGuide.some((t) => t.description) && (
+              <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 space-y-1.5">
+                {tierGuide.filter((t) => t.description).map((t) => (
+                  <div key={t.id} className="flex gap-2 text-xs">
+                    <span className="font-semibold shrink-0 min-w-[90px]">{t.name}</span>
+                    <span className="text-muted-foreground">{t.description}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Funder name search — narrows the visible rows AFTER the tier
                 filter, so tier counts stay accurate while typing a name.

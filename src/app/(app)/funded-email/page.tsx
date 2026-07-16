@@ -243,6 +243,25 @@ export default function FundedEmailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [econInput, tmpl]);
 
+  // Keep rep-labeled template fields in sync with the selected rep — when a
+  // deal auto-picks the rep (or the user changes the dropdown), the email
+  // line updates too.
+  useEffect(() => {
+    if (!tmpl) return;
+    const rep = reps.find((r) => r.id === repId);
+    setValues((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      (tmpl.fields ?? []).forEach((f, i) => {
+        if (!/\brep\b|representative/i.test(f.label || '') || isDateField(f)) return;
+        const v = rep?.name ?? '';
+        if (next[i] !== v) { next[i] = v; changed = true; }
+      });
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repId, reps, tmpl]);
+
   /** Your starred default recipients, comma-joined (empty string if none). */
   function defaultRecipients(): string {
     return contacts.filter((c) => c.isDefault).map((c) => c.email).join(', ');
@@ -529,23 +548,48 @@ export default function FundedEmailPage() {
                 Each field is its own grid cell so the page no longer scrolls
                 vertically through every input — they pack side-by-side. */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {tmpl.fields.map((f, i) => (
-                <Field key={i} label={f.label} hint={f.hint}>
-                  <Input
-                    // Date fields get a native date picker. Everything else
-                    // is a regular text input. Type is set by the admin
-                    // template OR auto-detected when the label mentions "date".
-                    type={isDateField(f) ? 'date' : 'text'}
-                    value={values[i] ?? ''}
-                    onChange={(e) => {
-                      // Typing into a field makes it YOURS — the built-in
-                      // calculator stops overwriting it from then on.
-                      autoFilledRef.current.delete(i);
-                      setValues({ ...values, [i]: e.target.value });
-                    }}
-                  />
-                </Field>
-              ))}
+              {tmpl.fields.map((f, i) => {
+                // A field labeled "Rep" is where the rep actually gets picked
+                // — render it as a dropdown of the company's reps. Choosing
+                // one fills the email line with their name AND ties the
+                // funded-deal approval to them (same as the top selector).
+                const isRepField = /\brep\b|representative/i.test(f.label || '') && !isDateField(f);
+                if (isRepField) {
+                  return (
+                    <Field key={i} label={f.label} hint={f.hint}>
+                      <select
+                        value={repId || ''}
+                        onChange={(e) => {
+                          const rep = reps.find((r) => r.id === e.target.value);
+                          setRepId(e.target.value);
+                          setValues({ ...values, [i]: rep?.name ?? '' });
+                        }}
+                        className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm"
+                      >
+                        <option value="">— pick the rep —</option>
+                        {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                    </Field>
+                  );
+                }
+                return (
+                  <Field key={i} label={f.label} hint={f.hint}>
+                    <Input
+                      // Date fields get a native date picker. Everything else
+                      // is a regular text input. Type is set by the admin
+                      // template OR auto-detected when the label mentions "date".
+                      type={isDateField(f) ? 'date' : 'text'}
+                      value={values[i] ?? ''}
+                      onChange={(e) => {
+                        // Typing into a field makes it YOURS — the built-in
+                        // calculator stops overwriting it from then on.
+                        autoFilledRef.current.delete(i);
+                        setValues({ ...values, [i]: e.target.value });
+                      }}
+                    />
+                  </Field>
+                );
+              })}
             </div>
             {/* Built-in MCA calculator — reads funding / rate / term from the
                 fields above and shows the full economics live. Payback and

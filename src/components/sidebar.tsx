@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import {
   ShoppingBag, Send, Inbox, Briefcase, Users, TrendingUp, Calculator, BookOpen, FileText,
   Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle, ClipboardList, Search,
-  Handshake, Gift, FileSignature, Table2, ChevronDown,
+  Handshake, Gift, FileSignature, Table2, ChevronDown, Sun, Moon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { GlobalSearch } from '@/components/global-search';
@@ -292,6 +292,7 @@ function MobileTopBar({
           >
             <Search className="h-5 w-5" />
           </button>
+          <ThemeToggle />
           <NotificationBell />
           <div className="h-8 w-8 rounded-lg bg-foreground text-background flex items-center justify-center text-xs font-semibold">
             {userInitial}
@@ -303,16 +304,231 @@ function MobileTopBar({
 }
 
 /* ============================================================
-   DESKTOP SIDEBAR (visible on lg+) — fixed width column.
+   SHARED SIDEBAR CONFIG — one hook drives BOTH the desktop icon
+   rail and the mobile drawer, so permissions, per-company order,
+   overrides, feature access, hides, and the tasks badge can never
+   drift between the two.
+   ============================================================ */
+function useSidebarConfig(user: SessionUser) {
+  const isAdmin = user.role === 'company_admin' || user.role === 'master_admin';
+
+  // Open tasks assigned to me — drives the red badge on the Tasks item.
+  const [myOpenTasks, setMyOpenTasks] = useState(0);
+  useEffect(() => {
+    if (user.role === 'lead_source') return;
+    let cancelled = false;
+    const check = () => {
+      fetch('/api/tasks', { cache: 'no-store' })
+        .then((r) => r.ok ? r.json() : null)
+        .then((j) => {
+          if (cancelled || !j) return;
+          const meId = j.me?.id;
+          const count = (j.data ?? []).filter((t: { status: string; assignedToUserId: string | null }) =>
+            t.status !== 'completed' && (t.assignedToUserId === meId || t.assignedToUserId === null)
+          ).length;
+          setMyOpenTasks(count);
+        })
+        .catch(() => {});
+    };
+    check();
+    const iv = setInterval(check, 60_000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [user.role]);
+
+  // Saved config from the company (order, categories, overrides, gates).
+  const [savedOrder, setSavedOrder] = useState<string[] | null>(null);
+  const [savedCategories, setSavedCategories] = useState<{ id: string; label: string; items: string[] }[] | null>(null);
+  const [itemOverrides, setItemOverrides] = useState<Record<string, { label?: string; icon?: string }> | null>(null);
+  const [enabledNavItems, setEnabledNavItems] = useState<string[] | null>(null);
+  const [hiddenNavItems, setHiddenNavItems] = useState<string[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/settings/sidebar-order', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled) return;
+        const o = j?.data?.order;
+        const c = j?.data?.categories;
+        const ov = j?.data?.itemOverrides;
+        const en = j?.data?.enabledNavItems;
+        const hid = j?.data?.hiddenNavItems;
+        if (Array.isArray(o)) setSavedOrder(o);
+        if (Array.isArray(c)) setSavedCategories(c);
+        if (ov && typeof ov === 'object') setItemOverrides(ov);
+        if (Array.isArray(en)) setEnabledNavItems(en);
+        if (Array.isArray(hid)) setHiddenNavItems(hid);
+      })
+      .catch(() => { /* fall through to default order */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  const itemsWithOverrides: NavItem[] = ALL_NAV_ITEMS.map((item) => {
+    const ov = itemOverrides?.[item.href];
+    if (!ov) return item;
+    return {
+      ...item,
+      label: ov.label || item.label,
+      icon: resolveIcon(ov.icon, item.icon as Parameters<typeof resolveIcon>[1]),
+    };
+  });
+
+  const visibleSections = resolveCategories(
+    itemsWithOverrides,
+    savedCategories,
+    savedOrder,
+    // Visible when: the user has the permission (admins pass everything)
+    // AND the feature is enabled for this company (platform-owner control)
+    // AND the company admin hasn't hidden it (self-service control).
+    // EXCEPTIONS: /worksheets is personal + cross-company (never hidden by
+    // company gates); /syndication is a company-wide board by design — the
+    // APIs allow every non-lead-source user, so the tab must too.
+    (item) =>
+      (isAdmin || user.permissions.includes(item.perm) || item.href === '/syndication') &&
+      (item.href === '/worksheets' || enabledNavItems === null || enabledNavItems.includes(item.href)) &&
+      (item.href === '/worksheets' || !hiddenNavItems || !hiddenNavItems.includes(item.href)),
+  );
+
+  return { visibleSections, myOpenTasks, isAdmin };
+}
+
+/* ============================================================
+   THEME TOGGLE — dark is the default command-center look; one
+   click flips to light and the choice persists per browser.
+   ============================================================ */
+export function ThemeToggle({ className }: { className?: string }) {
+  const [dark, setDark] = useState(true);
+  useEffect(() => {
+    setDark(document.documentElement.classList.contains('dark'));
+  }, []);
+  function toggle() {
+    const next = !dark;
+    setDark(next);
+    document.documentElement.classList.toggle('dark', next);
+    try { localStorage.setItem('mca-theme', next ? 'dark' : 'light'); } catch { /* private mode */ }
+  }
+  return (
+    <button
+      onClick={toggle}
+      title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+      className={cn('p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors', className)}
+    >
+      {dark ? <Sun className="h-[17px] w-[17px]" /> : <Moon className="h-[17px] w-[17px]" />}
+    </button>
+  );
+}
+
+/* ============================================================
+   DESKTOP ICON RAIL (visible on lg+) — the command-center nav.
+   Slim rail of icons with flyout labels; active item gets an
+   accent glow + indicator bar. All gating/order/overrides come
+   from the same hook as the mobile drawer. Section boundaries
+   render as hairline separators.
    ============================================================ */
 export function Sidebar({ user, branding }: { user: SessionUser; branding: Branding }) {
+  const pathname = usePathname();
+  const { visibleSections, myOpenTasks, isAdmin } = useSidebarConfig(user);
+  const userInitial = (user.name || user.email || 'U').charAt(0).toUpperCase();
+  const settingsActive = pathname.startsWith('/settings') || pathname.startsWith('/account') || pathname.startsWith('/master');
+
   return (
-    // Flat, slightly-recessed rail (Linear/Stripe style): a whisper darker
-    // than the canvas with a hairline divider — the content area reads as
-    // the "paper" and the nav recedes.
-    <aside className="w-60 border-r border-border bg-muted/40 flex flex-col shrink-0 h-screen sticky top-0">
-      <SidebarBody user={user} branding={branding} />
+    <aside className="w-[68px] border-r border-border bg-secondary/70 backdrop-blur flex flex-col items-center shrink-0 h-screen sticky top-0 py-3 z-40">
+      {/* Brand */}
+      <Link
+        href="/dashboard"
+        title={`${branding.productName} — ${branding.displayName}`}
+        className="mb-2 hover:opacity-80 transition-opacity"
+      >
+        <BrandMark logoUrl={branding.logoUrl} name={branding.productName || branding.displayName} size={38} rounded="lg" />
+      </Link>
+
+      {/* Nav — grouped icons with hairline separators between sections. */}
+      <nav className="flex-1 w-full overflow-y-auto scrollbar-none flex flex-col items-center gap-0.5 py-2">
+        {visibleSections.map((section, si) => (
+          <div key={section.id} className="w-full flex flex-col items-center gap-0.5">
+            {si > 0 && <div className="my-1.5 h-px w-7 bg-border" />}
+            {section.items.map((item) => {
+              const active = pathname === item.href || pathname.startsWith(item.href + '/');
+              const Icon = item.icon;
+              return (
+                <RailItem key={item.href} href={item.href} label={item.label} active={active}>
+                  <Icon className="h-[18px] w-[18px]" />
+                  {item.href === '/tasks' && myOpenTasks > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 inline-flex items-center justify-center min-w-[15px] h-[15px] px-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold leading-none ring-2 ring-secondary">
+                      {myOpenTasks > 99 ? '99' : myOpenTasks}
+                    </span>
+                  )}
+                </RailItem>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+
+      {/* Utility cluster */}
+      <div className="flex flex-col items-center gap-1 pt-2 border-t border-border w-full">
+        <button
+          onClick={() => window.dispatchEvent(new Event('mca:open-search'))}
+          title="Search (⌘K)"
+          className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        >
+          <Search className="h-[17px] w-[17px]" />
+        </button>
+        <NotificationBell compact align="left" />
+        <ThemeToggle />
+        <RailItem href={isAdmin ? '/settings' : '/account'} label="Settings" active={settingsActive}>
+          <Settings className="h-[18px] w-[18px]" />
+        </RailItem>
+
+        {/* User — hover for name/email + sign out. */}
+        <div className="relative group mt-1">
+          <div className="h-9 w-9 rounded-lg bg-foreground text-background flex items-center justify-center text-xs font-semibold cursor-default">
+            {userInitial}
+          </div>
+          <div className="absolute left-full bottom-0 ml-2 hidden group-hover:block group-focus-within:block z-50">
+            <div className="rounded-lg border border-border bg-popover text-popover-foreground shadow-xl p-3 w-52 animate-dropdown-in">
+              <div className="text-sm font-medium truncate">{user.name}</div>
+              <div className="text-[11px] text-muted-foreground truncate mb-2">{user.email}</div>
+              <button
+                onClick={() => signOut({ callbackUrl: '/login' })}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <LogOut className="h-4 w-4" /> Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </aside>
+  );
+}
+
+/** One icon on the rail — flyout label on hover, glow + bar when active. */
+function RailItem({
+  href, label, active, children,
+}: {
+  href: string; label: string; active: boolean; children: React.ReactNode;
+}) {
+  return (
+    <div className="relative group w-full flex justify-center">
+      {active && (
+        <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-[3px] rounded-r-full bg-primary" />
+      )}
+      <Link
+        href={href}
+        className={cn(
+          'relative p-2.5 rounded-lg transition-all',
+          active
+            ? 'text-primary bg-primary/15 glow-primary'
+            : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+        )}
+      >
+        {children}
+      </Link>
+      {/* Flyout label */}
+      <span className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1 rounded-md bg-popover text-popover-foreground border border-border shadow-lg text-xs font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50">
+        {label}
+      </span>
+    </div>
   );
 }
 
@@ -333,7 +549,7 @@ function SidebarBody({
   onClose?: () => void;
 }) {
   const pathname = usePathname();
-  const isAdmin = user.role === 'company_admin' || user.role === 'master_admin';
+  const { visibleSections, myOpenTasks, isAdmin } = useSidebarConfig(user);
   const userInitial = (user.name || user.email || 'U').charAt(0).toUpperCase();
 
   // Collapsible sections — collapsed set persists per-browser so the nav
@@ -357,97 +573,6 @@ function SidebarBody({
       return next;
     });
   }
-
-  // Open tasks assigned to me — drives the red badge on the Tasks nav item
-  // so a broker sees at a glance that something was assigned to them.
-  // Polled every 60s; cheap endpoint, no push infra needed.
-  const [myOpenTasks, setMyOpenTasks] = useState(0);
-  useEffect(() => {
-    if (user.role === 'lead_source') return;
-    let cancelled = false;
-    const check = () => {
-      fetch('/api/tasks', { cache: 'no-store' })
-        .then((r) => r.ok ? r.json() : null)
-        .then((j) => {
-          if (cancelled || !j) return;
-          const meId = j.me?.id;
-          const count = (j.data ?? []).filter((t: { status: string; assignedToUserId: string | null }) =>
-            t.status !== 'completed' && (t.assignedToUserId === meId || t.assignedToUserId === null)
-          ).length;
-          setMyOpenTasks(count);
-        })
-        .catch(() => {});
-    };
-    check();
-    const iv = setInterval(check, 60_000);
-    return () => { cancelled = true; clearInterval(iv); };
-  }, [user.role]);
-
-  // Saved config from the company. Categories take precedence over the
-  // flat order. Both null = default categories (Workflow/Commissions/Resources).
-  const [savedOrder, setSavedOrder] = useState<string[] | null>(null);
-  const [savedCategories, setSavedCategories] = useState<{ id: string; label: string; items: string[] }[] | null>(null);
-  // Per-item overrides (label rename + icon swap). Map keyed by href.
-  const [itemOverrides, setItemOverrides] = useState<Record<string, { label?: string; icon?: string }> | null>(null);
-  // Feature access set by the platform owner for this company. null = all.
-  const [enabledNavItems, setEnabledNavItems] = useState<string[] | null>(null);
-  // Tools the COMPANY ADMIN hid for their own company. null = nothing hidden.
-  const [hiddenNavItems, setHiddenNavItems] = useState<string[] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/settings/sidebar-order', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((j) => {
-        if (cancelled) return;
-        const o = j?.data?.order;
-        const c = j?.data?.categories;
-        const ov = j?.data?.itemOverrides;
-        const en = j?.data?.enabledNavItems;
-        const hid = j?.data?.hiddenNavItems;
-        if (Array.isArray(o)) setSavedOrder(o);
-        if (Array.isArray(c)) setSavedCategories(c);
-        if (ov && typeof ov === 'object') setItemOverrides(ov);
-        if (Array.isArray(en)) setEnabledNavItems(en);
-        if (Array.isArray(hid)) setHiddenNavItems(hid);
-      })
-      .catch(() => { /* fall through to default order */ });
-    return () => { cancelled = true; };
-  }, []);
-
-  // Apply per-item label/icon overrides to ALL_NAV_ITEMS so the rest of the
-  // pipeline (resolveCategories, permission checks) operates on the renamed
-  // items. We don't mutate ALL_NAV_ITEMS itself — overrides are local to
-  // each tenant.
-  const itemsWithOverrides: NavItem[] = ALL_NAV_ITEMS.map((item) => {
-    const ov = itemOverrides?.[item.href];
-    if (!ov) return item;
-    return {
-      ...item,
-      label: ov.label || item.label,
-      // Icon override: look up the named icon, falling back to the original
-      // component if the override name isn't in our registry.
-      icon: resolveIcon(ov.icon, item.icon as Parameters<typeof resolveIcon>[1]),
-    };
-  });
-
-  // Build the resolved sections — each labeled section contains items the
-  // current user can see. Empty sections are dropped.
-  const visibleSections = resolveCategories(
-    itemsWithOverrides,
-    savedCategories,
-    savedOrder,
-    // Visible when: the user has the permission (admins pass everything)
-    // AND the feature is enabled for this company (platform-owner control)
-    // AND the company admin hasn't hidden it (self-service control).
-    // EXCEPTION: /worksheets is a PERSONAL, cross-company feature — sheets
-    // can be shared to users at other companies, so it must never disappear
-    // because of a company's feature-access list (a rep at another company
-    // couldn't find a sheet shared with him for exactly this reason).
-    (item) =>
-      (isAdmin || user.permissions.includes(item.perm)) &&
-      (item.href === '/worksheets' || enabledNavItems === null || enabledNavItems.includes(item.href)) &&
-      (item.href === '/worksheets' || !hiddenNavItems || !hiddenNavItems.includes(item.href)),
-  );
 
   return (
     <>
