@@ -5,11 +5,11 @@ import { signOut } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import {
   ShoppingBag, Send, Inbox, Briefcase, Users, TrendingUp, Calculator, BookOpen, FileText,
-  Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle, ClipboardList, Search,
+  Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle, ClipboardList,
   Handshake, Gift, FileSignature, Table2, ChevronDown, Sun, Moon,
+  PanelLeftOpen, PanelLeftClose,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { GlobalSearch } from '@/components/global-search';
 import { NotificationBell } from '@/components/notification-bell';
 import { BrandMark } from '@/components/brand-mark';
 import { resolveIcon } from '@/lib/sidebar-icons';
@@ -247,9 +247,9 @@ export function AppShell({
         </main>
       </div>
 
-      {/* Global ⌘K search palette — mounted once at the shell so it's
-          reachable from every page. */}
-      <GlobalSearch />
+      {/* Global search removed by request (the ⌘K palette is unmounted;
+          the component is preserved in the codebase if it's ever wanted
+          back). */}
     </div>
   );
 }
@@ -285,13 +285,6 @@ function MobileTopBar({
           </div>
         </Link>
         <div className="flex items-center gap-1">
-          <button
-            onClick={() => window.dispatchEvent(new Event('mca:open-search'))}
-            aria-label="Search"
-            className="p-2 rounded-md hover:bg-muted transition-colors"
-          >
-            <Search className="h-5 w-5" />
-          </button>
           <ThemeToggle />
           <NotificationBell />
           <div className="h-8 w-8 rounded-lg bg-foreground text-background flex items-center justify-center text-xs font-semibold">
@@ -430,16 +423,46 @@ export function Sidebar({ user, branding }: { user: SessionUser; branding: Brand
   const userInitial = (user.name || user.email || 'U').charAt(0).toUpperCase();
   const settingsActive = pathname.startsWith('/settings') || pathname.startsWith('/account') || pathname.startsWith('/master');
 
+  // Rail ⇄ wide layout — expand back to the classic full-label sidebar any
+  // time; the choice persists per browser.
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    try { setWide(localStorage.getItem('sidebar:layout') === 'wide'); } catch { /* default rail */ }
+  }, []);
+  function setLayout(next: boolean) {
+    setWide(next);
+    try { localStorage.setItem('sidebar:layout', next ? 'wide' : 'rail'); } catch { /* private mode */ }
+  }
+
+  if (wide) {
+    return (
+      <aside className="w-60 border-r border-border bg-muted/40 flex flex-col shrink-0 h-screen sticky top-0">
+        <SidebarBody
+          user={user}
+          branding={branding}
+          onCollapseRail={() => setLayout(false)}
+        />
+      </aside>
+    );
+  }
+
   return (
     <aside className="w-[68px] border-r border-border bg-secondary/70 backdrop-blur flex flex-col items-center shrink-0 h-screen sticky top-0 py-3 z-40">
       {/* Brand */}
       <Link
         href="/dashboard"
         title={`${branding.productName} — ${branding.displayName}`}
-        className="mb-2 hover:opacity-80 transition-opacity"
+        className="mb-1 hover:opacity-80 transition-opacity"
       >
         <BrandMark logoUrl={branding.logoUrl} name={branding.productName || branding.displayName} size={38} rounded="lg" />
       </Link>
+      <button
+        onClick={() => setLayout(true)}
+        title="Expand sidebar (full labels)"
+        className="mb-1 p-1.5 rounded-lg text-muted-foreground/60 hover:text-foreground hover:bg-muted transition-colors"
+      >
+        <PanelLeftOpen className="h-4 w-4" />
+      </button>
 
       {/* Nav — grouped icons with hairline separators between sections. */}
       <nav className="flex-1 w-full overflow-y-auto scrollbar-none flex flex-col items-center gap-0.5 py-2">
@@ -464,15 +487,8 @@ export function Sidebar({ user, branding }: { user: SessionUser; branding: Brand
         ))}
       </nav>
 
-      {/* Utility cluster */}
+      {/* Utility cluster — global search removed by request. */}
       <div className="flex flex-col items-center gap-1 pt-2 border-t border-border w-full">
-        <button
-          onClick={() => window.dispatchEvent(new Event('mca:open-search'))}
-          title="Search (⌘K)"
-          className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-        >
-          <Search className="h-[17px] w-[17px]" />
-        </button>
         <NotificationBell compact align="left" />
         <ThemeToggle />
         <RailItem href={isAdmin ? '/settings' : '/account'} label="Settings" active={settingsActive}>
@@ -541,12 +557,15 @@ function SidebarBody({
   onNavigate,
   closable,
   onClose,
+  onCollapseRail,
 }: {
   user: SessionUser;
   branding: Branding;
   onNavigate?: () => void;
   closable?: boolean;
   onClose?: () => void;
+  /** Desktop wide mode only — collapses back to the icon rail. */
+  onCollapseRail?: () => void;
 }) {
   const pathname = usePathname();
   const { visibleSections, myOpenTasks, isAdmin } = useSidebarConfig(user);
@@ -598,7 +617,18 @@ function SidebarBody({
             <X className="h-4 w-4" />
           </button>
         ) : (
-          <NotificationBell compact align="left" />
+          <div className="flex items-center gap-0.5">
+            <NotificationBell compact align="left" />
+            {onCollapseRail && (
+              <button
+                onClick={onCollapseRail}
+                title="Collapse to icon rail"
+                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -687,6 +717,7 @@ function SidebarBody({
             <div className="text-sm font-medium truncate leading-tight">{user.name}</div>
             <div className="text-[10.5px] text-muted-foreground truncate mt-0.5">{user.email}</div>
           </div>
+          <ThemeToggle />
         </div>
         <button
           onClick={() => signOut({ callbackUrl: '/login' })}

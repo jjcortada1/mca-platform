@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { pageRequireTenant, currentUser } from '@/lib/auth/context';
 import { AppShell } from '@/components/sidebar';
-import { getTenantBranding, sanitizeCssColor } from '@/lib/branding';
+import { getTenantBranding } from '@/lib/branding';
 import { FundingCelebration } from '@/components/funding-celebration';
 import { redirect } from 'next/navigation';
 
@@ -32,20 +32,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   const branding = await getTenantBranding(companyId);
-  // Apply THIS company's brand color, overriding the neutral/owner color the
-  // root layout set. Injected per request so every tenant sees their own
-  // accent color throughout the app (buttons, links, active nav, rings).
-  const tenantColor = sanitizeCssColor(branding.primaryColor);
+  // Per-company brand COLOR injection removed by request — buttons and
+  // accents are consistent monochrome from the design tokens. Logo + names
+  // still come from the company's branding.
 
   return (
     <>
-      {tenantColor && (
-        <style
-          dangerouslySetInnerHTML={{
-            __html: `:root{--primary:${tenantColor};--accent:${tenantColor};--ring:${tenantColor};}`,
-          }}
-        />
-      )}
       <AppShell user={user} branding={branding}>
         {/* Global funding celebration overlay — listens for 'mca:funded-deal'
             custom events dispatched by any page that marks a deal funded. */}

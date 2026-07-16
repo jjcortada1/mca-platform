@@ -81,8 +81,19 @@ export default function DealShopPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTier, setActiveTier] = useState<string>('all');
   // Tier reference guide (name + admin-written description per tier).
+  // Open by default; collapsing it is remembered per browser.
   const [tierGuide, setTierGuide] = useState<{ id: string; name: string; description: string | null }[]>([]);
-  const [showTierGuide, setShowTierGuide] = useState(false);
+  const [showTierGuide, setShowTierGuideState] = useState(true);
+  useEffect(() => {
+    try { if (localStorage.getItem('deal-shop:tier-guide') === 'hidden') setShowTierGuideState(false); } catch { /* default open */ }
+  }, []);
+  function setShowTierGuide(updater: (v: boolean) => boolean) {
+    setShowTierGuideState((v) => {
+      const next = updater(v);
+      try { localStorage.setItem('deal-shop:tier-guide', next ? 'open' : 'hidden'); } catch { /* private mode */ }
+      return next;
+    });
+  }
   // Same idea but for the no-match manual picker fallback. Tracks which
   // tier chip is active so the broker can scope the manual list to just
   // one tier when they already know they want to shop "A-Paper only."
@@ -1424,6 +1435,33 @@ export default function DealShopPage() {
             </div>
           )}
 
+          {/* Tier guide — ALWAYS available at the top of the funder panel
+              (with or without match results) so brokers can reference what
+              each tier means while filling the intake form. Descriptions
+              come from Settings → Funder tiers; collapsible, open by
+              default until dismissed. */}
+          {tierGuide.some((t) => t.description) && (
+            <div className="rounded-lg border border-border bg-card">
+              <button
+                onClick={() => setShowTierGuide((v) => !v)}
+                className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <span>Tier guide — what each tier means</span>
+                <span className="text-[10px] font-medium normal-case tracking-normal">{showTierGuide ? 'Hide' : 'Show'}</span>
+              </button>
+              {showTierGuide && (
+                <div className="px-3 pb-2.5 space-y-1.5 border-t border-border/60 pt-2">
+                  {tierGuide.filter((t) => t.description).map((t) => (
+                    <div key={t.id} className="flex gap-2 text-xs">
+                      <span className="font-semibold shrink-0 min-w-[90px]">{t.name}</span>
+                      <span className="text-muted-foreground">{t.description}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
       {/* Results section */}
       {results && (
         totalMatched === 0 && totalExcluded === 0 ? (
@@ -1435,24 +1473,8 @@ export default function DealShopPage() {
         ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-between px-1 gap-3 flex-wrap">
-              <div className="flex items-center gap-2">
-                <div className="text-xs uppercase tracking-wider font-semibold text-muted-foreground/80">
-                  Results — {totalMatched} qualifying, {totalExcluded} excluded
-                </div>
-                {tierGuide.some((t) => t.description) && (
-                  <button
-                    onClick={() => setShowTierGuide((v) => !v)}
-                    className={cn(
-                      'text-[11px] font-medium px-2 py-0.5 rounded-full border transition-colors',
-                      showTierGuide
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'border-border text-muted-foreground hover:text-foreground'
-                    )}
-                    title="What each tier means"
-                  >
-                    Tier guide
-                  </button>
-                )}
+              <div className="text-xs uppercase tracking-wider font-semibold text-muted-foreground/80">
+                Results — {totalMatched} qualifying, {totalExcluded} excluded
               </div>
               {totalMatched > 0 && (
                 <div className="flex items-center gap-3 text-xs">
@@ -1470,20 +1492,6 @@ export default function DealShopPage() {
                 </div>
               )}
             </div>
-
-            {/* Tier guide — what each tier MEANS, straight from the admin's
-                descriptions in Settings → Funder tiers. A broker shopping a
-                deal can check it without leaving the page. */}
-            {showTierGuide && tierGuide.some((t) => t.description) && (
-              <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 space-y-1.5">
-                {tierGuide.filter((t) => t.description).map((t) => (
-                  <div key={t.id} className="flex gap-2 text-xs">
-                    <span className="font-semibold shrink-0 min-w-[90px]">{t.name}</span>
-                    <span className="text-muted-foreground">{t.description}</span>
-                  </div>
-                ))}
-              </div>
-            )}
 
             {/* Funder name search — narrows the visible rows AFTER the tier
                 filter, so tier counts stay accurate while typing a name.

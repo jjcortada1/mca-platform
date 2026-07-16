@@ -10,7 +10,7 @@ import {
   Palette, Mail, Send, FileText, DollarSign, Layers, ListChecks,
   Users as UsersIcon, GitBranch, Database, ShieldCheck, Menu as MenuIcon,
   Trash2, Sparkles, Crown, Plus, UserCircle, Building2, GripVertical,
-  Eye, EyeOff,
+  Eye, EyeOff, Pencil, X,
 } from 'lucide-react';
 import Link from 'next/link';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -216,16 +216,6 @@ export default function SettingsPage() {
 
 /* -------- Branding -------- */
 
-const COLOR_PRESETS = [
-  { name: 'Deep Teal',    hsl: '184 70% 22%' },
-  { name: 'Cobalt',       hsl: '215 75% 38%' },
-  { name: 'Royal Indigo', hsl: '234 60% 38%' },
-  { name: 'Forest',       hsl: '152 55% 28%' },
-  { name: 'Burgundy',     hsl: '345 65% 32%' },
-  { name: 'Slate',        hsl: '220 18% 28%' },
-  { name: 'Charcoal',     hsl: '224 28% 18%' },
-];
-
 function BrandingSection() {
   const toast = useToast();
   const [productName, setProductName] = useState('');
@@ -307,47 +297,9 @@ function BrandingSection() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Primary color</CardTitle>
-          <CardDescription>Used for buttons, links, and active navigation. Pick a preset or enter a custom HSL value.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            {COLOR_PRESETS.map((p) => (
-              <button
-                key={p.hsl}
-                type="button"
-                onClick={() => setPrimaryColor(p.hsl)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md border transition-all ${
-                  primaryColor === p.hsl ? 'border-foreground/40 bg-muted' : 'border-border hover:border-muted-foreground/40'
-                }`}
-              >
-                <span
-                  className="h-4 w-4 rounded-full border border-black/10"
-                  style={{ backgroundColor: `hsl(${p.hsl})` }}
-                />
-                <span className="text-xs font-medium">{p.name}</span>
-              </button>
-            ))}
-          </div>
-
-          <Field label="Custom HSL value" hint='Format: "hue saturation% lightness%" — e.g. "184 70% 22%"'>
-            <div className="flex items-center gap-2">
-              <span
-                className="h-9 w-9 rounded-md border border-border shrink-0"
-                style={{ backgroundColor: primaryColor ? `hsl(${primaryColor})` : 'transparent' }}
-              />
-              <Input
-                value={primaryColor}
-                onChange={(e) => setPrimaryColor(e.target.value)}
-                placeholder="184 70% 22%"
-                className="flex-1 font-mono text-xs"
-              />
-            </div>
-          </Field>
-        </CardContent>
-      </Card>
+      {/* The per-company Primary Color picker was removed by request — the
+          palette is consistent monochrome across every company (the saved
+          value remains in the database, it just no longer applies). */}
 
       <Card>
         <CardHeader>
@@ -1187,14 +1139,6 @@ function TiersSection() {
     }
   }
 
-  async function move(idx: number, dir: -1 | 1) {
-    const newIdx = idx + dir;
-    if (newIdx < 0 || newIdx >= tiers.length) return;
-    const reordered = [...tiers];
-    [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
-    await persistOrder(reordered);
-  }
-
   function dropTier(to: number) {
     const from = tierDragFrom.current;
     tierDragFrom.current = null;
@@ -1212,7 +1156,7 @@ function TiersSection() {
     <Card>
       <CardHeader>
         <CardTitle>Funder tiers</CardTitle>
-        <CardDescription>Categorize funders (e.g., A-paper, Subprime, Reverse, Real Estate). Drag the grip to reorder (arrows work too).</CardDescription>
+        <CardDescription>Categorize funders (e.g., A-paper, Subprime, Reverse, Real Estate). Drag the grip to reorder. The description shows to brokers as the Tier guide on Shop &amp; Submit.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="space-y-1.5">
@@ -1244,24 +1188,6 @@ function TiersSection() {
               >
                 <GripVertical className="h-4 w-4" />
               </span>
-              <div className="flex flex-col">
-                <button
-                  onClick={() => move(i, -1)}
-                  disabled={i === 0}
-                  className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
-                  title="Move up"
-                >
-                  ▲
-                </button>
-                <button
-                  onClick={() => move(i, 1)}
-                  disabled={i === tiers.length - 1}
-                  className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
-                  title="Move down"
-                >
-                  ▼
-                </button>
-              </div>
               <div className="flex-1 space-y-1">
                 <Input
                   defaultValue={t.name}
@@ -3197,25 +3123,21 @@ function SidebarOrderSection() {
     next[idx] = { ...next[idx], label };
     setCats(next);
   }
-  function moveCategory(idx: number, dir: -1 | 1) {
-    const j = idx + dir;
-    if (j < 0 || j >= cats.length) return;
+  // Category drag-to-reorder (whole sections).
+  const catDragFrom = useRef<number | null>(null);
+  const [catDragOver, setCatDragOver] = useState<number | null>(null);
+  function dropCategory(to: number) {
+    const from = catDragFrom.current;
+    catDragFrom.current = null;
+    setCatDragOver(null);
+    if (from === null || from === to) return;
     const next = [...cats];
-    [next[idx], next[j]] = [next[j], next[idx]];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
     setCats(next);
   }
 
   // ---- Item-level edits -------------------------------------------------
-  function moveItem(catIdx: number, itemIdx: number, dir: -1 | 1) {
-    const j = itemIdx + dir;
-    const cat = cats[catIdx];
-    if (j < 0 || j >= cat.items.length) return;
-    const items = [...cat.items];
-    [items[itemIdx], items[j]] = [items[j], items[itemIdx]];
-    const next = [...cats];
-    next[catIdx] = { ...cat, items };
-    setCats(next);
-  }
   function removeItem(catIdx: number, itemIdx: number) {
     const cat = cats[catIdx];
     const items = cat.items.filter((_, i) => i !== itemIdx);
@@ -3313,23 +3235,37 @@ function SidebarOrderSection() {
         </CardHeader>
         <CardContent className="space-y-3">
           {cats.map((cat, catIdx) => (
-            <div key={cat.id} className="rounded-lg border border-border bg-card">
-              {/* Section header: rename + reorder + delete the whole category */}
-              <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30 rounded-t-lg">
-                <div className="flex flex-col">
-                  <button
-                    onClick={() => moveCategory(catIdx, -1)}
-                    disabled={catIdx === 0}
-                    className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
-                    title="Move section up"
-                  >▲</button>
-                  <button
-                    onClick={() => moveCategory(catIdx, 1)}
-                    disabled={catIdx === cats.length - 1}
-                    className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
-                    title="Move section down"
-                  >▼</button>
-                </div>
+            <div
+              key={cat.id}
+              className={cn(
+                'rounded-lg border border-border bg-card transition-shadow',
+                catDragOver === catIdx && catDragFrom.current !== null && catDragFrom.current !== catIdx && 'ring-2 ring-primary/50'
+              )}
+            >
+              {/* Section header: drag to reorder + rename + delete */}
+              <div
+                className="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30 rounded-t-lg"
+                draggable
+                onDragStart={(e) => {
+                  catDragFrom.current = catIdx;
+                  e.dataTransfer.effectAllowed = 'move';
+                  try { e.dataTransfer.setData('text/plain', cat.id); } catch { /* older browsers */ }
+                }}
+                onDragOver={(e) => {
+                  if (catDragFrom.current === null) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (catDragOver !== catIdx) setCatDragOver(catIdx);
+                }}
+                onDrop={(e) => { e.preventDefault(); dropCategory(catIdx); }}
+                onDragEnd={() => { catDragFrom.current = null; setCatDragOver(null); }}
+              >
+                <span
+                  title="Drag to reorder sections"
+                  className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground"
+                >
+                  <GripVertical className="h-4 w-4" />
+                </span>
                 <Input
                   value={cat.label}
                   onChange={(e) => renameCategory(catIdx, e.target.value)}
@@ -3353,7 +3289,9 @@ function SidebarOrderSection() {
                     return (
                       <div key={href} className="flex items-center gap-2 p-1.5 rounded border border-dashed border-border text-xs text-muted-foreground">
                         <span className="flex-1 font-mono">{href} (no longer available)</span>
-                        <button onClick={() => removeItem(catIdx, itemIdx)} className="hover:text-destructive">✕</button>
+                        <button onClick={() => removeItem(catIdx, itemIdx)} className="hover:text-destructive inline-flex items-center">
+                          <X className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     );
                   }
@@ -3397,20 +3335,6 @@ function SidebarOrderSection() {
                         >
                           <GripVertical className="h-4 w-4" />
                         </span>
-                        <div className="flex flex-col">
-                          <button
-                            onClick={() => moveItem(catIdx, itemIdx, -1)}
-                            disabled={itemIdx === 0}
-                            className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
-                            title="Move up"
-                          >▲</button>
-                          <button
-                            onClick={() => moveItem(catIdx, itemIdx, 1)}
-                            disabled={itemIdx === cat.items.length - 1}
-                            className="text-muted-foreground hover:text-foreground disabled:opacity-20 px-1 leading-none text-xs"
-                            title="Move down"
-                          >▼</button>
-                        </div>
                         <DisplayIcon className="h-4 w-4 text-muted-foreground shrink-0" />
                         <div className="text-sm font-medium flex-1 min-w-0 truncate flex items-center gap-1.5">
                           {displayLabel}
@@ -3444,11 +3368,11 @@ function SidebarOrderSection() {
                           onClick={() => setEditingItem(isEditing ? null : href)}
                           title="Rename or change icon"
                           className={cn(
-                            'h-6 px-1.5 rounded text-xs',
+                            'h-6 px-1.5 rounded text-xs inline-flex items-center',
                             isEditing ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
                           )}
                         >
-                          ✎
+                          <Pencil className="h-3.5 w-3.5" />
                         </button>
                         {/* Move to other section */}
                         <select
@@ -3467,8 +3391,10 @@ function SidebarOrderSection() {
                         <button
                           onClick={() => removeItem(catIdx, itemIdx)}
                           title="Remove from sidebar"
-                          className="text-muted-foreground hover:text-destructive px-1 text-sm"
-                        >✕</button>
+                          className="text-muted-foreground hover:text-destructive px-1 inline-flex items-center"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                       {/* Inline editor — label input + icon picker. Empty
                           label = revert to the item's default name. Same

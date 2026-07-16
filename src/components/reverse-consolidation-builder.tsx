@@ -275,18 +275,21 @@ export function ReverseConsolidationBuilder({
         col.map((r) => `<tr><td>${r.num}</td><td>${esc(r.date)}</td><td class="v">${esc(money(parseNum(r.amount)))}</td></tr>`).join('')
       }</table>`)
       .join('');
-    // Dense mode shrinks type + padding when there's a lot of content, so
-    // the document never spills onto a second page.
+    // Dense mode shrinks type + padding when there's a lot of content, and
+    // a print zoom factor scales the WHOLE document down as load grows —
+    // the sheet never spills onto a second page, period.
     const contentLoad = schedule.length + funders.length * 2 + requirements.length * 1.5;
-    const dense = contentLoad > 34;
+    const dense = contentLoad > 26;
+    const zoom = contentLoad > 60 ? 0.75 : contentLoad > 45 ? 0.85 : contentLoad > 32 ? 0.92 : 1;
+    const reqCols = requirements.filter((r) => r.trim()).length > 5 ? 2 : 1;
     const reqRows = requirements.filter((r) => r.trim()).map((r) => `<li>${esc(r)}</li>`).join('');
     const today = fmtDate(new Date());
 
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Reverse Consolidation — ${esc(dealName)}</title>
 <style>
-  @page { size: letter; margin: 0.35in; }
+  @page { size: letter; margin: 0.3in; }
   * { box-sizing: border-box; margin: 0; }
-  body { font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827; padding: 40px 48px; font-size: ${dense ? '11.5px' : '13px'}; line-height: ${dense ? '1.3' : '1.45'}; }
+  body { font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827; padding: 40px 48px; font-size: ${dense ? '11.5px' : '13px'}; line-height: ${dense ? '1.28' : '1.45'}; zoom: ${zoom}; }
   .head { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 2px solid #111827; padding-bottom: 14px; margin-bottom: 20px; }
   .brand { display: flex; align-items: center; gap: 14px; }
   .brand img { height: 46px; width: auto; max-width: 180px; object-fit: contain; }
@@ -304,9 +307,10 @@ export function ReverseConsolidationBuilder({
   table.sched { flex: 1; }
   table.sched td, table.sched th { padding: ${dense ? '1.5px 6px' : '3.5px 8px'}; font-size: ${dense ? '10.5px' : '12px'}; }
   .schedtotal { margin-top: 6px; text-align: right; font-weight: 700; font-size: 12.5px; }
-  ul { padding-left: 18px; }
-  li { margin: 2.5px 0; }
-  @media print { body { padding: ${dense ? '8px 14px' : '20px 26px'}; } h2 { margin: ${dense ? '10px 0 4px' : '18px 0 6px'}; } }
+  ul { padding-left: 18px; columns: ${reqCols}; column-gap: 28px; }
+  li { margin: 2.5px 0; break-inside: avoid; }
+  .brand img { height: ${dense ? '36px' : '46px'}; }
+  @media print { body { padding: ${dense ? '6px 12px' : '20px 26px'}; } h2 { margin: ${dense ? '8px 0 3px' : '18px 0 6px'}; } .head { padding-bottom: ${dense ? '8px' : '14px'}; margin-bottom: ${dense ? '10px' : '20px'}; } }
 </style></head><body>
   <div class="head">
     <div class="brand">

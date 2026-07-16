@@ -30,7 +30,7 @@ import {
 import { useToast } from '@/components/toast';
 import { useConfirm } from '@/components/confirm-provider';
 import { useRouter } from 'next/navigation';
-import { Plus, X, Send, Paperclip, BookOpen } from 'lucide-react';
+import { Plus, X, Send, Paperclip, BookOpen, Star } from 'lucide-react';
 
 interface DealOpt {
   id: string; name: string;
@@ -243,19 +243,23 @@ export default function FundedEmailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [econInput, tmpl]);
 
-  // Keep rep-labeled template fields in sync with the selected rep — when a
-  // deal auto-picks the rep (or the user changes the dropdown), the email
-  // line updates too.
+  // When a KNOWN rep is selected (e.g. auto-picked by attaching a deal),
+  // fill the rep-labeled field with their name. Never clears or overwrites
+  // a custom name the user typed themselves.
   useEffect(() => {
-    if (!tmpl) return;
+    if (!tmpl || !repId) return;
     const rep = reps.find((r) => r.id === repId);
+    if (!rep) return;
     setValues((prev) => {
       const next = { ...prev };
       let changed = false;
       (tmpl.fields ?? []).forEach((f, i) => {
         if (!/\brep\b|representative/i.test(f.label || '') || isDateField(f)) return;
-        const v = rep?.name ?? '';
-        if (next[i] !== v) { next[i] = v; changed = true; }
+        // Only fill when empty or already showing a different rep's exact
+        // name — free-typed custom text is left alone.
+        const cur = (prev[i] ?? '').trim();
+        const isKnownRepName = !cur || reps.some((r) => r.name.toLowerCase() === cur.toLowerCase());
+        if (isKnownRepName && next[i] !== rep.name) { next[i] = rep.name; changed = true; }
       });
       return changed ? next : prev;
     });
@@ -480,7 +484,9 @@ export default function FundedEmailPage() {
                       <div className="text-sm font-medium">
                         {c.name}{c.company ? ` · ${c.company}` : ''}
                         {c.isDefault && (
-                          <span className="ml-2 text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">★ Default</span>
+                          <span className="ml-2 inline-flex items-center gap-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                            <Star className="h-3 w-3 fill-current" /> Default
+                          </span>
                         )}
                       </div>
                       <div className="text-xs text-muted-foreground font-mono">{c.email}</div>
@@ -555,20 +561,28 @@ export default function FundedEmailPage() {
                 // funded-deal approval to them (same as the top selector).
                 const isRepField = /\brep\b|representative/i.test(f.label || '') && !isDateField(f);
                 if (isRepField) {
+                  // Type any name OR pick from the suggestions — never
+                  // forced to choose from the list. Typing a name that
+                  // matches a rep links them; any other name just goes in
+                  // the email as written.
                   return (
-                    <Field key={i} label={f.label} hint={f.hint}>
-                      <select
-                        value={repId || ''}
-                        onChange={(e) => {
-                          const rep = reps.find((r) => r.id === e.target.value);
-                          setRepId(e.target.value);
-                          setValues({ ...values, [i]: rep?.name ?? '' });
-                        }}
-                        className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm"
-                      >
-                        <option value="">— pick the rep —</option>
-                        {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                      </select>
+                    <Field key={i} label={f.label} hint={f.hint ?? 'Pick a rep or type any name'}>
+                      <>
+                        <Input
+                          list="funded-email-reps"
+                          value={values[i] ?? ''}
+                          placeholder="Pick a rep or type any name"
+                          onChange={(e) => {
+                            const typed = e.target.value;
+                            const match = reps.find((r) => r.name.toLowerCase() === typed.trim().toLowerCase());
+                            setRepId(match?.id ?? '');
+                            setValues({ ...values, [i]: typed });
+                          }}
+                        />
+                        <datalist id="funded-email-reps">
+                          {reps.map((r) => <option key={r.id} value={r.name} />)}
+                        </datalist>
+                      </>
                     </Field>
                   );
                 }

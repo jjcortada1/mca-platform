@@ -27,7 +27,7 @@ import { useConfirm } from '@/components/confirm-provider';
 import { useAutoRefresh } from '@/lib/use-auto-refresh';
 import { cn } from '@/lib/utils';
 import {
-  Plus, Table2, Share2, Settings2, Trash2, X, ChevronUp, ChevronDown, ChevronRight,
+  Plus, Table2, Share2, Settings2, Trash2, X, ChevronRight,
   Users as UsersIcon, GripVertical, Upload, FileSpreadsheet, Copy,
 } from 'lucide-react';
 
@@ -97,6 +97,10 @@ export default function WorksheetsPage() {
   // Drag-to-reorder (sheet TABS — own sheets only; shared tabs stay put)
   const tabDragFromRef = useRef<number | null>(null);
   const [tabDragOver, setTabDragOver] = useState<number | null>(null);
+
+  // Drag-to-reorder (columns inside the Columns panel)
+  const colDragFromRef = useRef<number | null>(null);
+  const [colDragOver, setColDragOver] = useState<number | null>(null);
 
   // ---- Refs that make saving race-proof ----
   const activeIdRef = useRef<string | null>(null);
@@ -815,7 +819,7 @@ export default function WorksheetsPage() {
                                 onChange={(e) => setImportDraft({ ...importDraft, mapping: { ...importDraft.mapping, [i]: e.target.value } })}
                               >
                                 {detail.columns.map((c) => <option key={c.id} value={c.id}>→ {c.label}</option>)}
-                                {isOwner && <option value="__new__">＋ Add as new column</option>}
+                                {isOwner && <option value="__new__">+ Add as new column</option>}
                                 <option value="__skip__">Skip this column</option>
                               </Select>
                             </th>
@@ -912,27 +916,53 @@ export default function WorksheetsPage() {
               {showColumns && isOwner && (
                 <Card className="p-4 space-y-3">
                   <div className="text-sm font-semibold">Columns</div>
-                  <p className="text-xs text-muted-foreground">Rename, reorder, add, or remove. You can also drag the edge of any column header on the grid to resize it.</p>
+                  <p className="text-xs text-muted-foreground">Rename, add, or remove — drag the grip to reorder. You can also drag the edge of any column header on the grid to resize it.</p>
                   <div className="space-y-1.5">
                     {colDraft.map((c, i) => (
-                      <div key={c.id} className="flex items-center gap-1.5">
+                      <div
+                        key={c.id}
+                        draggable
+                        onDragStart={(e) => {
+                          colDragFromRef.current = i;
+                          e.dataTransfer.effectAllowed = 'move';
+                          try { e.dataTransfer.setData('text/plain', c.id); } catch { /* older browsers */ }
+                        }}
+                        onDragOver={(e) => {
+                          if (colDragFromRef.current === null) return;
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                          if (colDragOver !== i) setColDragOver(i);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const from = colDragFromRef.current;
+                          colDragFromRef.current = null;
+                          setColDragOver(null);
+                          if (from === null || from === i) return;
+                          setColDraft((arr) => {
+                            const n = [...arr];
+                            const [moved] = n.splice(from, 1);
+                            n.splice(i, 0, moved);
+                            return n;
+                          });
+                        }}
+                        onDragEnd={() => { colDragFromRef.current = null; setColDragOver(null); }}
+                        className={cn(
+                          'flex items-center gap-1.5 rounded-md transition-shadow',
+                          colDragOver === i && colDragFromRef.current !== null && colDragFromRef.current !== i && 'ring-2 ring-primary/50'
+                        )}
+                      >
+                        <span
+                          title="Drag to reorder"
+                          className="cursor-grab active:cursor-grabbing p-1 text-muted-foreground/40 hover:text-muted-foreground"
+                        >
+                          <GripVertical className="h-4 w-4" />
+                        </span>
                         <Input
                           className="h-8 flex-1"
                           value={c.label}
                           onChange={(e) => setColDraft((arr) => arr.map((x, xi) => xi === i ? { ...x, label: e.target.value } : x))}
                         />
-                        <button
-                          onClick={() => setColDraft((arr) => { if (i === 0) return arr; const n = [...arr]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; return n; })}
-                          disabled={i === 0}
-                          className="p-1.5 rounded hover:bg-muted text-muted-foreground disabled:opacity-30"
-                          title="Move up"
-                        ><ChevronUp className="h-3.5 w-3.5" /></button>
-                        <button
-                          onClick={() => setColDraft((arr) => { if (i === arr.length - 1) return arr; const n = [...arr]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; return n; })}
-                          disabled={i === colDraft.length - 1}
-                          className="p-1.5 rounded hover:bg-muted text-muted-foreground disabled:opacity-30"
-                          title="Move down"
-                        ><ChevronDown className="h-3.5 w-3.5" /></button>
                         <button
                           onClick={() => setColDraft((arr) => arr.filter((_, xi) => xi !== i))}
                           className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-rose-500"

@@ -1,3 +1,52 @@
+# Update — July 2026 (round 26) — Rail polish: expandable sidebar, monochrome palette, drag-only reordering, modern icons
+
+## Sidebar — expand it back whenever you want
+- The icon rail now has an **expand button** (right under your logo) that
+  brings back the classic wide sidebar with full labels; a collapse button
+  up top shrinks it back to the rail. Your choice sticks per browser.
+
+## Consistent black & white — brand colors removed
+- Per-company accent colors are **gone**: buttons, links, rings, and active
+  states are consistent **monochrome** — near-black on white in light mode,
+  white on dark in dark mode. The color picker was removed from Settings →
+  Branding (logo and names still apply). Status colors (green/amber/red)
+  stay semantic.
+
+## Modern icons + drag-only reordering
+- Every dated text glyph (▲▼ arrows, ✎, ✕, ★, ⏸, ↻) is replaced with the
+  crisp icon set used everywhere else.
+- **Wherever drag exists, the arrows are gone**: funder tiers, sidebar
+  items, and now sidebar **sections** (drag the header) and **worksheet
+  columns** all reorder by grip-drag only.
+
+## Global search removed
+- The system-wide search (⌘K palette and its buttons) has been removed per
+  request. Each page keeps its own local search and filters.
+
+## Funded email — type OR pick the rep
+- The Rep field is a type-ahead: **pick from your reps or type any name**.
+  Typing a name that matches a rep links them; any other name goes into the
+  email exactly as written. Nothing is ever forced, and your typed text is
+  never overwritten.
+
+## Reverse consolidation — one page, guaranteed
+- The PDF now **scales itself** (progressive densify + whole-document zoom,
+  requirements in two columns when long) so even a heavy sheet — 28+
+  disbursements plus a long requirements list — lands on a single page.
+
+## Shop & Submit — tier guide is actually visible now
+- The Tier guide sits at the **top of the funder panel, open by default**
+  (collapsible, remembered) — visible while filling the intake form, not
+  buried behind a button inside results. Reminder: descriptions come from
+  Settings → Funder tiers.
+- The full Shop & Submit layout rebuild is Rebuild Round 2 — next.
+
+## Dark mode toggle
+- Stays at the bottom of the rail (and in the wide sidebar's footer +
+  mobile top bar), as requested.
+
+---
+
 # Update — July 2026 (round 25) — REBUILD ROUND 1: dark command-center shell + icon rail, plus the five mini fixes
 
 ## THE NEW SHELL (Rebuild Round 1 of the authorized teardown)

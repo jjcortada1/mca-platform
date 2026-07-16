@@ -7,7 +7,7 @@ import { useToast } from '@/components/toast';
 import { useConfirm } from '@/components/confirm-provider';
 import { formatCurrency } from '@/lib/utils';
 import { cn } from '@/lib/utils';
-import { Search, Trash2, Plus, LayoutGrid, List as ListIcon, Upload } from 'lucide-react';
+import { Search, Trash2, Plus, LayoutGrid, List as ListIcon, Upload, Pause, RotateCcw } from 'lucide-react';
 import { BulkImportModal } from '@/components/bulk-import-modal';
 import { FundedApprovalsCard } from '@/components/funded-approvals-card';
 import { useAutoRefresh } from '@/lib/use-auto-refresh';
@@ -979,7 +979,8 @@ function FundedDealRow({
               className="ml-1.5 inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 whitespace-nowrap"
               title={deal.paymentsPausedAt ? `Payments paused since ${formatCalendarDate(deal.paymentsPausedAt)}` : 'Payments paused'}
             >
-              ⏸ Paused{deal.paymentsPausedAt ? ` ${formatCalendarDate(deal.paymentsPausedAt)}` : ''}
+              <Pause className="h-2.5 w-2.5 mr-1 fill-current" />
+              Paused{deal.paymentsPausedAt ? ` ${formatCalendarDate(deal.paymentsPausedAt)}` : ''}
             </span>
           )}
           {!deal.paymentsPaused && deal.modifiedPaymentAmount && deal.modifiedPaymentUntil
@@ -1203,8 +1204,9 @@ function FundedDealRow({
                     </div>
                   </div>
                   {deal.refinancedFromDealId && (
-                    <div className="text-[11px] text-violet-700 dark:text-violet-400">
-                      ↻ This deal is a refinance of an earlier funded deal (linked in its history).
+                    <div className="text-[11px] text-violet-700 dark:text-violet-400 inline-flex items-center gap-1">
+                      <RotateCcw className="h-3 w-3" />
+                      This deal is a refinance of an earlier funded deal (linked in its history).
                     </div>
                   )}
                 </>

@@ -74,7 +74,6 @@ function sanitizeCssColor(input: string | null | undefined): string | null {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const branding = await getPublicBranding();
-  const safeColor = sanitizeCssColor(branding.primaryColor);
 
   return (
     <html lang="en">
@@ -95,13 +94,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         />
       </head>
       <body>
-        {safeColor && (
-          <style
-            dangerouslySetInnerHTML={{
-              __html: `:root{--primary:${safeColor};--accent:${safeColor};--ring:${safeColor};}`,
-            }}
-          />
-        )}
+        {/* Brand-color injection removed — the palette is consistent
+            monochrome from the design tokens (per JJ's request). */}
         <SessionProvider>
           <ToastProvider>
             <ConfirmProvider>{children}</ConfirmProvider>
