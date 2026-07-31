@@ -140,7 +140,10 @@ export default function SubmissionsPage() {
   useAutoRefresh(() => { load(); });
 
   async function load() {
-    setLoading(true);
+    // Silent by design: this runs on the 30s background refresh and after
+    // saves. Flipping the page-level loading flag here would swap the whole
+    // list for a skeleton and back — the "page blink". Existing rows stay
+    // visible; the skeleton only ever shows on the very first load.
     const res = await fetch('/api/submissions');
     const json = await res.json();
     setRows(json.submissions ?? []);

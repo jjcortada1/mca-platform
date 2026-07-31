@@ -397,7 +397,10 @@ export default function PortfolioPage() {
           funded, assigns the rep, and creates the commission. Hidden for
           non-admins and when the queue is empty. Reload after approve so the
           newly-funded deal appears in the list below. */}
-      <FundedApprovalsCard onApproved={() => window.location.reload()} />
+      {/* Approving a funded deal refreshes the list IN PLACE — this used to
+          hard-reload the whole browser page (screen flash, scroll reset)
+          on every approval. */}
+      <FundedApprovalsCard onApproved={loadDeals} />
 
       {showBulk && (
         <BulkImportModal
@@ -2399,7 +2402,8 @@ function SyndicationsPanel({
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
-    setLoading(true);
+    // Silent on re-load — after adding/removing a syndication the existing
+    // list stays visible while fresh data arrives (spinner on first load only).
     try {
       const r = await fetch(`/api/deals/${dealId}/syndications`, { cache: 'no-store' });
       if (!r.ok) { setSyndications([]); return; }

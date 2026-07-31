@@ -93,7 +93,8 @@ export default function FundersPage() {
   const [stateList, setStateList] = useState<{ code: string; name: string }[]>(US_STATES);
 
   async function load() {
-    setLoading(true);
+    // Silent by design — re-runs after every funder save/delete. The list
+    // stays visible while fresh data loads (skeleton only on first load).
     const [fres, tres, mres, sres] = await Promise.all([
       fetch('/api/funders', { cache: 'no-store' }).then((r) => r.json()),
       fetch('/api/funder-tiers', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({ data: [] })),

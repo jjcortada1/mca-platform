@@ -134,7 +134,9 @@ export default function ActiveDealsPage() {
   const [funderOptions, setFunderOptions] = useState<{ id: string; name: string }[]>([]);
 
   async function load() {
-    setLoading(true);
+    // Silent by design — runs on the 30s background refresh and after every
+    // save. Existing rows stay visible while fresh data loads; the skeleton
+    // only shows on the very first load (initial state).
     const [dRes, uRes, fRes] = await Promise.all([
       fetch('/api/deals', { cache: 'no-store' }).then((r) => r.json()),
       fetch('/api/users').then((r) => r.json()).catch(() => ({ data: [] })),

@@ -154,7 +154,9 @@ export default function CommissionsPage() {
   const [showDraw, setShowDraw] = useState(false);
 
   async function load() {
-    setLoading(true);
+    // Silent by design — re-runs after every save/payment/draw action.
+    // Existing tables stay visible while fresh data loads; the skeleton
+    // only shows on the very first load (initial state).
     try {
       const meRes = await fetch('/api/auth/me').catch(() => null);
       let admin = false;

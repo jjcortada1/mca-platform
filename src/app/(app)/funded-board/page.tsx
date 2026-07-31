@@ -44,7 +44,8 @@ export default function FundedBoardPage() {
   });
 
   async function load() {
-    setLoading(true);
+    // Silent by design — runs on background refresh; existing entries stay
+    // on screen while fresh data loads (skeleton only on the initial load).
     const [eRes, uRes] = await Promise.all([
       fetch('/api/funded-entries').then((r) => r.json()),
       fetch('/api/users').then((r) => r.json()).catch(() => ({ data: [] })),

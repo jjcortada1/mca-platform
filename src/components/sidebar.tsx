@@ -191,6 +191,9 @@ export function AppShell({
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  // ONE config fetch + ONE tasks poll for the whole shell — shared by the
+  // desktop rail/wide sidebar and the mobile drawer.
+  const sidebarConfig = useSidebarConfig(user);
 
   // Auto-close drawer when route changes
   useEffect(() => { setOpen(false); }, [pathname]);
@@ -206,7 +209,7 @@ export function AppShell({
     <div className="min-h-screen flex bg-background">
       {/* Desktop sidebar — always visible on lg+ */}
       <div className="hidden lg:flex">
-        <Sidebar user={user} branding={branding} />
+        <Sidebar user={user} branding={branding} config={sidebarConfig} />
       </div>
 
       {/* Mobile drawer — slides in from left */}
@@ -229,7 +232,7 @@ export function AppShell({
             open ? 'translate-x-0' : '-translate-x-full'
           )}
         >
-          <SidebarBody user={user} branding={branding} onNavigate={() => setOpen(false)} closable onClose={() => setOpen(false)} />
+          <SidebarBody user={user} branding={branding} config={sidebarConfig} onNavigate={() => setOpen(false)} closable onClose={() => setOpen(false)} />
         </div>
       </div>
 
@@ -300,9 +303,17 @@ function MobileTopBar({
    SHARED SIDEBAR CONFIG — one hook drives BOTH the desktop icon
    rail and the mobile drawer, so permissions, per-company order,
    overrides, feature access, hides, and the tasks badge can never
-   drift between the two.
+   drift between the two. Called ONCE in AppShell and passed down —
+   never in both children (that doubled every fetch + the tasks
+   poll, i.e. duplicate API requests on a timer).
    ============================================================ */
-function useSidebarConfig(user: SessionUser) {
+export interface SidebarConfig {
+  visibleSections: { id: string; label: string; items: NavItem[] }[];
+  myOpenTasks: number;
+  isAdmin: boolean;
+}
+
+function useSidebarConfig(user: SessionUser): SidebarConfig {
   const isAdmin = user.role === 'company_admin' || user.role === 'master_admin';
 
   // Open tasks assigned to me — drives the red badge on the Tasks item.
@@ -417,9 +428,9 @@ export function ThemeToggle({ className }: { className?: string }) {
    from the same hook as the mobile drawer. Section boundaries
    render as hairline separators.
    ============================================================ */
-export function Sidebar({ user, branding }: { user: SessionUser; branding: Branding }) {
+export function Sidebar({ user, branding, config }: { user: SessionUser; branding: Branding; config: SidebarConfig }) {
   const pathname = usePathname();
-  const { visibleSections, myOpenTasks, isAdmin } = useSidebarConfig(user);
+  const { visibleSections, myOpenTasks, isAdmin } = config;
   const userInitial = (user.name || user.email || 'U').charAt(0).toUpperCase();
   const settingsActive = pathname.startsWith('/settings') || pathname.startsWith('/account') || pathname.startsWith('/master');
 
@@ -440,6 +451,7 @@ export function Sidebar({ user, branding }: { user: SessionUser; branding: Brand
         <SidebarBody
           user={user}
           branding={branding}
+          config={config}
           onCollapseRail={() => setLayout(false)}
         />
       </aside>
@@ -554,6 +566,7 @@ function RailItem({
 function SidebarBody({
   user,
   branding,
+  config,
   onNavigate,
   closable,
   onClose,
@@ -561,6 +574,7 @@ function SidebarBody({
 }: {
   user: SessionUser;
   branding: Branding;
+  config: SidebarConfig;
   onNavigate?: () => void;
   closable?: boolean;
   onClose?: () => void;
@@ -568,7 +582,7 @@ function SidebarBody({
   onCollapseRail?: () => void;
 }) {
   const pathname = usePathname();
-  const { visibleSections, myOpenTasks, isAdmin } = useSidebarConfig(user);
+  const { visibleSections, myOpenTasks, isAdmin } = config;
   const userInitial = (user.name || user.email || 'U').charAt(0).toUpperCase();
 
   // Collapsible sections — collapsed set persists per-browser so the nav

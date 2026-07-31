@@ -1,3 +1,48 @@
+# Update — July 2026 (round 27) — Invisible background refreshes: the blinking is fixed at the source
+
+## What was actually causing the blinking (traced, not guessed)
+- **Timed skeleton swaps** — Submissions, Active Deals, and Funded Board
+  flipped their page-level loading flag on every background refresh (every
+  30–45s), swapping the entire table for a loading skeleton and back. That
+  was THE periodic flash, and it also collapsed the page height (scroll
+  jumps). Commissions and Funders did the same thing after every save.
+- **A real full-page reload** — approving a funded deal ran a browser
+  reload of the whole Funded Deals page (white flash + scroll reset).
+- **Duplicate polling** — the new shell fetched the sidebar config and
+  polled open tasks twice (rail + mobile drawer), doubling those API calls
+  on a timer.
+
+## The fixes
+- **Silent refresh everywhere**: background refreshes and post-save reloads
+  keep the existing content on screen and replace only the data once the
+  new request succeeds. Loading skeletons now appear ONLY the first time a
+  page loads. Applied to Submissions, Active Deals, Funded Board,
+  Commissions, Funders, and the syndications panel on funded deals.
+- **No more full reloads**: approving a funded deal updates the list in
+  place — scroll position, filters, and expanded rows stay put.
+- **One poll for the shell**: sidebar config + task-badge polling now runs
+  exactly once, shared by the rail and the mobile drawer.
+- Already-safe behaviors confirmed while tracing: refreshes only tick on
+  visible tabs, skip while you're typing, pause while a row is expanded or
+  a form is open, and worksheets never let a background sync overwrite
+  unsaved cell edits.
+
+## Regression tests (run with `npm run test:stability`)
+- A plain-Node test suite now enforces the anti-blink rules on the source
+  itself and fails the moment a change reintroduces them: no browser
+  reloads in the app, no page-level loading flips on auto-refresh pages,
+  the visible-tab + not-typing guards stay in the refresh hook, the shell
+  polls once, and the worksheets dirty-edit guard stays intact. (It caught
+  two leftover violations during this very fix — then passed clean.)
+- Honest scope note: these are source-level invariants, not browser
+  recordings — visually confirming "no blink" end-to-end needs a real
+  browser harness the Replit deploy doesn't run. The 5-minute manual check:
+  sit on Active Deals for a minute (no flash), save a commission (table
+  stays), approve a funded deal (no reload), edit a deal while the refresh
+  timer passes (form intact).
+
+---
+
 # Update — July 2026 (round 26) — Rail polish: expandable sidebar, monochrome palette, drag-only reordering, modern icons
 
 ## Sidebar — expand it back whenever you want
