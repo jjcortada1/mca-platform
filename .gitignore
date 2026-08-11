@@ -6,3 +6,6 @@ node_modules
 .DS_Store
 .replit-cache
 .setup-complete
+
+# TypeScript incremental build cache
+*.tsbuildinfo

@@ -8,6 +8,7 @@ import {
   Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle, ClipboardList,
   Handshake, Gift, FileSignature, Table2, ChevronDown,
   PanelLeftOpen, PanelLeftClose, Trophy, Banknote, ReceiptText, Layers, BarChart3,
+  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NotificationBell } from '@/components/notification-bell';
@@ -41,6 +42,10 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   // separate /submit route was retired in favor of a single-screen flow.
   // /submit redirects to /deal-shop so any old bookmarks still resolve.
   { href: '/deal-shop',    label: 'Shop & Submit',  icon: ShoppingBag, perm: 'deals.shop' },
+  // Underwriting — drop in bank statements and get an instant MCA scrub
+  // (existing positions, cash-flow health, red flags). Runs entirely on
+  // local code in the browser; no AI credits and nothing is uploaded.
+  { href: '/underwriting', label: 'Underwriting',   icon: ShieldCheck, perm: 'deals.shop' },
   { href: '/funded-email', label: 'Funded Email',   icon: Send,        perm: 'deals.submit' },
   // Send Application — Dropbox Sign: name + email → signature request.
   { href: '/esign',        label: 'Send Application', icon: FileSignature, perm: 'deals.submit' },
@@ -84,7 +89,7 @@ export const ALL_NAV_ITEMS: NavItem[] = [
 export const DEFAULT_CATEGORIES: { id: string; label: string; items: string[] }[] = [
   {
     id: 'workflow', label: 'Workflow',
-    items: ['/deal-shop', '/funded-email', '/esign', '/submissions', '/active-deals', '/funded-board', '/portfolio', '/syndication'],
+    items: ['/deal-shop', '/underwriting', '/funded-email', '/esign', '/submissions', '/active-deals', '/funded-board', '/portfolio', '/syndication'],
   },
   {
     id: 'commissions', label: 'Commissions',
@@ -671,7 +676,8 @@ function SidebarBody({
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
 
         {/* One Settings entry for everyone.
             Admins → /settings (which now contains My account + Companies).

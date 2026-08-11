@@ -9,6 +9,7 @@
     "lint": "next lint",
     "setup": "node scripts/setup.js",
     "test:stability": "node scripts/stability-tests.mjs",
+    "test:underwriting": "tsx scripts/underwriting-tests.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:migrate": "tsx src/lib/db/migrate.ts",

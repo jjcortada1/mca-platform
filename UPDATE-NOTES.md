@@ -1,3 +1,84 @@
+# Update — August 2026 (round 31) — Underwriting tab (bank-statement MCA scrub) + a build-breaking bug found and fixed
+
+## NEW: Underwriting (sidebar → Workflow, right under Shop & Submit)
+Drop in bank statements and get an instant underwriting read on the deal.
+
+**It runs on plain code, not AI.** You asked for it not to burn live AI
+credits, so there is no API call anywhere in it — the whole thing is a
+funder-name dictionary, recurring-payment math, and a fixed rule set. Same
+statements always produce the same answer, and an underwriter can re-derive
+every number by hand.
+
+**The statements never leave the computer.** The file is read in the
+browser, analyzed in the browser, and thrown away when the tab closes.
+Nothing is uploaded, nothing is written to the database, no deal record is
+touched.
+
+### What it tells you
+- **Existing MCAs.** Finds stacked positions two ways: by matching the bank
+  descriptor against a dictionary of ~110 known funders (Rapid, OnDeck,
+  Fora, Kapitus, Credibly, Everest, Libertas, Bitty, Fox, and so on), and
+  by spotting the shape of an advance — a fixed amount debiting every
+  business day or every week. Payroll, rent, insurance, taxes, cards,
+  software, and fuel cards are on an exclusion list so they never get
+  mistaken for a position.
+- **Each position broken down**: funder, payment amount, cadence, number of
+  debits, first and last date, per-day and per-month burden, and a
+  confidence level with the exact reasons it was flagged (click any row to
+  expand).
+- **Estimated original advance, factor, term, and payback** — reverse-solved
+  from the payment using the same engine as the Reverse Calculator. When a
+  funding deposit from that funder lands inside the statement window, the
+  real number replaces the estimate and the remaining balance becomes exact.
+- **Cash flow**: deposits, deposit count, "true revenue" (deposits minus
+  transfers, refunds, and advance proceeds), withdrawals, and net — month by
+  month, with a chart.
+- **Bank behavior**: NSF and overdraft items, negative days, lowest balance,
+  and average daily balance (weighted by days actually covered).
+- **The underwriting box**: eight standard checks scored pass / watch / fail
+  against the usual benchmarks.
+- **A graded verdict** (A through Decline, 0–100) with the specific red
+  flags and strengths behind it — never just a number with no reasoning.
+- **Room for new money**: a conservative estimate of what the file supports,
+  computed from revenue, the grade's holdback ceiling, and the existing
+  payments already coming out. It says $0 and explains why when the merchant
+  is tapped out.
+
+### Getting statements in
+- **Upload** the transaction export from the merchant's online banking —
+  `.csv`, `.xlsx`, `.xls`, `.tsv`, or `.txt`. Load all three months at once;
+  overlapping periods are de-duplicated automatically.
+- **Paste from PDF** if that's all you have — paste the transaction lines
+  and it reads date, description, amount, and running balance off each line.
+- Columns are detected automatically (including split debit/credit columns,
+  and files where every amount is positive — direction is then worked out
+  from the running balance). If a bank's format is unusual, the file shows a
+  **map the columns manually** control instead of failing.
+- **Copy summary** and **Download report** produce a clean text scrub you can
+  drop straight into an email to a funder or into the deal notes.
+
+## FIXED: the app could not build
+While type-checking the new work, the whole project turned out to be
+**syntactically broken** — `src/components/sidebar.tsx` was missing a closing
+brace on the nav-section loop, introduced back on July 9 with the
+collapsible-sidebar-sections change. TypeScript stopped parsing at that
+point, which means every build since then would have failed. One brace,
+fixed, and the project parses clean again. Nothing about how the sidebar
+behaves changed.
+
+## Also
+- `npm run test:underwriting` — a regression suite that builds synthetic
+  statements with known answers and checks the scrub reproduces them:
+  positions found, ordinary recurring bills NOT flagged as advances, cadence
+  and payment amounts correct, NSF counting, the paste parser, the
+  balance-inferred direction logic, and duplicate merging.
+- Nothing existing was touched: no schema change, no API change, no
+  permission change, no calculation change. The Underwriting tab uses the
+  same permission as Shop & Submit and obeys the sidebar order/visibility
+  settings like every other tab.
+
+---
+
 # Update — August 2026 (round 30) — Light theme, permanently
 
 ## The system is LIGHT now — everywhere, for everyone
