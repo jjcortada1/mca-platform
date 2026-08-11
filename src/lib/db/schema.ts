@@ -1413,6 +1413,39 @@ export const emailAccounts = pgTable(
   })
 );
 
+/* ---------- Court searches (NY WebCivil Supreme) ----------
+   A saved public-record lookup against a merchant or an owner. Kept so a
+   hit stays attached to the deal and shows as a risk signal rather than
+   living in someone's memory. Results are stored as returned so a later
+   dispute can be checked against what the court actually showed. */
+export const courtSearches = pgTable(
+  'court_searches',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    dealId: uuid('deal_id').references(() => deals.id, { onDelete: 'cascade' }),
+    // 'business' | 'person'
+    searchType: varchar('search_type', { length: 16 }).notNull(),
+    businessName: varchar('business_name', { length: 300 }),
+    firstName: varchar('first_name', { length: 120 }),
+    lastName: varchar('last_name', { length: 120 }),
+    provider: varchar('provider', { length: 40 }).notNull().default('ny_webcivil'),
+    // 'ok' | 'no_results' | 'blocked' | 'unavailable' | 'parse_failed'
+    status: varchar('status', { length: 24 }).notNull(),
+    error: text('error'),
+    resultCount: integer('result_count').notNull().default(0),
+    // CourtCase[] plus the match score assigned at search time.
+    results: jsonb('results').notNull().default(sql`'[]'::jsonb`),
+    diagnostics: jsonb('diagnostics'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    companyIdx: index('court_searches_company_idx').on(t.companyId),
+    dealIdx: index('court_searches_deal_idx').on(t.dealId),
+  })
+);
+
 /* ---------- Permission keys (constants) ---------- */
 
 export const PERMISSION_KEYS = {

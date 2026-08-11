@@ -8,7 +8,7 @@ import {
   Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle, ClipboardList,
   Handshake, Gift, FileSignature, Table2, ChevronDown,
   PanelLeftOpen, PanelLeftClose, Trophy, Banknote, ReceiptText, Layers, BarChart3,
-  ShieldCheck,
+  ShieldCheck, Gavel,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NotificationBell } from '@/components/notification-bell';
@@ -46,6 +46,9 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   // (existing positions, cash-flow health, red flags). Runs entirely on
   // local code in the browser; no AI credits and nothing is uploaded.
   { href: '/underwriting', label: 'Underwriting',   icon: ShieldCheck, perm: 'deals.shop' },
+  // NY court record search — public civil index lookup for defaults and
+  // judgments against a merchant or an owner.
+  { href: '/court-search', label: 'Court Search',   icon: Gavel,       perm: 'deals.shop' },
   { href: '/funded-email', label: 'Funded Email',   icon: Send,        perm: 'deals.submit' },
   // Send Application — Dropbox Sign: name + email → signature request.
   { href: '/esign',        label: 'Send Application', icon: FileSignature, perm: 'deals.submit' },
@@ -89,7 +92,7 @@ export const ALL_NAV_ITEMS: NavItem[] = [
 export const DEFAULT_CATEGORIES: { id: string; label: string; items: string[] }[] = [
   {
     id: 'workflow', label: 'Workflow',
-    items: ['/deal-shop', '/underwriting', '/funded-email', '/esign', '/submissions', '/active-deals', '/funded-board', '/portfolio', '/syndication'],
+    items: ['/deal-shop', '/underwriting', '/court-search', '/funded-email', '/esign', '/submissions', '/active-deals', '/funded-board', '/portfolio', '/syndication'],
   },
   {
     id: 'commissions', label: 'Commissions',

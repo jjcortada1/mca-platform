@@ -1,3 +1,55 @@
+# Update — August 2026 (round 38) — NY court search
+
+New **Court Search** tab. Type a business name, or an owner's first and
+last name, and it searches the New York State courts' public civil index —
+the same WebCivil Supreme search you'd otherwise run by hand — for
+judgments and defaults.
+
+## What it does
+- **Business search** tries the name with and without the entity suffix.
+  Courts index filings inconsistently, so "ACME Logistics LLC" also tries
+  "ACME Logistics" and "ACME Logistics" — searching only the exact string
+  misses real judgments.
+- **Person search** uses "Last, First", which is how New York indexes
+  people. A last name is required; the first name narrows it.
+- **Every hit is scored** against what you searched and labelled
+  **Exact / Partial / Weak**, because a party search matches substrings and
+  will happily return every ACME in the state.
+- Results show index number (linked to the court's own case page), caption,
+  court and county, case type, filing date, and status.
+- Searches are saved, so a lookup stays attached to the file rather than
+  living in someone's memory, and recent searches are listed.
+
+## Two honest limitations
+**There is no official NY courts API.** WebCivil Supreme is a session-based
+web form, so this drives the public search the way a browser does. That
+means the court can rate-limit or temporarily block it, and their markup
+can change. When either happens you get a clear message saying which —
+never a silent "no results", which would read as a clean merchant.
+
+**A name match is not proof.** Common names collide. The screen says so,
+and every case links back to the court so you can confirm the actual party
+before acting on it.
+
+Coverage is the NY state civil index only — not federal court, not other
+states, not UCC filings.
+
+## Built to be fixable
+The adapter **discovers the court's search form at runtime** rather than
+hardcoding field names, so it keeps working when they change their markup,
+and it preserves their hidden session tokens so submissions aren't
+rejected. Requests are spaced out and identify themselves.
+
+Admins can open **`/api/court/diagnose`** to see whether the court site is
+reachable from your server and exactly which form fields it exposes today —
+which turns "court search isn't working" into a concrete answer.
+
+## Database
+One new table, `court_searches`, via the same idempotent boot migration.
+No existing table or column changed.
+
+---
+
 # Update — August 2026 (round 37) — Gmail integration (stage 1: connect + send as you)
 
 You asked for three things: connect Gmail properly, capture funder replies,

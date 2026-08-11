@@ -396,6 +396,27 @@ const ONE_TIME_BACKFILLS: { flag: string; sql: string }[] = [
   `CREATE INDEX IF NOT EXISTS email_accounts_user_idx ON email_accounts (user_id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS email_accounts_user_provider_email_idx
      ON email_accounts (user_id, provider, email_address)`,
+
+  // ---- court searches (NY WebCivil Supreme public-record lookups) ----
+  `CREATE TABLE IF NOT EXISTS court_searches (
+     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+     company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+     deal_id uuid REFERENCES deals(id) ON DELETE CASCADE,
+     search_type varchar(16) NOT NULL,
+     business_name varchar(300),
+     first_name varchar(120),
+     last_name varchar(120),
+     provider varchar(40) NOT NULL DEFAULT 'ny_webcivil',
+     status varchar(24) NOT NULL,
+     error text,
+     result_count integer NOT NULL DEFAULT 0,
+     results jsonb NOT NULL DEFAULT '[]'::jsonb,
+     diagnostics jsonb,
+     created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+     created_at timestamptz NOT NULL DEFAULT now()
+   )`,
+  `CREATE INDEX IF NOT EXISTS court_searches_company_idx ON court_searches (company_id)`,
+  `CREATE INDEX IF NOT EXISTS court_searches_deal_idx ON court_searches (deal_id)`,
 ];
 
 /**
