@@ -34,6 +34,44 @@ export const WEEKS_PER_MONTH = 4.333;
 
 export type Cadence = 'daily' | 'weekly' | 'bi-weekly' | 'semi-weekly' | 'monthly' | 'irregular';
 
+/** A stretch of time over which an advance's payment held steady. */
+export interface PaymentSegment {
+  amount: number;
+  from: string;
+  to: string;
+  count: number;
+}
+
+/** Money coming IN that looks like advance proceeds. */
+export interface FundingEvent {
+  date: string;
+  description: string;
+  amount: number;
+  /** Known funder name when the descriptor matched one. */
+  funderName: string | null;
+  confidence: 'high' | 'medium';
+  /** Why it was flagged. */
+  reason: string;
+}
+
+/** How a transaction was classified, for filtering in the UI. */
+export type TxnCategory = 'mca' | 'funding' | 'nsf' | 'transfer' | 'deposit' | 'withdrawal';
+
+/** A transaction plus everything the scrub worked out about it. */
+export interface AnnotatedTransaction {
+  date: string;
+  description: string;
+  amount: number;
+  balance: number | null;
+  category: TxnCategory;
+  /** Set when the row belongs to a detected MCA position. */
+  positionId: string | null;
+  /** Funder name when this row is tied to one. */
+  funderName: string | null;
+  /** True when the row is unusually large for this account. */
+  isLarge: boolean;
+}
+
 export interface McaPosition {
   id: string;
   /** Known funder name, or the cleaned-up bank descriptor. */
@@ -43,8 +81,14 @@ export interface McaPosition {
   /** Representative raw descriptor as it appears on the statement. */
   descriptor: string;
   cadence: Cadence;
-  /** Typical (median) debit amount. */
+  /** The payment being debited NOW (the latest segment's amount). */
   paymentAmount: number;
+  /** What the payment started out as, before any change. */
+  originalPayment: number;
+  /** The payment amount over time — more than one entry means it changed. */
+  paymentHistory: PaymentSegment[];
+  /** True when the funder changed the debit mid-advance. */
+  paymentChanged: boolean;
   /** Number of debits observed in the uploaded statements. */
   paymentCount: number;
   firstDate: string;
@@ -142,6 +186,12 @@ export interface UnderwritingReport {
   holdbackPct: number;
   /** Deposits that look like advance proceeds landing during the period. */
   advanceDepositsFound: { date: string; description: string; amount: number }[];
+  /** Advance fundings received, with why each was flagged. */
+  fundingEvents: FundingEvent[];
+  /** Every transaction, classified — powers the filterable table. */
+  transactions: AnnotatedTransaction[];
+  /** The threshold above which a transaction counts as "large". */
+  largeThreshold: number;
 
   score: number;         // 0–100
   grade: Grade;
@@ -269,16 +319,134 @@ export const CADENCE_LABEL: Record<Cadence, string> = {
 interface Stream {
   key: string;
   descriptor: string;
+  /** Every debit in the stream, oldest first. */
   txns: Transaction[];
+  /** The payment being taken NOW — the most recent segment's amount. */
   amount: number;
+  /** What the payment started at. Differs from `amount` after a switch. */
+  originalAmount: number;
+  /** The payment amount over time, oldest first. */
+  segments: PaymentSegment[];
   cadence: Cadence;
   medianGap: number;
+  /** Share of debits sitting within 2% of their own segment's amount. */
+  consistency: number;
+}
+
+/** How much two payment runs may overlap and still count as a switch. */
+const SWITCH_OVERLAP_DAYS = 10;
+
+/**
+ * Split one payee's debits into runs of a steady amount.
+ *
+ * Funders change the debit all the time — they re-amortize, the merchant
+ * asks for relief, a second advance is added on. Naively bucketing by
+ * amount turns one advance into two phantom positions, which is the
+ * difference between a "2 position" file and a "4 position" file.
+ *
+ * The distinction that matters is timing. Two amounts that run one AFTER
+ * the other are the same advance with a changed payment. Two amounts
+ * running at the SAME TIME are two separate advances from the same funder.
+ */
+function buildAmountRuns(rows: Transaction[]): Transaction[][] {
+  // Cluster by amount first, ignoring time.
+  const byAmount = [...rows].sort((a, b) => Math.abs(a.amount) - Math.abs(b.amount));
+  const clusters: Transaction[][] = [];
+  let current: Transaction[] = [];
+  for (const t of byAmount) {
+    if (!current.length) { current = [t]; continue; }
+    const base = Math.abs(current[0].amount);
+    if (Math.abs(Math.abs(t.amount) - base) <= Math.max(base * 0.02, 1)) current.push(t);
+    else { clusters.push(current); current = [t]; }
+  }
+  if (current.length) clusters.push(current);
+
+  // Keep clusters with real repetition; hold the rest aside.
+  const solid = clusters.filter((c) => c.length >= 2)
+    .map((c) => [...c].sort((a, b) => (a.date < b.date ? -1 : 1)));
+  const leftovers = clusters.filter((c) => c.length < 2).flat();
+  if (!solid.length) return [];
+
+  solid.sort((a, b) => (a[0].date < b[0].date ? -1 : 1));
+
+  // Walk them in start order, merging any that begin after the current
+  // chain has essentially finished.
+  const chains: Transaction[][][] = [[solid[0]]];
+  for (let i = 1; i < solid.length; i++) {
+    const cluster = solid[i];
+    const chain = chains[chains.length - 1];
+    const chainEnd = chain[chain.length - 1][chain[chain.length - 1].length - 1].date;
+    const overlap = daysBetween(cluster[0].date, chainEnd);
+    if (overlap <= SWITCH_OVERLAP_DAYS) chain.push(cluster);   // sequential → a switch
+    else chains.push([cluster]);                                // concurrent → separate
+  }
+
+  // Fold each chain back into a flat, date-sorted transaction list and
+  // reattach any one-off amounts that fall inside its window.
+  return chains.map((chain) => {
+    const flat = chain.flat();
+    const from = flat[0].date;
+    const to = flat[flat.length - 1].date;
+    const extras = leftovers.filter(
+      (t) => daysBetween(from, t.date) >= -14 && daysBetween(t.date, to) >= -14,
+    );
+    return [...flat, ...extras].sort((a, b) => (a.date < b.date ? -1 : 1));
+  });
 }
 
 /**
- * Find recurring fixed-amount debit streams. Descriptors are grouped by
- * merchant key, then each group is clustered by amount (±2%) so a payee
- * with one steady payment separates cleanly from ad-hoc charges.
+ * Describe how the payment moved over the life of a stream.
+ *
+ * Walks the debits in date order and starts a new segment whenever the
+ * amount settles somewhere new. A lone odd amount (a partial or a final
+ * catch-up payment) is absorbed into the surrounding segment rather than
+ * being reported as a change.
+ */
+function buildPaymentSegments(txns: Transaction[]): PaymentSegment[] {
+  const segments: PaymentSegment[] = [];
+  let run: Transaction[] = [];
+
+  const flush = () => {
+    if (!run.length) return;
+    const amount = median(run.map((t) => Math.abs(t.amount)));
+    segments.push({
+      amount,
+      from: run[0].date,
+      to: run[run.length - 1].date,
+      count: run.length,
+    });
+    run = [];
+  };
+
+  for (const t of txns) {
+    if (!run.length) { run = [t]; continue; }
+    const base = median(run.map((x) => Math.abs(x.amount)));
+    if (Math.abs(Math.abs(t.amount) - base) <= Math.max(base * 0.02, 1)) run.push(t);
+    else { flush(); run = [t]; }
+  }
+  flush();
+
+  // Absorb single-transaction blips back into the neighbouring segment so
+  // one odd debit isn't reported as "the payment changed".
+  const merged: PaymentSegment[] = [];
+  for (const seg of segments) {
+    const prev = merged[merged.length - 1];
+    if (seg.count === 1 && prev) {
+      prev.to = seg.to;
+      prev.count += 1;
+    } else {
+      merged.push({ ...seg });
+    }
+  }
+  return merged.length ? merged : segments;
+}
+
+/**
+ * Find recurring debit streams — a payee paid on a repeating schedule.
+ *
+ * Descriptors are grouped by merchant key, then split into runs so a
+ * changed payment stays one stream while two concurrent advances from the
+ * same funder stay separate.
  */
 function findRecurringStreams(txns: Transaction[]): Stream[] {
   const debits = txns.filter((t) => t.amount < 0);
@@ -294,23 +462,9 @@ function findRecurringStreams(txns: Transaction[]): Stream[] {
   for (const [key, rows] of groups) {
     if (rows.length < 3) continue;
 
-    // Cluster the group by amount so one payee can hold more than one
-    // distinct recurring stream (and so noise doesn't dilute the median).
-    const byAmount = [...rows].sort((a, b) => Math.abs(a.amount) - Math.abs(b.amount));
-    const clusters: Transaction[][] = [];
-    let current: Transaction[] = [];
-    for (const t of byAmount) {
-      if (!current.length) { current = [t]; continue; }
-      const base = Math.abs(current[0].amount);
-      if (Math.abs(Math.abs(t.amount) - base) <= Math.max(base * 0.02, 1)) current.push(t);
-      else { clusters.push(current); current = [t]; }
-    }
-    if (current.length) clusters.push(current);
-
-    for (const cluster of clusters) {
-      if (cluster.length < 3) continue;
-      const sorted = [...cluster].sort((a, b) => (a.date < b.date ? -1 : 1));
-      const uniqueDates = Array.from(new Set(sorted.map((t) => t.date)));
+    for (const run of buildAmountRuns(rows)) {
+      if (run.length < 3) continue;
+      const uniqueDates = Array.from(new Set(run.map((t) => t.date)));
       if (uniqueDates.length < 3) continue;
 
       const gaps: number[] = [];
@@ -325,13 +479,28 @@ function findRecurringStreams(txns: Transaction[]): Stream[] {
       const medGap = median(adjusted);
       const cadence = cadenceFromGap(medGap);
 
+      const segments = buildPaymentSegments(run);
+      const currentAmount = segments.length ? segments[segments.length - 1].amount : median(run.map((t) => Math.abs(t.amount)));
+      const originalAmount = segments.length ? segments[0].amount : currentAmount;
+
+      // Consistency is measured against each debit's OWN segment, so a
+      // clean advance that switched payments still reads as consistent.
+      let inline = 0;
+      for (const t of run) {
+        const seg = segments.find((sg) => t.date >= sg.from && t.date <= sg.to) ?? segments[segments.length - 1];
+        if (seg && Math.abs(Math.abs(t.amount) - seg.amount) <= Math.max(seg.amount * 0.02, 1)) inline++;
+      }
+
       streams.push({
         key,
-        descriptor: sorted[0].description,
-        txns: sorted,
-        amount: median(sorted.map((t) => Math.abs(t.amount))),
+        descriptor: run[0].description,
+        txns: run,
+        amount: currentAmount,
+        originalAmount,
+        segments,
         cadence,
         medianGap: medGap,
+        consistency: run.length ? inline / run.length : 0,
       });
     }
   }
@@ -366,10 +535,9 @@ function classifyPositions(
       : !excluded && mcaCadence && s.txns.length >= 4;
     if (!qualifies) continue;
 
-    // Amount consistency — share of debits within 2% of the median.
-    const consistent = s.txns.filter(
-      (t) => Math.abs(Math.abs(t.amount) - s.amount) <= Math.max(s.amount * 0.02, 1),
-    ).length / s.txns.length;
+    // Consistency is measured per payment segment, so an advance whose
+    // debit was re-set partway through still reads as a fixed payment.
+    const consistent = s.consistency;
     if (!known && consistent < 0.7) continue;
 
     const reasons: string[] = [];
@@ -382,6 +550,14 @@ function classifyPositions(
     if (consistent >= 0.95) { confidenceScore += 15; reasons.push('Payment amount is identical every time'); }
     else if (consistent >= 0.8) { confidenceScore += 8; reasons.push('Payment amount is nearly identical every time'); }
     if (s.txns.length >= 15) { confidenceScore += 8; reasons.push(`${s.txns.length} debits observed`); }
+    if (s.segments.length > 1) {
+      // A funder re-setting the debit is itself advance-like behaviour —
+      // ordinary vendors don't renegotiate a recurring charge mid-stream.
+      confidenceScore += 6;
+      reasons.push(
+        `Payment changed ${s.segments.length - 1} time${s.segments.length === 2 ? '' : 's'} — ${s.segments.map((sg) => fmt(sg.amount)).join(' → ')}`,
+      );
+    }
 
     const confidence: McaPosition['confidence'] =
       confidenceScore >= 70 ? 'high' : confidenceScore >= 45 ? 'medium' : 'low';
@@ -418,12 +594,15 @@ function classifyPositions(
     }
 
     positions.push({
-      id: `${s.key}|${Math.round(s.amount * 100)}`,
+      id: `${s.key}|${s.txns[0].date}`,
       funderName: known ?? prettyName(s.descriptor),
       identified: Boolean(known),
       descriptor: s.descriptor,
       cadence: s.cadence,
       paymentAmount: s.amount,
+      originalPayment: s.originalAmount,
+      paymentHistory: s.segments,
+      paymentChanged: s.segments.length > 1,
       paymentCount: s.txns.length,
       firstDate,
       lastDate,
@@ -567,6 +746,7 @@ export function analyzeStatements(input: Transaction[], parseWarnings: string[] 
     totalNsf: 0, totalNegativeDays: 0,
     positions: [], positionCount: 0, totalDailyMca: 0, totalMonthlyMca: 0,
     totalEstimatedPayback: 0, holdbackPct: 0, advanceDepositsFound: [],
+    fundingEvents: [], transactions: [], largeThreshold: 0,
     score: 0, grade: 'Decline', verdict: 'No data', verdictDetail: '',
     positives: [], redFlags: [], checks: [], maxNewAdvance: 0, maxNewAdvanceBasis: '',
     recentMcaTransactions: [], warnings: parseWarnings,
@@ -586,21 +766,68 @@ export function analyzeStatements(input: Transaction[], parseWarnings: string[] 
   const streams = findRecurringStreams(txns);
   const positions = classifyPositions(streams, periodEnd, roughMonthlyDeposits);
 
-  // Map every transaction that belongs to a detected position.
+  // Map every transaction that belongs to a detected position, keeping the
+  // position id so the transaction table can show which advance a debit
+  // paid and filter by it.
   const mcaTxnKeys = new Set<string>();
-  const mcaKeySet = new Set(positions.map((p) => p.id));
-  for (const s of streams) {
-    const id = `${s.key}|${Math.round(s.amount * 100)}`;
-    if (!mcaKeySet.has(id)) continue;
-    for (const t of s.txns) mcaTxnKeys.add(`${t.date}|${t.description}|${t.amount.toFixed(2)}`);
+  const txnPositionId = new Map<string, string>();
+  const positionsById = new Map(positions.map((p) => [p.id, p]));
+  for (const st of streams) {
+    const id = `${st.key}|${st.txns[0].date}`;
+    if (!positionsById.has(id)) continue;
+    for (const t of st.txns) {
+      const k = `${t.date}|${t.description}|${t.amount.toFixed(2)}`;
+      mcaTxnKeys.add(k);
+      txnPositionId.set(k, id);
+    }
   }
 
-  // Advances that FUNDED during the statement window — a deposit from a
-  // known funder. These both explain a spike in deposits and pin down when
-  // a position started.
-  const advanceDepositsFound = txns
-    .filter((t) => t.amount > 0 && Boolean(matchKnownFunder(t.description)) && t.amount >= 2000)
-    .map((t) => ({ date: t.date, description: t.description, amount: t.amount }));
+  /* ── Money coming IN that looks like advance proceeds ──
+     Two ways to spot a funding: the descriptor names a known funder, or
+     the deposit is wildly out of scale for this account and worded like a
+     funding. Both matter — a funding inside the window explains a deposit
+     spike that isn't revenue, and it pins down exactly when a position
+     started, which turns the remaining-balance estimate into a real
+     number. */
+  const depositAmounts = txns.filter((t) => t.amount > 0).map((t) => t.amount).sort((a, b) => a - b);
+  const depositP90 = depositAmounts.length
+    ? depositAmounts[Math.min(depositAmounts.length - 1, Math.floor(depositAmounts.length * 0.9))]
+    : 0;
+  const depositMedian = median(depositAmounts);
+
+  const fundingEvents: FundingEvent[] = [];
+  for (const t of txns) {
+    if (t.amount <= 0) continue;
+    const known = matchKnownFunder(t.description);
+    if (known && t.amount >= 2000) {
+      fundingEvents.push({
+        date: t.date, description: t.description, amount: t.amount,
+        funderName: known, confidence: 'high',
+        reason: `Deposit from ${known}, a known MCA funder`,
+      });
+      continue;
+    }
+    // Not a name we know — but an outsized, round, funding-worded deposit
+    // is still worth surfacing for the underwriter to eyeball.
+    const outsized = depositMedian > 0 && t.amount >= Math.max(depositMedian * 4, depositP90 * 1.5, 5000);
+    const round = t.amount % 500 === 0 || t.amount % 1000 === 0;
+    const worded = hasWeakMcaHint(t.description);
+    if (outsized && (round || worded)) {
+      fundingEvents.push({
+        date: t.date, description: t.description, amount: t.amount,
+        funderName: null, confidence: 'medium',
+        reason: worded
+          ? 'Large deposit with advance/funding wording in the description'
+          : `Large round deposit — ${Math.round(t.amount / Math.max(1, depositMedian))}× this account's typical deposit`,
+      });
+    }
+  }
+
+  // Kept for the existing start-date logic below, which only cares about
+  // named-funder deposits.
+  const advanceDepositsFound = fundingEvents
+    .filter((f) => f.funderName)
+    .map((f) => ({ date: f.date, description: f.description, amount: f.amount }));
 
   // Resolve "started in period" + remaining balance where determinable.
   for (const p of positions) {
@@ -676,6 +903,40 @@ export function analyzeStatements(input: Transaction[], parseWarnings: string[] 
   const totalEstimatedPayback = live.reduce((s, p) => s + (p.estimatedPayback ?? 0), 0);
   const holdbackPct = avgMonthlyDeposits > 0 ? totalMonthlyMca / avgMonthlyDeposits : 0;
 
+  /* ── Classify every transaction so the table can filter and sort ──
+     "Large" is defined relative to this account rather than as a fixed
+     dollar figure: $8,000 is routine for one merchant and an outlier for
+     another. */
+  const allMagnitudes = txns.map((t) => Math.abs(t.amount)).sort((a, b) => a - b);
+  const magP90 = allMagnitudes.length
+    ? allMagnitudes[Math.min(allMagnitudes.length - 1, Math.floor(allMagnitudes.length * 0.9))]
+    : 0;
+  const largeThreshold = Math.max(magP90, median(allMagnitudes) * 3);
+
+  const fundingKeys = new Set(fundingEvents.map((f) => `${f.date}|${f.description}|${f.amount.toFixed(2)}`));
+
+  const annotated: AnnotatedTransaction[] = txns.map((t) => {
+    const key = `${t.date}|${t.description}|${t.amount.toFixed(2)}`;
+    const positionId = txnPositionId.get(key) ?? null;
+    let category: TxnCategory;
+    if (positionId) category = 'mca';
+    else if (fundingKeys.has(key)) category = 'funding';
+    else if (NSF_RE.test(t.description) || OD_FEE_RE.test(t.description)) category = 'nsf';
+    else if (t.amount > 0 && NON_REVENUE_DEPOSIT_RE.test(t.description)) category = 'transfer';
+    else category = t.amount > 0 ? 'deposit' : 'withdrawal';
+
+    return {
+      date: t.date,
+      description: t.description,
+      amount: t.amount,
+      balance: t.balance,
+      category,
+      positionId,
+      funderName: positionId ? (positionsById.get(positionId)?.funderName ?? null) : (fundingEvents.find((f) => `${f.date}|${f.description}|${f.amount.toFixed(2)}` === key)?.funderName ?? null),
+      isLarge: largeThreshold > 0 && Math.abs(t.amount) >= largeThreshold,
+    };
+  });
+
   const recentMcaTransactions = txns
     .filter((t) => mcaTxnKeys.has(`${t.date}|${t.description}|${t.amount.toFixed(2)}`))
     .slice(-40)
@@ -738,11 +999,23 @@ export function analyzeStatements(input: Transaction[], parseWarnings: string[] 
     redFlags.push({ severity: 'info', label: 'Short statement window', detail: `Only ${monthsCovered} month${monthsCovered === 1 ? '' : 's'} of data. Funders want 3–6 months; the read below is less reliable.` });
   }
 
-  if (advanceDepositsFound.length) {
+  if (fundingEvents.length) {
+    const named = fundingEvents.filter((f) => f.funderName).length;
     redFlags.push({
       severity: 'info',
       label: 'Advance funded during this period',
-      detail: `${advanceDepositsFound.length} deposit${advanceDepositsFound.length === 1 ? '' : 's'} from a known funder landed inside the statement window — those are not revenue.`,
+      detail: `${fundingEvents.length} incoming deposit${fundingEvents.length === 1 ? '' : 's'} look${fundingEvents.length === 1 ? 's' : ''} like advance proceeds${named ? ` (${named} from a named funder)` : ''}, totalling ${fmt(fundingEvents.reduce((a, f) => a + f.amount, 0))}. That money is not revenue.`,
+    });
+  }
+
+  const switched = positions.filter((p) => p.paymentChanged);
+  if (switched.length) {
+    redFlags.push({
+      severity: 'warning',
+      label: `Payment changed on ${switched.length} position${switched.length === 1 ? '' : 's'}`,
+      detail: switched
+        .map((p) => `${p.funderName}: ${p.paymentHistory.map((sg) => fmt(sg.amount)).join(' → ')}`)
+        .join('; ') + '. A re-set debit usually means a renewal, a re-amortization, or relief being granted.',
     });
   }
 
@@ -848,6 +1121,9 @@ export function analyzeStatements(input: Transaction[], parseWarnings: string[] 
     totalEstimatedPayback,
     holdbackPct,
     advanceDepositsFound,
+    fundingEvents,
+    transactions: annotated,
+    largeThreshold,
     score,
     grade,
     verdict: VERDICT[grade].v,
@@ -918,11 +1194,23 @@ export function reportToText(r: UnderwritingReport, merchantName?: string): stri
         : '';
       L.push(`  • ${p.funderName} — ${fmtMoney(p.paymentAmount)} ${CADENCE_LABEL[p.cadence].toLowerCase()} (${fmt(p.monthlyEquivalent)}/mo)${structure}`);
       L.push(`      ${p.paymentCount} debits ${fmtStatementDate(p.firstDate)} – ${fmtStatementDate(p.lastDate)} | confidence: ${p.confidence}${p.likelyPaidOff ? ' | appears paid off / stopped' : ''}`);
+      if (p.paymentChanged) {
+        L.push(`      payment changed: ${p.paymentHistory.map((sg) => `${fmtMoney(sg.amount)} (${sg.count}x from ${fmtStatementDate(sg.from)})`).join('  →  ')}`);
+      }
       if (p.estimatedRemaining !== null && !p.likelyPaidOff) L.push(`      est. balance remaining ${fmt(p.estimatedRemaining)}`);
     }
     L.push(`  Total: ${fmtMoney(r.totalDailyMca)}/day, ${fmt(r.totalMonthlyMca)}/month — ${(r.holdbackPct * 100).toFixed(1)}% of deposits`);
   }
   L.push('');
+
+  if (r.fundingEvents.length) {
+    L.push('FUNDINGS RECEIVED');
+    for (const f of r.fundingEvents) {
+      L.push(`  • ${fmtStatementDate(f.date)} — ${fmt(f.amount)} — ${f.funderName ?? 'unnamed'} (${f.confidence} confidence)`);
+      L.push(`      ${f.reason}`);
+    }
+    L.push('');
+  }
 
   if (r.redFlags.length) {
     L.push('RED FLAGS');

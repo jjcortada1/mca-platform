@@ -8,7 +8,7 @@ import { useToast } from '@/components/toast';
 import {
   Upload, CheckCircle2, XCircle, AlertTriangle, Download, Copy,
   Trash2, Info, ClipboardPaste, Loader2, ShieldCheck, TrendingUp, TrendingDown,
-  Activity, Gauge, X,
+  Activity, Gauge, X, Search, ArrowUpDown, ArrowDownWideNarrow, Banknote,
 } from 'lucide-react';
 import {
   detectColumns, detectColumnsHeaderless, gridToTransactions, parseStatementText,
@@ -19,7 +19,9 @@ import type { Transaction, DetectResult, ColumnMap } from '@/lib/underwriting/pa
 import {
   analyzeStatements, reportToText, fmtMoney, fmtMoneyShort, fmtStatementDate, CADENCE_LABEL,
 } from '@/lib/underwriting/engine';
-import type { UnderwritingReport, McaPosition } from '@/lib/underwriting/engine';
+import type {
+  UnderwritingReport, McaPosition, AnnotatedTransaction, TxnCategory,
+} from '@/lib/underwriting/engine';
 
 /**
  * Underwriting — bank-statement scrub.
@@ -459,8 +461,10 @@ export function UnderwritingScrub() {
             <KeyMetrics report={report} />
             <McaDetection report={report} />
             <CashFlowChart report={report} />
+            <FundingsReceived report={report} />
             <ScrubChecklist report={report} />
             <MonthTable report={report} />
+            <TransactionsPanel report={report} />
           </div>
 
           {/* ── Right rail ──────────────────────────────────── */}
@@ -764,10 +768,16 @@ function PositionRow({
             {p.funderName}
             {!p.identified && <Badge variant="outline">Unrecognized name</Badge>}
             {p.likelyPaidOff && <Badge variant="success">Paid off / stopped</Badge>}
+            {p.paymentChanged && <Badge variant="warning">Payment changed</Badge>}
           </div>
           <div className="text-xs text-muted-foreground mt-0.5">
             {CADENCE_LABEL[p.cadence]} · {p.paymentCount} debits · {fmtStatementDate(p.firstDate)} – {fmtStatementDate(p.lastDate)}
           </div>
+          {p.paymentChanged && (
+            <div className="text-xs text-amber-700 mt-1">
+              {p.paymentHistory.map((sg) => fmtMoney(sg.amount)).join('  →  ')}
+            </div>
+          )}
         </td>
         <td className="py-3 px-3 text-right tabular-nums">{fmtMoney(p.paymentAmount)}</td>
         <td className="py-3 px-3 text-right tabular-nums">{fmtMoney(p.dailyEquivalent)}</td>
@@ -799,6 +809,23 @@ function PositionRow({
                 <ul className="text-xs text-muted-foreground space-y-1">
                   {p.confidenceReasons.map((r, i) => <li key={i}>• {r}</li>)}
                 </ul>
+                {p.paymentChanged && (
+                  <>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mt-3 mb-1">
+                      Payment history
+                    </div>
+                    <div className="space-y-1">
+                      {p.paymentHistory.map((sg, i) => (
+                        <div key={i} className="flex items-center justify-between gap-3 text-xs">
+                          <span className="tabular-nums font-medium">{fmtMoney(sg.amount)}</span>
+                          <span className="text-muted-foreground">
+                            {sg.count} debit{sg.count === 1 ? '' : 's'} · {fmtStatementDate(sg.from)} – {fmtStatementDate(sg.to)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
                 <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mt-3 mb-1">
                   Bank descriptor
                 </div>
@@ -1159,5 +1186,298 @@ function RecentMcaTransactions({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Money the merchant RECEIVED that looks like advance proceeds.
+ *
+ * Worth its own panel: a funding inside the statement window inflates
+ * deposits without being revenue, and it pins down exactly when that
+ * advance started — which is what turns the remaining-balance estimate
+ * from a guess into a real number.
+ */
+function FundingsReceived({ report }: { report: UnderwritingReport }) {
+  if (!report.fundingEvents.length) return null;
+  const total = report.fundingEvents.reduce((s, f) => s + f.amount, 0);
+
+  return (
+    <Card>
+      <CardContent className="p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <h2 className="text-base font-semibold tracking-tight flex items-center gap-2">
+            <Banknote className="h-4 w-4 text-muted-foreground" /> Fundings received
+          </h2>
+          <span className="text-sm text-muted-foreground">
+            {report.fundingEvents.length} deposit{report.fundingEvents.length === 1 ? '' : 's'} · {fmtMoneyShort(total)}
+          </span>
+        </div>
+        <div className="overflow-x-auto -mx-5 px-5">
+          <table className="w-full text-sm min-w-[560px]">
+            <thead>
+              <tr className="text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground border-b border-border">
+                <th className="py-2 pr-3 font-semibold">Date</th>
+                <th className="py-2 px-3 font-semibold">Funder</th>
+                <th className="py-2 px-3 font-semibold">Why it was flagged</th>
+                <th className="py-2 pl-3 font-semibold text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.fundingEvents.map((f, i) => (
+                <tr key={`${f.date}-${i}`} className="border-b border-border/60">
+                  <td className="py-2.5 pr-3 whitespace-nowrap">{fmtStatementDate(f.date)}</td>
+                  <td className="py-2.5 px-3">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{f.funderName ?? 'Unnamed'}</span>
+                      <Badge variant={f.confidence === 'high' ? 'destructive' : 'warning'}>
+                        {f.confidence === 'high' ? 'Confirmed' : 'Possible'}
+                      </Badge>
+                    </div>
+                  </td>
+                  <td className="py-2.5 px-3 text-xs text-muted-foreground">{f.reason}</td>
+                  <td className="py-2.5 pl-3 text-right tabular-nums text-emerald-600 font-medium whitespace-nowrap">
+                    +{fmtMoneyShort(f.amount)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-muted-foreground mt-3">
+          These deposits are excluded from the &ldquo;true revenue&rdquo; figures — advance proceeds are borrowed
+          money, not sales.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+const CATEGORY_META: Record<TxnCategory, { label: string; variant: 'default' | 'success' | 'destructive' | 'warning' | 'outline' }> = {
+  mca: { label: 'MCA', variant: 'destructive' },
+  funding: { label: 'Funding', variant: 'warning' },
+  nsf: { label: 'NSF', variant: 'destructive' },
+  transfer: { label: 'Transfer', variant: 'outline' },
+  deposit: { label: 'Deposit', variant: 'success' },
+  withdrawal: { label: 'Withdrawal', variant: 'default' },
+};
+
+type TxnFilter = 'all' | TxnCategory | 'large';
+type TxnSort = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc';
+
+/**
+ * Every transaction, searchable and sortable.
+ *
+ * Amount sorting works on the magnitude, so "largest first" surfaces the
+ * biggest movements in either direction — which is how you eyeball a file
+ * for anything unusual.
+ */
+function TransactionsPanel({ report }: { report: UnderwritingReport }) {
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<TxnFilter>('all');
+  const [sort, setSort] = useState<TxnSort>('date-desc');
+  const [limit, setLimit] = useState(50);
+
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { all: report.transactions.length, large: 0 };
+    for (const t of report.transactions) {
+      c[t.category] = (c[t.category] ?? 0) + 1;
+      if (t.isLarge) c.large += 1;
+    }
+    return c;
+  }, [report.transactions]);
+
+  const rows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    let list = report.transactions.filter((t) => {
+      if (filter === 'large') { if (!t.isLarge) return false; }
+      else if (filter !== 'all' && t.category !== filter) return false;
+      if (needle && !t.description.toLowerCase().includes(needle) && !(t.funderName ?? '').toLowerCase().includes(needle)) return false;
+      return true;
+    });
+    list = [...list].sort((a, b) => {
+      switch (sort) {
+        case 'date-asc': return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+        case 'amount-desc': return Math.abs(b.amount) - Math.abs(a.amount);
+        case 'amount-asc': return Math.abs(a.amount) - Math.abs(b.amount);
+        default: return a.date > b.date ? -1 : a.date < b.date ? 1 : 0;
+      }
+    });
+    return list;
+  }, [report.transactions, search, filter, sort]);
+
+  const shown = rows.slice(0, limit);
+  const filtered = rows.reduce(
+    (acc, t) => {
+      if (t.amount > 0) acc.in += t.amount; else acc.out += Math.abs(t.amount);
+      return acc;
+    },
+    { in: 0, out: 0 },
+  );
+
+  const FILTERS: { key: TxnFilter; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'mca', label: 'MCA debits' },
+    { key: 'funding', label: 'Fundings' },
+    { key: 'deposit', label: 'Deposits' },
+    { key: 'withdrawal', label: 'Withdrawals' },
+    { key: 'nsf', label: 'NSF' },
+    { key: 'transfer', label: 'Transfers' },
+    { key: 'large', label: 'Large only' },
+  ];
+
+  function downloadCsv() {
+    const head = ['Date', 'Description', 'Amount', 'Balance', 'Category', 'Funder', 'Large'];
+    const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+    const body = rows.map((t: AnnotatedTransaction) => [
+      t.date, esc(t.description), t.amount.toFixed(2),
+      t.balance === null ? '' : t.balance.toFixed(2),
+      CATEGORY_META[t.category].label, esc(t.funderName ?? ''), t.isLarge ? 'yes' : '',
+    ].join(','));
+    const blob = new Blob([[head.join(','), ...body].join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'statement-transactions.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <h2 className="text-base font-semibold tracking-tight">All transactions</h2>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setLimit(50); }}
+                placeholder="Search description or funder"
+                className="h-9 w-60 pl-8"
+              />
+            </div>
+            <Select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as TxnSort)}
+              className="h-9 w-auto text-sm"
+              aria-label="Sort transactions"
+            >
+              <option value="date-desc">Newest first</option>
+              <option value="date-asc">Oldest first</option>
+              <option value="amount-desc">Largest first</option>
+              <option value="amount-asc">Smallest first</option>
+            </Select>
+            <Button variant="outline" className="h-9" onClick={downloadCsv}>
+              <Download className="h-4 w-4 mr-2" /> CSV
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          {FILTERS.map((f) => {
+            const n = counts[f.key] ?? 0;
+            if (f.key !== 'all' && n === 0) return null;
+            const active = filter === f.key;
+            return (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => { setFilter(f.key); setLimit(50); }}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                  active ? 'bg-primary text-primary-foreground' : 'bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+              >
+                {f.label} <span className={active ? 'opacity-70' : 'opacity-60'}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground mb-3">
+          <span>{rows.length.toLocaleString()} shown</span>
+          <span className="text-emerald-600">In {fmtMoneyShort(filtered.in)}</span>
+          <span className="text-rose-600">Out {fmtMoneyShort(filtered.out)}</span>
+          {report.largeThreshold > 0 && (
+            <span>&ldquo;Large&rdquo; = {fmtMoneyShort(report.largeThreshold)}+ for this account</span>
+          )}
+        </div>
+
+        {rows.length === 0 ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">
+            Nothing matches that filter.
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto -mx-5 px-5">
+              <table className="w-full text-sm min-w-[680px]">
+                <thead>
+                  <tr className="text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground border-b border-border">
+                    <th className="py-2 pr-3 font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setSort((v) => (v === 'date-desc' ? 'date-asc' : 'date-desc'))}
+                        className="inline-flex items-center gap-1 hover:text-foreground"
+                      >
+                        Date <ArrowUpDown className="h-3 w-3" />
+                      </button>
+                    </th>
+                    <th className="py-2 px-3 font-semibold">Description</th>
+                    <th className="py-2 px-3 font-semibold">Type</th>
+                    <th className="py-2 px-3 font-semibold text-right">
+                      <button
+                        type="button"
+                        onClick={() => setSort((v) => (v === 'amount-desc' ? 'amount-asc' : 'amount-desc'))}
+                        className="inline-flex items-center gap-1 hover:text-foreground"
+                      >
+                        Amount <ArrowDownWideNarrow className="h-3 w-3" />
+                      </button>
+                    </th>
+                    <th className="py-2 pl-3 font-semibold text-right">Balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.map((t, i) => (
+                    <TxnRow key={`${t.date}-${i}-${t.amount}`} txn={t} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {rows.length > shown.length && (
+              <Button variant="outline" className="w-full mt-3 h-9" onClick={() => setLimit((n) => n + 200)}>
+                Show more ({(rows.length - shown.length).toLocaleString()} left)
+              </Button>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function TxnRow({ txn: t }: { txn: AnnotatedTransaction }) {
+  const meta = CATEGORY_META[t.category];
+  return (
+    <tr className="border-b border-border/60">
+      <td className="py-2.5 pr-3 whitespace-nowrap text-muted-foreground">{fmtStatementDate(t.date)}</td>
+      <td className="py-2.5 px-3">
+        <div className="truncate max-w-[380px]" title={t.description}>{t.description}</div>
+        {t.funderName && <div className="text-xs text-muted-foreground">{t.funderName}</div>}
+      </td>
+      <td className="py-2.5 px-3">
+        <div className="flex items-center gap-1.5">
+          <Badge variant={meta.variant}>{meta.label}</Badge>
+          {t.isLarge && <Badge variant="outline">Large</Badge>}
+        </div>
+      </td>
+      <td className={`py-2.5 px-3 text-right tabular-nums whitespace-nowrap font-medium ${t.amount > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+        {t.amount > 0 ? '+' : '−'}{fmtMoney(Math.abs(t.amount))}
+      </td>
+      <td className="py-2.5 pl-3 text-right tabular-nums text-muted-foreground whitespace-nowrap">
+        {t.balance === null ? '—' : fmtMoney(t.balance)}
+      </td>
+    </tr>
   );
 }

@@ -367,10 +367,10 @@ export function gridToTransactions(
  * "Total Deposits and Additions   $23,454.00" can't reset the section.
  */
 const CREDIT_SECTION_RE =
-  /^\s*(deposits?\s*(and|&)\s*(additions?|credits?|other\s+credits?)|electronic\s+deposits?|deposits?\s+and\s+other\s+additions?|credits?|deposits?|additions?|money\s+in|amounts?\s+received)\s*:?\s*$/i;
+  /^\s*(deposits?\s*(and|&)\s*(additions?|credits?|other\s+credits?|other\s+additions?)|electronic\s+deposits?|deposits?\s+and\s+other\s+(additions?|credits?)|other\s+(deposits?|credits?|additions?)|credits?|deposits?|additions?|money\s+in|amounts?\s+received|incoming\s+(transfers?|payments?))\s*:?\s*$/i;
 
 const DEBIT_SECTION_RE =
-  /^\s*(electronic\s+withdrawals?|withdrawals?\s*(and|&)\s*(subtractions?|debits?|other\s+deductions?)|other\s+withdrawals?|checks?\s+(paid|presented)|atm\s*(and|&)\s*debit\s+card\s+withdrawals?|card\s+(purchases?|withdrawals?)|debit\s+card\s+purchases?|fees?(\s*(and|&)\s*(charges?|service\s+charges?))?|service\s+charges?|debits?|withdrawals?|deductions?|money\s+out|amounts?\s+paid)\s*:?\s*$/i;
+  /^\s*(electronic\s+withdrawals?|withdrawals?\s*(and|&)\s*(subtractions?|debits?|other\s+debits?|other\s+deductions?)|other\s+(withdrawals?|debits?|deductions?)|checks?\s+(paid|presented|and\s+other\s+debits?)|atm\s*(and|&)\s*debit\s+card\s+(withdrawals?|subtractions?)|card\s+(purchases?|withdrawals?)|debit\s+card\s+purchases?|preauthorized\s+(withdrawals?|debits?|payments?)|automatic\s+(payments?|transfers?|withdrawals?)|fees?(\s*(and|&)\s*(charges?|service\s+charges?))?|service\s+(charges?|fees?)|account\s+fees?|debits?|withdrawals?|deductions?|payments?\s+and\s+other\s+debits?|money\s+out|amounts?\s+paid)\s*:?\s*$/i;
 
 /** Lines that look like a transaction but are really a subtotal. */
 const TOTAL_LINE_RE = /^\s*(sub)?total\b|^\s*(beginning|ending|opening|closing|previous|new)\s+balance\b|^\s*balance\s+(forward|as\s+of)\b/i;

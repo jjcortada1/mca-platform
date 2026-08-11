@@ -1,3 +1,70 @@
+# Update — August 2026 (round 33) — Smarter MCA detection + a full transaction browser
+
+## Positions now survive a payment change
+The biggest miss in the first version: when a funder **re-sets the debit**
+partway through — a renewal, a re-amortization, relief being granted — the
+scrub counted it as **two separate positions**. That's the difference
+between a "2 position" file and a "4 position" file, which changes who you
+can shop it to.
+
+Now it tells the two situations apart by timing:
+- Two amounts running **one after the other** = one advance whose payment
+  changed. The position shows a **Payment changed** badge, the old → new
+  amounts inline, and the full history (amount, number of debits, and dates
+  for each stretch) when you expand the row.
+- Two amounts running **at the same time** = two separate advances from the
+  same funder. Still counted separately, as it should be.
+
+The burden math uses the payment being taken **now**, not an average of old
+and new. A payment change also nudges confidence up slightly — ordinary
+vendors don't renegotiate a recurring charge mid-stream.
+
+## Fundings received — its own section
+Every deposit that looks like **advance proceeds** is now called out with
+the date, the funder, the amount, and **why it was flagged**:
+- **Confirmed** — the deposit came from a name in the funder dictionary.
+- **Possible** — an outsized round deposit, or one worded like a funding,
+  that is several times this account's typical deposit.
+
+These are excluded from "true revenue" (borrowed money isn't sales), and
+when a funding lines up with the start of a position, the **remaining
+balance stops being a guess** and becomes a real number.
+
+## All transactions — searchable, filterable, sortable
+A full transaction table at the bottom of the report:
+- **Search** by description or funder.
+- **Filter** by type — MCA debits, Fundings, Deposits, Withdrawals, NSF,
+  Transfers, or **Large only** — each with a live count.
+- **Sort** by newest, oldest, **largest first**, or smallest first. Largest
+  sorts on size regardless of direction, so the biggest movements in the
+  file surface immediately. The Date and Amount column headers are
+  clickable too.
+- Running totals of money in and money out **for the current filter**.
+- **CSV export** of exactly what you're looking at.
+
+Every row is tagged with what it is, and anything unusually large for that
+account is marked. "Large" is measured **against the account**, not a fixed
+dollar figure — $8,000 is routine for one merchant and an outlier for
+another.
+
+## Reads more banks
+More section-heading variations recognized, so statements from Bank of
+America, Wells Fargo, and smaller banks land correctly alongside Chase:
+"Withdrawals and other debits", "Checks and other debits", "Preauthorized
+withdrawals", "Automatic payments", "Other deposits", "Incoming transfers",
+"Account fees", and more. These headings are how most banks encode
+deposit-vs-withdrawal, so each one added is a bank that now reads correctly.
+
+## Tests
+A fifth scenario covers exactly the cases above: an advance whose daily
+debit is re-set mid-stream (must stay **one** position, with the current
+payment being the new one), two concurrent advances from a single funder
+(must stay **two**), a $50,000 funding deposit (must be recognized, excluded
+from revenue, and used to date the position it started), and the
+classification of every transaction.
+
+---
+
 # Update — August 2026 (round 32) — Underwriting reads PDF statements
 
 ## Drop in the bank's PDF, exactly as it comes

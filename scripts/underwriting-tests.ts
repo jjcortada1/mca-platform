@@ -337,6 +337,84 @@ async function runPdfScenarios() {
   console.log('✅ SCENARIO 4 (PDF, balance-inferred) PASSED');
 }
 
+/* ═══════ Scenario 5: payment switch, stacking, funding received ═══════ */
+
+/**
+ * The cases the naive version got wrong:
+ *   • A funder that re-sets the daily debit partway through is ONE
+ *     position whose payment changed — not two positions.
+ *   • Two advances from the SAME funder running at the same time are two
+ *     positions, even though the descriptor is identical.
+ *   • A large deposit from a funder is a funding received, not revenue,
+ *     and it pins down when that advance started.
+ */
+const rows5: { date: string; desc: string; amt: number }[] = [];
+let bal5 = 30_000;
+for (let i = 0; i < 92; i++) {
+  const day = addDays(start, i);
+  if (!isWeekday(day)) continue;
+  rows5.push({ date: iso(day), desc: 'CARD SETTLEMENT DEPOSIT 992018', amt: 4200 + ((i * 173) % 2200) });
+
+  // One advance whose payment is re-set on day 45.
+  rows5.push({ date: iso(day), desc: 'RAPID FINANCE ACH DEBIT 1900288', amt: i < 45 ? -1285.71 : -950.0 });
+
+  // Two Bitty advances running concurrently the whole time.
+  rows5.push({ date: iso(day), desc: 'BITTY ADVANCE ACH DEBIT 55231', amt: -200.0 });
+  rows5.push({ date: iso(day), desc: 'BITTY ADVANCE ACH DEBIT 55231', amt: -310.0 });
+
+  // A funding lands mid-period; its weekly debits start right after.
+  if (i === 42) rows5.push({ date: iso(day), desc: 'FORA FINANCIAL ACH CREDIT FUNDING', amt: 50_000 });
+  if (i > 43 && day.getUTCDay() === 2) rows5.push({ date: iso(day), desc: 'FORA FINANCIAL ACH DEBIT 88120', amt: -1800.0 });
+}
+const grid5: string[][] = [['Date', 'Description', 'Amount', 'Running Balance']];
+for (const r of rows5) { bal5 += r.amt; grid5.push([r.date, r.desc, r.amt.toFixed(2), bal5.toFixed(2)]); }
+const rep5 = analyzeStatements(gridToTransactions(grid5, detectColumns(grid5)!, {}).transactions);
+
+console.log('\nswitch/stack scenario → positions:');
+for (const p of rep5.positions) {
+  console.log(`  ${p.funderName.padEnd(18)} ${String(p.paymentAmount).padStart(8)} ${p.cadence.padEnd(8)} segments=${p.paymentHistory.length} [${p.paymentHistory.map((sg) => sg.amount).join(' -> ')}]`);
+}
+
+// The re-set advance must be ONE position with a two-step history.
+const rapid5 = rep5.positions.filter((p) => p.funderName === 'Rapid Finance');
+if (rapid5.length !== 1) throw new Error(`FAIL(switch): Rapid Finance should be 1 position, got ${rapid5.length}`);
+if (!rapid5[0].paymentChanged) throw new Error('FAIL(switch): the payment change was not detected');
+if (rapid5[0].paymentHistory.length !== 2) throw new Error(`FAIL(switch): expected 2 payment segments, got ${rapid5[0].paymentHistory.length}`);
+if (Math.abs(rapid5[0].paymentAmount - 950) > 0.01) throw new Error(`FAIL(switch): current payment should be the NEW 950, got ${rapid5[0].paymentAmount}`);
+if (Math.abs(rapid5[0].originalPayment - 1285.71) > 0.01) throw new Error('FAIL(switch): original payment wrong');
+
+// The two simultaneous Bitty advances must stay separate.
+const bitty = rep5.positions.filter((p) => /bitty/i.test(p.funderName));
+if (bitty.length !== 2) throw new Error(`FAIL(stack): concurrent advances from one funder should stay separate, got ${bitty.length}`);
+
+// The funding must be recognised as incoming advance money, not revenue.
+const funding = rep5.fundingEvents.find((f) => f.funderName === 'Fora Financial');
+if (!funding) throw new Error('FAIL(funding): the Fora Financial funding deposit was not detected');
+if (funding.confidence !== 'high') throw new Error('FAIL(funding): a named-funder deposit should be high confidence');
+if (Math.abs(funding.amount - 50_000) > 0.01) throw new Error('FAIL(funding): wrong funding amount');
+
+const monthWithFunding = rep5.months.find((m) => m.key === funding.date.slice(0, 7))!;
+if (monthWithFunding.trueRevenue >= monthWithFunding.deposits) {
+  throw new Error('FAIL(funding): advance proceeds were counted as true revenue');
+}
+
+// Knowing the start date makes the remaining balance a real number.
+const fora = rep5.positions.find((p) => p.funderName === 'Fora Financial');
+if (!fora) throw new Error('FAIL(funding): the Fora Financial position was not detected');
+if (!fora.startedInPeriod) throw new Error('FAIL(funding): the advance start should be visible in the window');
+if (fora.estimatedRemaining === null) throw new Error('FAIL(funding): remaining balance should be determinable');
+
+// Every transaction should be classified, and the funding flagged large.
+const cats = new Map<string, number>();
+for (const t of rep5.transactions) cats.set(t.category, (cats.get(t.category) ?? 0) + 1);
+console.log('categories:', JSON.stringify(Object.fromEntries(cats)));
+if (rep5.transactions.length !== rows5.length) throw new Error(`FAIL(annotate): expected ${rows5.length} annotated txns, got ${rep5.transactions.length}`);
+if (!cats.get('mca')) throw new Error('FAIL(annotate): no transactions tagged as MCA');
+const fundingRow = rep5.transactions.find((t) => t.amount === 50_000)!;
+if (fundingRow.category !== 'funding') throw new Error(`FAIL(annotate): the funding row is categorised as ${fundingRow.category}`);
+if (!fundingRow.isLarge) throw new Error('FAIL(annotate): a 50k deposit should be flagged large');
+console.log('✅ SCENARIO 5 (payment switch, stacking, funding) PASSED');
+
 runPdfScenarios()
   .then(() => console.log('\n✅ ALL UNDERWRITING TESTS PASSED'))
   .catch((err) => { console.error(String(err && err.message ? err.message : err)); process.exit(1); });
