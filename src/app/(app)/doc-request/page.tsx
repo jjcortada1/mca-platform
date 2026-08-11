@@ -29,6 +29,9 @@ export default function DocRequestPage() {
   const [feePct, setFeePct] = useState<string>('');
   const [termCount, setTermCount] = useState<string>('');
   const [termUnit, setTermUnit] = useState<'days' | 'weeks'>('days');
+  // Refi toggle — when the deal is a refinance, the message opens with
+  // "Send refi docs for …" instead of "Send docs for …".
+  const [isRefi, setIsRefi] = useState(false);
   // Merchant contact
   const [merchantEmail, setMerchantEmail] = useState<string>('');
   // Phone is stored raw (digits + formatting) — formatted live as the
@@ -77,7 +80,8 @@ export default function DocRequestPage() {
   const message = useMemo(() => {
     const lines: string[] = [];
     const moneyStr = fmtMoney(fundingAmount);
-    if (moneyStr) lines.push(`Send docs for ${moneyStr}`);
+    const docsWord = isRefi ? 'refi docs' : 'docs';
+    if (moneyStr) lines.push(`Send ${docsWord} for ${moneyStr}`);
     if (rate)     lines.push(`Rate: ${rate}`);
     if (feePct)   lines.push(`Fee: ${feePct}%`);
     if (termCount) lines.push(`Term: ${termCount} ${termUnit}`);
@@ -100,7 +104,7 @@ export default function DocRequestPage() {
     if (notes) lines.push(`Notes: ${notes.trim()}`);
 
     return lines.join('\n');
-  }, [fundingAmount, rate, feePct, termCount, termUnit, epos, merchantEmail, merchantCell, notes]);
+  }, [fundingAmount, rate, feePct, termCount, termUnit, isRefi, epos, merchantEmail, merchantCell, notes]);
 
   async function copyMessage() {
     if (!message) {
@@ -134,6 +138,30 @@ export default function DocRequestPage() {
         <Card>
           <CardContent className="p-5 space-y-4">
             <div className="text-sm font-semibold">Deal details</div>
+
+            {/* Refi toggle — flips the opening line to "Send refi docs". */}
+            <Field label="Is this a refi?">
+              <div className="inline-flex rounded-md border border-input bg-card p-0.5" role="group">
+                <button
+                  type="button"
+                  onClick={() => setIsRefi(false)}
+                  className={`h-9 px-4 rounded text-xs font-medium transition-colors ${
+                    !isRefi ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  No
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsRefi(true)}
+                  className={`h-9 px-4 rounded text-xs font-medium transition-colors ${
+                    isRefi ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Yes — refi
+                </button>
+              </div>
+            </Field>
 
             <Field label="Funding amount">
               {/* CurrencyInput adds $ prefix + commas as the user types. */}
