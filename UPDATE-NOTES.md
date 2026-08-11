@@ -1,3 +1,24 @@
+# Update — July 2026 (round 28) — Doc Request refi option + full system audit delivered
+
+## Doc Request — refi toggle
+- New **"Is this a refi?"** Yes/No toggle at the top of the form. Choosing
+  Yes changes the generated message to open with **"Send refi docs for $X"**
+  instead of "Send docs for $X".
+
+## Full system audit — three independent passes, all findings verified
+- A consultant-style audit of all 28 pages, 100+ API routes, and shared
+  libraries is delivered as a styled report (shared separately) and a
+  condensed copy in the repo: **AUDIT-2026-07.md**.
+- Headlines: **6 critical bugs** (including a commission double-booking path
+  and a dashboard reading two conflicting funded sources), the **funded
+  workflow requiring up to 4 manual entries per deal**, ~300 light-only
+  color classes breaking on the dark theme, ~700+ lines of verified dead
+  code, and a phased fix plan. The security/data core passed.
+- No fixes from the audit were applied yet — the report is the deliverable;
+  fixes proceed per the phased plan on approval.
+
+---
+
 # Update — July 2026 (round 27) — Invisible background refreshes: the blinking is fixed at the source
 
 ## What was actually causing the blinking (traced, not guessed)
