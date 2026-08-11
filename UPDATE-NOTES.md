@@ -1,3 +1,65 @@
+# Update — August 2026 (round 36) — Worksheets: a real spreadsheet
+
+Phase 1 of the product doc. Worksheets now behaves like spreadsheet
+software instead of a page of form fields.
+
+## The grid
+- **Column letters (A, B, C…) and row numbers**, both frozen so they stay
+  visible while you scroll.
+- **Click a cell to select it. Shift-click or drag to select a block.**
+  Arrow keys move, Shift+arrows extend, Tab/Shift+Tab go across, Enter
+  edits and moves down, Escape cancels.
+- **Just start typing** to overwrite a cell, the way you'd expect.
+- **Copy and paste real blocks.** Ctrl/⌘+C copies the selection as proper
+  tab-separated data you can paste into Excel or Google Sheets, and pasting
+  a block back in fills the cells — **adding rows automatically** if the
+  paste runs past the end of the sheet. Ctrl/⌘+X cuts, Delete clears.
+- **Undo and redo** (Ctrl/⌘+Z, Ctrl/⌘+Shift+Z) across every kind of edit —
+  typing, pasting, clearing.
+- **Drag column edges to resize.** Widths save automatically.
+- **Freeze any column** to the left so it stays put while you scroll wide.
+- **Format a column** as text, number, currency, or percent. Numbers right-
+  align and use tabular figures. This is display only — **your typed value
+  is never rewritten**, so switching the format back shows exactly what you
+  entered.
+- **Search within the sheet**, with matches highlighted in place.
+- **Status bar** showing row/column counts, the selected cell reference, how
+  many cells are selected, and **Sum / Average / Count of the numbers in the
+  selection**.
+- **Row density**: compact, normal, or tall.
+
+## Speed
+Only the rows actually on screen are rendered, so a **1,000+ row sheet stays
+responsive** — scrolling, selecting and typing don't degrade as the sheet
+grows.
+
+## Layout
+The sheet fills the window instead of sitting inside a card, and **worksheet
+tabs moved to the bottom**, where spreadsheet tabs belong. Tabs still drag
+to reorder and the order still saves.
+
+## Nothing was lost
+Sharing and view/edit permissions, the import flow, tab reordering, row
+ordering, and the debounced save-with-dirty-tracking are all unchanged — a
+background refresh still cannot overwrite an edit you haven't saved yet, and
+a 200-cell paste still saves one request per row. Column changes remain
+owner-only, matching the API; for an editor a resize now stays local to the
+session instead of failing against a permission check.
+
+The `format` and `frozen` column settings are new optional fields on the
+existing column definition — **no migration, and sheets created before this
+update keep working exactly as they did.**
+
+---
+
+### Still to come, in the doc's priority order
+2. Underwriting dashboard (landing / command centre)
+3. Shop & Submit and Funders layout overhauls
+4. Further underwriting logic (much of this shipped last round)
+5. Message Response Database
+
+---
+
 # Update — August 2026 (round 35) — Underwriting workstation (stage 1)
 
 The Underwriting tab is now a proper underwriting workstation instead of a

@@ -26,12 +26,22 @@ import { useToast } from '@/components/toast';
 import { useConfirm } from '@/components/confirm-provider';
 import { useAutoRefresh } from '@/lib/use-auto-refresh';
 import { cn } from '@/lib/utils';
+import { SheetGrid, ROW_HEIGHTS, DEFAULT_COL_WIDTH as GRID_COL_WIDTH } from '@/components/worksheets/grid';
+import type { GridColumn, CellChange, RowHeight } from '@/components/worksheets/grid';
 import {
   Plus, Table2, Share2, Settings2, Trash2, X, ChevronRight,
   Users as UsersIcon, GripVertical, Upload, FileSpreadsheet, Copy,
 } from 'lucide-react';
 
-interface Col { id: string; label: string; width?: number }
+interface Col {
+  id: string;
+  label: string;
+  width?: number;
+  /** Display format. Presentational only — cell text is never rewritten. */
+  format?: 'text' | 'number' | 'currency' | 'percent' | 'date';
+  /** Freeze to the left while scrolling horizontally. */
+  frozen?: boolean;
+}
 interface SheetMeta { id: string; name: string; columns: Col[]; myRole: 'owner' | 'edit' | 'view'; ownerName: string | null }
 interface RowData { id: string; cells: Record<string, string> }
 interface SheetDetail { id: string; name: string; columns: Col[]; myRole: 'owner' | 'edit' | 'view'; rows: RowData[] }
@@ -80,6 +90,13 @@ export default function WorksheetsPage() {
 
   // Inline row expansion (double-click a row, or its chevron)
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+
+  /* Grid UI state. Row height is a single sheet-wide setting because the
+     grid windows its rows, and windowing needs a known row height. */
+  const [gridSearch, setGridSearch] = useState('');
+  const [rowHeight, setRowHeight] = useState<RowHeight>('normal');
+  const [gridStatus, setGridStatus] = useState('');
+  const colSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Import flow
   const [importDraft, setImportDraft] = useState<ImportDraft | null>(null);
@@ -240,6 +257,95 @@ export default function WorksheetsPage() {
     const j = await res.json();
     if (!res.ok) { toast.error(j.error || 'Could not add a row.'); return; }
     setDetail((d) => d ? { ...d, rows: [...d.rows, j.data] } : d);
+  }
+
+  /**
+   * Apply a batch of cell edits from the grid.
+   *
+   * Routed through the SAME dirty-tracking + debounced save path the sheet
+   * already used, so a paste of 200 cells still can't be clobbered by a
+   * background refresh and still saves one request per row.
+   */
+  function applyCellChanges(changes: CellChange[]) {
+    if (!changes.length) return;
+    setDetail((d) => {
+      if (!d) return d;
+      const byRow = new Map<string, Record<string, string>>();
+      for (const ch of changes) {
+        const patch = byRow.get(ch.rowId) ?? {};
+        patch[ch.colId] = ch.value;
+        byRow.set(ch.rowId, patch);
+      }
+      return {
+        ...d,
+        rows: d.rows.map((r) => (byRow.has(r.id) ? { ...r, cells: { ...r.cells, ...byRow.get(r.id)! } } : r)),
+      };
+    });
+    const timers = saveTimersRef.current;
+    for (const rowId of new Set(changes.map((c) => c.rowId))) {
+      dirtyRowsRef.current.add(rowId);
+      const existing = timers.get(rowId);
+      if (existing) clearTimeout(existing);
+      timers.set(rowId, setTimeout(() => saveRowNow(rowId), 700));
+    }
+  }
+
+  /** Create n rows and resolve with their ids, so a paste can overflow. */
+  async function addRows(n: number): Promise<string[]> {
+    const d = detailRef.current;
+    if (!d || n <= 0) return [];
+    const ids: string[] = [];
+    const created: RowData[] = [];
+    for (let i = 0; i < n; i++) {
+      const res = await fetch(`/api/worksheets/${d.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cells: {} }),
+      });
+      if (!res.ok) break;
+      const j = await res.json();
+      if (!j?.data?.id) break;
+      created.push(j.data);
+      ids.push(j.data.id);
+    }
+    if (created.length) setDetail((cur) => (cur ? { ...cur, rows: [...cur.rows, ...created] } : cur));
+    if (ids.length < n) toast.error('Some rows could not be added — paste may be truncated.');
+    return ids;
+  }
+
+  async function deleteRows(rowIds: string[]) {
+    const d = detailRef.current;
+    if (!d || !rowIds.length) return;
+    const ok = await confirm({
+      title: rowIds.length === 1 ? 'Delete this row?' : `Delete ${rowIds.length} rows?`,
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    for (const rowId of rowIds) {
+      const res = await fetch(`/api/worksheets/${d.id}/rows/${rowId}`, { method: 'DELETE' });
+      if (res.ok) dirtyRowsRef.current.delete(rowId);
+    }
+    setDetail((cur) => (cur ? { ...cur, rows: cur.rows.filter((r) => !rowIds.includes(r.id)) } : cur));
+  }
+
+  /**
+   * Column geometry / format changes. Only the owner may persist them (the
+   * API enforces this too), so for an editor the change stays local to the
+   * session rather than failing with a 403 on every drag.
+   */
+  function applyColumnChange(next: GridColumn[]) {
+    setDetail((d) => (d ? { ...d, columns: next as Col[] } : d));
+    const d = detailRef.current;
+    if (!d || d.myRole !== 'owner') return;
+    if (colSaveTimerRef.current) clearTimeout(colSaveTimerRef.current);
+    colSaveTimerRef.current = setTimeout(() => {
+      fetch(`/api/worksheets/${d.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ columns: (detailRef.current?.columns ?? next) }),
+      }).catch(() => { /* width/format is cosmetic; a failed save retries on the next change */ });
+    }, 600);
   }
 
   /** Update a cell locally, mark the row dirty, and schedule a debounced save. */
@@ -674,45 +780,6 @@ export default function WorksheetsPage() {
         />
       ) : (
         <>
-          {/* Sheet tabs — drag your own tabs to reorder them (Sheet 2 before
-              Sheet 1, etc.); the order saves automatically. */}
-          <div className="flex items-end gap-1 border-b border-border overflow-x-auto pb-px">
-            {ownSheets.map((s, i) => (
-              <div
-                key={s.id}
-                draggable
-                onDragStart={(e) => {
-                  tabDragFromRef.current = i;
-                  e.dataTransfer.effectAllowed = 'move';
-                  try { e.dataTransfer.setData('text/plain', String(i)); } catch { /* older browsers */ }
-                }}
-                onDragOver={(e) => {
-                  if (tabDragFromRef.current === null) return;
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = 'move';
-                  if (tabDragOver !== i) setTabDragOver(i);
-                }}
-                onDrop={(e) => { e.preventDefault(); dropTab(i); }}
-                onDragEnd={() => { tabDragFromRef.current = null; setTabDragOver(null); }}
-                className={cn('shrink-0 rounded-t-lg transition-shadow',
-                  tabDragOver === i && tabDragFromRef.current !== null && tabDragFromRef.current !== i &&
-                  'ring-2 ring-primary/50')}
-              >
-                <SheetTab sheet={s} active={activeId === s.id} onClick={() => setActiveId(s.id)} />
-              </div>
-            ))}
-            {sharedSheets.length > 0 && <div className="mx-1.5 mb-2 h-4 w-px bg-border shrink-0" />}
-            {sharedSheets.map((s) => (
-              <SheetTab key={s.id} sheet={s} active={activeId === s.id} onClick={() => setActiveId(s.id)} />
-            ))}
-            <button
-              onClick={createSheet}
-              title="New sheet"
-              className="ml-1 mb-1 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-          </div>
 
           {loadingSheet || !detail ? (
             <TableSkeleton />
@@ -981,173 +1048,145 @@ export default function WorksheetsPage() {
                 </Card>
               )}
 
-              {/* Grid */}
-              <Card className="overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="text-sm border-collapse" style={{ width: 'max-content', minWidth: '100%' }}>
-                    <thead>
-                      <tr className="bg-muted/40 border-b border-border">
-                        <th className="w-[52px] px-2 py-2 text-left text-[10px] font-semibold text-muted-foreground">#</th>
-                        {detail.columns.map((c) => (
-                          <th
-                            key={c.id}
-                            className="relative px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-l border-border/50 select-none"
-                            style={{ width: c.width ?? DEFAULT_COL_WIDTH, minWidth: 70 }}
-                          >
-                            {c.label}
-                            {/* Drag handle on the right edge to resize */}
-                            <span
-                              onMouseDown={(e) => startResize(e, c)}
-                              title="Drag to resize"
-                              className="absolute top-0 right-0 h-full w-[6px] cursor-col-resize hover:bg-primary/30 active:bg-primary/50"
-                            />
-                          </th>
-                        ))}
-                        <th className="w-9"></th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/50">
-                      {detail.rows.map((row, ri) => (
-                        <Fragment key={row.id}>
-                          <tr
-                            className={cn(
-                              'group hover:bg-muted/20 transition-colors',
-                              expandedRowId === row.id && 'bg-primary/[0.04]',
-                              dragOver === ri && dragFromRef.current !== null && dragFromRef.current !== ri && 'bg-primary/10'
-                            )}
-                            draggable={canEdit && dragArmed === ri}
-                            onDragStart={(e) => onRowDragStart(e, ri)}
-                            onDragOver={(e) => onRowDragOver(e, ri)}
-                            onDrop={(e) => onRowDrop(e, ri)}
-                            onDragEnd={onRowDragEnd}
-                            onDoubleClick={() => setExpandedRowId((v) => v === row.id ? null : row.id)}
-                          >
-                            <td className="px-1 py-1 text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">
-                              <span className="inline-flex items-center gap-0.5">
-                                {canEdit && (
-                                  <span
-                                    onMouseDown={() => setDragArmed(ri)}
-                                    onMouseUp={() => setDragArmed(null)}
-                                    title="Drag to reorder"
-                                    className="cursor-grab active:cursor-grabbing p-0.5 rounded text-muted-foreground/40 group-hover:text-muted-foreground hover:bg-muted"
-                                  >
-                                    <GripVertical className="h-3.5 w-3.5" />
-                                  </span>
-                                )}
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); setExpandedRowId((v) => v === row.id ? null : row.id); }}
-                                  title={expandedRowId === row.id ? 'Collapse row' : 'Expand row'}
-                                  className="p-0.5 rounded hover:bg-muted text-muted-foreground/50 group-hover:text-muted-foreground"
-                                >
-                                  <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', expandedRowId === row.id && 'rotate-90')} />
-                                </button>
-                                {ri + 1}
-                              </span>
-                            </td>
-                            {detail.columns.map((c) => (
-                              <td
-                                key={c.id}
-                                className="border-l border-border/40 p-0 align-top"
-                                style={{ width: c.width ?? DEFAULT_COL_WIDTH, maxWidth: c.width ?? DEFAULT_COL_WIDTH }}
-                                title="Double-click to expand the row"
-                              >
-                                {canEdit ? (
-                                  <input
-                                    value={row.cells[c.id] ?? ''}
-                                    onChange={(e) => setCell(row.id, c.id, e.target.value)}
-                                    onBlur={() => saveRowNow(row.id)}
-                                    onKeyDown={(e) => { if (e.key === 'Enter') saveRowNow(row.id); }}
-                                    className="w-full bg-transparent px-2.5 py-1.5 text-[13px] outline-none focus:bg-primary/[0.04] focus:ring-1 focus:ring-inset focus:ring-ring/40 tabular-nums truncate"
-                                  />
-                                ) : (
-                                  <div className="px-2.5 py-1.5 text-[13px] tabular-nums truncate">{row.cells[c.id] ?? ''}</div>
-                                )}
-                              </td>
-                            ))}
-                            <td className="px-1 py-1 text-center">
-                              {canEdit && (
-                                <button
-                                  onClick={() => deleteRow(row.id)}
-                                  className="p-1 rounded text-muted-foreground/0 group-hover:text-muted-foreground hover:!text-rose-500 hover:bg-muted transition-colors"
-                                  title="Delete row"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                          {/* Inline expansion — the row opens directly beneath itself. */}
-                          {expandedRowId === row.id && (
-                            <tr className="bg-muted/[0.15]">
-                              <td colSpan={detail.columns.length + 2} className="p-0 border-l-2 border-l-primary/70">
-                                <div className="px-4 py-3 animate-row-expand">
-                                  <div className="flex items-center justify-between mb-2.5">
-                                    <div className="text-xs font-semibold text-muted-foreground">Row {ri + 1}</div>
-                                    <button
-                                      onClick={() => { if (canEdit) saveRowNow(row.id); setExpandedRowId(null); }}
-                                      className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
-                                      title="Collapse row"
-                                    >
-                                      <X className="h-4 w-4" />
-                                    </button>
-                                  </div>
-                                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                                    {detail.columns.map((c) => (
-                                      <div key={c.id} className="space-y-1">
-                                        <div className="flex items-center justify-between">
-                                          <span className="text-xs font-medium text-muted-foreground">{c.label}</span>
-                                          {/* One-press copy for this exact value. */}
-                                          <button
-                                            onClick={() => copyCell(row.cells[c.id] ?? '', c.label)}
-                                            title={`Copy ${c.label}`}
-                                            className="p-1 rounded text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-colors"
-                                          >
-                                            <Copy className="h-3.5 w-3.5" />
-                                          </button>
-                                        </div>
-                                        {canEdit ? (
-                                          <Textarea
-                                            rows={2}
-                                            value={row.cells[c.id] ?? ''}
-                                            onChange={(e) => setCell(row.id, c.id, e.target.value)}
-                                            onBlur={() => saveRowNow(row.id)}
-                                            className="text-[13px] leading-relaxed min-h-[52px]"
-                                          />
-                                        ) : (
-                                          <div className="text-[13px] leading-relaxed whitespace-pre-wrap rounded-lg border border-border bg-card px-3 py-2 min-h-[40px]">
-                                            {row.cells[c.id] || <span className="text-muted-foreground">—</span>}
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </Fragment>
-                      ))}
-                      {detail.rows.length === 0 && (
-                        <tr>
-                          <td colSpan={detail.columns.length + 2} className="px-4 py-8 text-center text-sm text-muted-foreground">
-                            {canEdit ? 'Empty sheet — add your first row, or use Import to bring in a spreadsheet.' : 'This sheet is empty.'}
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+              {/* Grid toolbar — search, density, and structure controls. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  value={gridSearch}
+                  onChange={(e) => setGridSearch(e.target.value)}
+                  placeholder="Search this sheet"
+                  className="h-8 w-52 text-[12.5px]"
+                />
+                <Select
+                  value={rowHeight}
+                  onChange={(e) => setRowHeight(e.target.value as RowHeight)}
+                  className="h-8 w-auto text-[12px]"
+                  aria-label="Row height"
+                >
+                  <option value="compact">Compact rows</option>
+                  <option value="normal">Normal rows</option>
+                  <option value="tall">Tall rows</option>
+                </Select>
                 {canEdit && (
-                  <button
-                    onClick={addRow}
-                    className="w-full flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 border-t border-border transition-colors"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Add row
-                  </button>
+                  <Button size="sm" variant="outline" onClick={() => addRows(1)}>
+                    <Plus className="h-3.5 w-3.5" /> Row
+                  </Button>
                 )}
-              </Card>
+                {isOwner && (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => applyColumnChange([
+                        ...(detail.columns as GridColumn[]),
+                        { id: newColId(), label: `Column ${detail.columns.length + 1}`, width: GRID_COL_WIDTH },
+                      ])}
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Column
+                    </Button>
+                    <Select
+                      value=""
+                      onChange={(e) => {
+                        const [colId, fmt] = e.target.value.split('|');
+                        if (!colId) return;
+                        applyColumnChange((detail.columns as GridColumn[]).map((c) => (
+                          c.id === colId ? { ...c, format: fmt as GridColumn['format'] } : c
+                        )));
+                      }}
+                      className="h-8 w-auto text-[12px]"
+                      aria-label="Column format"
+                    >
+                      <option value="">Format a column…</option>
+                      {detail.columns.map((c) => (
+                        <optgroup key={c.id} label={c.label}>
+                          {(['text', 'number', 'currency', 'percent'] as const).map((f) => (
+                            <option key={f} value={`${c.id}|${f}`}>
+                              {c.label} → {f}{(c.format ?? 'text') === f ? ' ✓' : ''}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </Select>
+                    <Select
+                      value=""
+                      onChange={(e) => {
+                        const colId = e.target.value;
+                        if (!colId) return;
+                        applyColumnChange((detail.columns as GridColumn[]).map((c) => (
+                          c.id === colId ? { ...c, frozen: !c.frozen } : c
+                        )));
+                      }}
+                      className="h-8 w-auto text-[12px]"
+                      aria-label="Freeze column"
+                    >
+                      <option value="">Freeze / unfreeze…</option>
+                      {detail.columns.map((c) => (
+                        <option key={c.id} value={c.id}>{c.frozen ? `Unfreeze ${c.label}` : `Freeze ${c.label}`}</option>
+                      ))}
+                    </Select>
+                  </>
+                )}
+                {gridStatus && <span className="text-[11.5px] text-muted-foreground">{gridStatus}</span>}
+              </div>
+
+              {/* Spreadsheet grid — fills the remaining viewport so the sheet
+                  itself is the interface rather than a card floating in a page. */}
+              <div className="flex flex-col min-h-0" style={{ height: 'calc(100vh - 320px)', minHeight: 380 }}>
+                <SheetGrid
+                  columns={detail.columns as GridColumn[]}
+                  rows={detail.rows}
+                  canEdit={canEdit}
+                  canEditColumns={isOwner}
+                  rowHeight={rowHeight}
+                  search={gridSearch}
+                  onCellsChange={applyCellChanges}
+                  onColumnsChange={applyColumnChange}
+                  onAddRows={addRows}
+                  onDeleteRows={deleteRows}
+                  onStatus={setGridStatus}
+                />
+              </div>
             </div>
           )}
+
+          {/* Sheet tabs — drag your own tabs to reorder them (Sheet 2 before
+              Sheet 1, etc.); the order saves automatically. */}
+          <div className="flex items-end gap-1 border-b border-border overflow-x-auto pb-px">
+            {ownSheets.map((s, i) => (
+              <div
+                key={s.id}
+                draggable
+                onDragStart={(e) => {
+                  tabDragFromRef.current = i;
+                  e.dataTransfer.effectAllowed = 'move';
+                  try { e.dataTransfer.setData('text/plain', String(i)); } catch { /* older browsers */ }
+                }}
+                onDragOver={(e) => {
+                  if (tabDragFromRef.current === null) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (tabDragOver !== i) setTabDragOver(i);
+                }}
+                onDrop={(e) => { e.preventDefault(); dropTab(i); }}
+                onDragEnd={() => { tabDragFromRef.current = null; setTabDragOver(null); }}
+                className={cn('shrink-0 rounded-t-lg transition-shadow',
+                  tabDragOver === i && tabDragFromRef.current !== null && tabDragFromRef.current !== i &&
+                  'ring-2 ring-primary/50')}
+              >
+                <SheetTab sheet={s} active={activeId === s.id} onClick={() => setActiveId(s.id)} />
+              </div>
+            ))}
+            {sharedSheets.length > 0 && <div className="mx-1.5 mb-2 h-4 w-px bg-border shrink-0" />}
+            {sharedSheets.map((s) => (
+              <SheetTab key={s.id} sheet={s} active={activeId === s.id} onClick={() => setActiveId(s.id)} />
+            ))}
+            <button
+              onClick={createSheet}
+              title="New sheet"
+              className="ml-1 mb-1 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
         </>
       )}
     </div>

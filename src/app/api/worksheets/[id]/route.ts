@@ -39,7 +39,14 @@ const patchSchema = z.object({
     label: z.string().min(1).max(120),
     // Column width in px (drag-resizable in the UI). Optional; clamped.
     width: z.number().int().min(60).max(1200).optional(),
-  })).max(30).optional(),
+    // Display format for the column. Purely presentational — the cell
+    // value is always stored as the text the user typed, so changing the
+    // format never rewrites data and old sheets (which have no format)
+    // keep behaving exactly as before.
+    format: z.enum(['text', 'number', 'currency', 'percent', 'date']).optional(),
+    // Freeze this column to the left while scrolling horizontally.
+    frozen: z.boolean().optional(),
+  })).max(60).optional(),
 });
 
 /** PATCH — rename / edit columns. Owner only. */
