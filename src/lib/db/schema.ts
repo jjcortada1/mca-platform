@@ -1376,6 +1376,43 @@ export const structuredEmailFieldsRelations = relations(structuredEmailFields, (
   company: one(companies, { fields: [structuredEmailFields.companyId], references: [companies.id] }),
 }));
 
+/* ---------- Connected email accounts (Gmail OAuth) ----------
+   A mailbox a user has connected so the CRM can send AS them (mail lands
+   in their real Sent folder) and, once read scope is granted, capture the
+   replies. Tokens are encrypted at rest with the same AES-256-GCM helper
+   the SMTP passwords use. SMTP is untouched and remains the fallback. */
+export const emailAccounts = pgTable(
+  'email_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    provider: varchar('provider', { length: 20 }).notNull().default('google'),
+    emailAddress: varchar('email_address', { length: 320 }).notNull(),
+    displayName: varchar('display_name', { length: 200 }),
+    // Encrypted blobs — never plaintext.
+    accessToken: text('access_token').notNull(),
+    refreshToken: text('refresh_token'),
+    tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
+    scope: text('scope').notNull().default(''),
+    // 'connected' | 'needs_reauth' | 'error'
+    status: varchar('status', { length: 20 }).notNull().default('connected'),
+    lastError: text('last_error'),
+    // Sync cursor for reply capture / inbox (stage 2).
+    historyId: varchar('history_id', { length: 50 }),
+    lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+    syncEnabled: boolean('sync_enabled').notNull().default(true),
+    // Prefer this mailbox over SMTP when sending.
+    sendEnabled: boolean('send_enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('email_accounts_user_idx').on(t.userId),
+    uniqueMailbox: uniqueIndex('email_accounts_user_provider_email_idx').on(t.userId, t.provider, t.emailAddress),
+  })
+);
+
 /* ---------- Permission keys (constants) ---------- */
 
 export const PERMISSION_KEYS = {

@@ -1,3 +1,73 @@
+# Update — August 2026 (round 37) — Gmail integration (stage 1: connect + send as you)
+
+You asked for three things: connect Gmail properly, capture funder replies,
+and a full inbox in the CRM. They all sit on one foundation — an OAuth
+connection to Google — so that is built first and built properly.
+
+## What works now
+**My account → Connected email → Connect Gmail.**
+
+Once connected, Cortada can send **as you** through your own mailbox
+instead of an SMTP app password. That means:
+- Mail appears in your **real Gmail Sent folder**
+- Replies **thread properly**, which is what makes reply capture possible
+- **No app passwords** to create, store, or rotate
+
+Each person connects their own mailbox. Cortada never asks for anyone's
+password, and access can be pulled at any time from the Disconnect button
+or Google's own permissions page.
+
+**Your SMTP setup is untouched.** Anyone without a connected mailbox keeps
+sending exactly as they do today, so this can be rolled out one rep at a
+time with no cutover.
+
+## Setup required (one-time, by an admin)
+This needs a Google Cloud OAuth client — **`docs/google-email-setup.md`**
+has the click-by-click steps. Two new secrets:
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+
+## The honest constraint on the inbox
+Sending uses a scope any app can request. **Reading** your mail — which is
+what reply capture and the in-app inbox need — uses a scope Google
+classifies as *restricted*:
+
+- If everyone connecting a mailbox is on **your Google Workspace domain**,
+  set the OAuth app to **Internal** and there is no review. Straightforward.
+- If reps at **other companies** need it, the app must be **External**, and
+  Google requires a verification review including a security assessment
+  that can take weeks.
+
+No amount of code changes this — it is Google's policy. Worth deciding
+early which path you're on, because it sets the timeline for the inbox.
+
+Connected mailboxes show whether they have read access, with an **Add read
+access** button to re-consent when you're ready.
+
+## Security
+- Access and refresh tokens are **encrypted at rest** (AES-256-GCM), using
+  the same key as the SMTP passwords.
+- The OAuth handshake is bound to both a one-time httpOnly cookie **and**
+  your signed-in user id, so a mailbox can't be attached to someone else's
+  account.
+- Expired tokens refresh automatically; if Google revokes access the
+  mailbox is flagged **Reconnect needed** rather than failing silently on
+  every send.
+- Disconnecting revokes the grant at Google before deleting the record.
+
+## Database
+One new table, `email_accounts`, created by the same idempotent boot
+migration everything else uses. **No existing table or column was
+changed.**
+
+---
+
+### Next, on this foundation
+1. Route deal and funded-email sending through the connected mailbox
+2. Reply capture — funder replies attach to the submission/deal
+3. The in-app inbox
+
+---
+
 # Update — August 2026 (round 36) — Worksheets: a real spreadsheet
 
 Phase 1 of the product doc. Worksheets now behaves like spreadsheet

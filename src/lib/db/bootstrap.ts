@@ -369,6 +369,33 @@ const ONE_TIME_BACKFILLS: { flag: string; sql: string }[] = [
     flag: 'two_factor_enable_all_v1',
     sql: `UPDATE users SET two_factor_enabled = true`,
   },
+
+  // ---- connected email accounts (Gmail OAuth) ----
+  // Additive: SMTP config on companies/users is untouched and stays the
+  // fallback for anyone who hasn't connected a mailbox.
+  `CREATE TABLE IF NOT EXISTS email_accounts (
+     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+     provider varchar(20) NOT NULL DEFAULT 'google',
+     email_address varchar(320) NOT NULL,
+     display_name varchar(200),
+     access_token text NOT NULL,
+     refresh_token text,
+     token_expires_at timestamptz,
+     scope text NOT NULL DEFAULT '',
+     status varchar(20) NOT NULL DEFAULT 'connected',
+     last_error text,
+     history_id varchar(50),
+     last_sync_at timestamptz,
+     sync_enabled boolean NOT NULL DEFAULT true,
+     send_enabled boolean NOT NULL DEFAULT true,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     updated_at timestamptz NOT NULL DEFAULT now()
+   )`,
+  `CREATE INDEX IF NOT EXISTS email_accounts_user_idx ON email_accounts (user_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS email_accounts_user_provider_email_idx
+     ON email_accounts (user_id, provider, email_address)`,
 ];
 
 /**

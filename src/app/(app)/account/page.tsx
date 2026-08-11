@@ -22,6 +22,7 @@ import {
   Button, Input, Field, PageHeader,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
+import { ConnectedMailboxes } from '@/components/email/connected-mailboxes';
 import { Mail, KeyRound, ShieldCheck, Shield, PenLine, X } from 'lucide-react';
 
 interface MeUser { id: string; name: string; email: string; role: string }
@@ -51,6 +52,10 @@ export default function AccountPage() {
         title="My account"
         description="Your personal settings. To change company-wide options, contact your admin."
       />
+
+      {/* Connected mailbox (Gmail OAuth). Sits above the SMTP settings
+          because a connected mailbox takes precedence over them. */}
+      <ConnectedMailboxes />
 
       {me && (
         <Card>
