@@ -76,15 +76,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const branding = await getPublicBranding();
 
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <head>
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="format-detection" content="telephone=no" />
-        {/* Single-theme app: the dark command center, always. The light/dark
-            switcher was removed by request — the class is set statically on
-            <html>, no script, no stored preference. */}
+        {/* Single-theme app: LIGHT, always (per JJ — August 2026). The
+            light/dark switcher was removed earlier; with no .dark class on
+            <html>, the :root light tokens apply everywhere. The dark token
+            set remains in globals.css but is inert. */}
       </head>
       <body>
         {/* Brand-color injection removed — the palette is consistent

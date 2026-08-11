@@ -93,7 +93,9 @@
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    color-scheme: light dark;
+    /* Light-only app — keeps native controls (scrollbars, date pickers,
+       selects) from rendering dark on OS-dark machines. */
+    color-scheme: light;
   }
 
   body {

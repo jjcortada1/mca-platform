@@ -1,3 +1,17 @@
+# Update — August 2026 (round 30) — Light theme, permanently
+
+## The system is LIGHT now — everywhere, for everyone
+- The app renders in the **light theme only**: clean white surfaces with the
+  dark-navy monochrome buttons and accents. No toggle, no stored
+  preference, no dark mode.
+- Native controls (scrollbars, date pickers, dropdowns) are also locked to
+  light so they can't render dark on computers set to OS dark mode.
+- Everything from the recent rounds carries over unchanged — the icon rail
+  (with the expand-to-wide option), monochrome buttons, unique icons,
+  Funder Intel, storage usage, silent refreshes, and all fixes.
+
+---
+
 # Update — August 2026 (round 29) — Funder Intel, storage usage, single dark theme, and the audit's Phase 1 fixes
 
 ## NEW: Funder Intel (sidebar → Resources)
