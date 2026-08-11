@@ -48,8 +48,11 @@ export function handle<T extends (...args: any[]) => Promise<Response>>(fn: T): 
       if (err instanceof ForbiddenError) return forbidden(err.message);
       if (err instanceof ZodError) return badRequest('Validation failed', err.flatten());
       console.error('[api error]', err);
-      const message = err instanceof Error ? err.message : 'Internal server error';
-      return serverError(message);
+      // NEVER echo raw error messages on 500s — internal database/system
+      // strings leak schema and infrastructure details. Full detail goes to
+      // the server log above; the client gets a generic message (same policy
+      // as lib/api/errors.ts apiError).
+      return serverError('Internal server error');
     }
   }) as T;
 }

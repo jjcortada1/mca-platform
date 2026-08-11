@@ -1,3 +1,62 @@
+# Update — August 2026 (round 29) — Funder Intel, storage usage, single dark theme, and the audit's Phase 1 fixes
+
+## NEW: Funder Intel (sidebar → Resources)
+- A full analytics section for funder performance, **built automatically
+  from data you already have** — nothing extra to type: submissions sent /
+  approved / declined per funder, approval rate, offers made with average
+  offer size and factor, **deals won and funded volume**, and win rate.
+- Ranked by wins with a volume bar per funder, a "top funder" callout,
+  period filters (30 days / 90 days / 12 months / all time), and an
+  active-only toggle. Requires the same permission as the Funders tab.
+
+## NEW: Storage usage (Settings → Backup → Storage usage)
+- See how many **MB/GB of database storage each company uses** and the
+  total. Per-company bars, record counts, and an expandable breakdown of
+  each company's largest tables. Company admins see their own company; as
+  the platform owner you see every company plus the true database total.
+
+## Dark/light switcher removed
+- The app is now **one theme: the dark command center**, always. The
+  toggle is gone from the rail, wide sidebar, and mobile bar, and no
+  preference is stored. (If you ever want light-only instead, it's a
+  one-line flip — say the word.)
+
+## Audit Phase 1 — five of the six critical findings fixed
+- **Commission double-booking fixed**: approving a funded email now checks
+  for an existing commission on the deal and never books a second one (the
+  admin sees a note instead), and an unlinked approval attaches to an
+  existing funded deal with the same name rather than creating a duplicate.
+- **Commissions page dark-theme bug fixed**: invalid CSS variable usage
+  made table headers invisible and selects borderless — now valid.
+- **Calculator commission drift fixed**: the Deal Calculator now uses the
+  same shared commission engine as the server (proper rounding guard, 12%
+  cap, and defaults if the rules fetch fails — no more silent 0%).
+- **Crash guard**: an API error can no longer white-screen Active Deals or
+  Funders.
+- **Error-message leak closed**: the secondary API error handler no longer
+  echoes raw internal error text on server errors.
+- (The sixth finding — pointing the dashboard at deals instead of the
+  manual board — is deliberately deferred to Phase 2, since changing where
+  those numbers come from deserves its own careful round.)
+
+## Structure & cleanup from the audit
+- **Unique sidebar icons**: Funded Board now has a trophy, Payments a
+  banknote, Accounting a receipt, Reverse Consolidation layers — no more
+  three-items-one-icon guessing.
+- Dashboard quick actions fixed: one "Shop & submit" tile linking straight
+  to the page (no more redirect flash through a retired route) + a Funder
+  Intel shortcut.
+- Deleted verified dead code: the unmounted global search + its API route,
+  the retired redirect-to-a-redirect stub, orphaned calculator API routes,
+  and the dead refinance hand-off block (~500 lines gone). `/submit` is now
+  a server-side redirect for old bookmarks (no flash).
+
+## Doc Request
+- (From the previous round) "Is this a refi?" toggle — Yes makes the
+  message open with "Send refi docs for $X".
+
+---
+
 # Update — July 2026 (round 28) — Doc Request refi option + full system audit delivered
 
 ## Doc Request — refi toggle

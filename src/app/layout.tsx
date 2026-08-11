@@ -76,22 +76,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const branding = await getPublicBranding();
 
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <head>
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="format-detection" content="telephone=no" />
-        {/* Pre-paint theme script. DARK is the default (the command-center
-            look, per the authorized front-end rebuild). Light mode remains
-            one click away via the toggle on the rail / mobile top bar, and
-            the choice persists per browser — so anyone who prefers light
-            flips once and keeps it. */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('mca-theme');var r=document.documentElement;if(t==='light'){r.classList.remove('dark');}else{r.classList.add('dark');}}catch(e){}})();`,
-          }}
-        />
+        {/* Single-theme app: the dark command center, always. The light/dark
+            switcher was removed by request — the class is set statically on
+            <html>, no script, no stored preference. */}
       </head>
       <body>
         {/* Brand-color injection removed — the palette is consistent

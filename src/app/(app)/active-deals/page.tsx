@@ -142,7 +142,9 @@ export default function ActiveDealsPage() {
       fetch('/api/users').then((r) => r.json()).catch(() => ({ data: [] })),
       fetch('/api/funders', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({ data: [] })),
     ]);
-    setDeals(dRes.data ?? dRes ?? []);
+    // Array.isArray guard: an error payload ({ error }) must never land in
+    // array state — the next .filter() would crash the whole page.
+    setDeals(Array.isArray(dRes.data) ? dRes.data : Array.isArray(dRes) ? dRes : []);
     // Reps only — exclude master admins and lead source accounts.
     setReps((uRes.data ?? []).filter((u: { role: string }) => u.role === 'rep' || u.role === 'company_admin'));
     setFunderOptions(((fRes.data ?? fRes.funders ?? []) as { id: string; name: string; isActive?: boolean }[])
@@ -162,46 +164,8 @@ export default function ActiveDealsPage() {
       .then((r) => r.json())
       .then((j) => { if (j?.user) setMe({ id: j.user.id, role: j.user.role }); })
       .catch(() => {});
-
-    // Refi prefill — when the user clicks "Mark as refinanced" on a funded
-    // deal, /portfolio stashes the merchant info in sessionStorage and
-    // routes here with `?refi=1`. We pick it up on mount, populate the
-    // creating drawer with the merchant carry-over, then clear both the
-    // blob and the query string so refreshing the page doesn't re-open
-    // the drawer with the same data. Same-document URL rewrite avoids a
-    // navigation round trip.
-    try {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('refi') === '1') {
-        const raw = sessionStorage.getItem('mca-refi-prefill');
-        if (raw) {
-          const p = JSON.parse(raw) as Partial<Record<string, string>>;
-          // Generate a sensible default deal name so the rep can tell at a
-          // glance this row came from a refi. They can rename before save.
-          const baseName = (p.businessName || `${p.merchantFirstName ?? ''} ${p.merchantLastName ?? ''}`.trim() || p.sourceDealName || 'Refi deal').trim();
-          setCreating({
-            ...blankDeal(),
-            name: baseName ? `${baseName} (Refi)` : '',
-            merchantFirstName: p.merchantFirstName ?? '',
-            merchantLastName: p.merchantLastName ?? '',
-            merchantEmail: p.merchantEmail ?? '',
-            merchantPhone: p.merchantPhone ?? '',
-            // Audit trail: note which old deal this refi was for so the
-            // user has context inside the new deal's notes panel.
-            renewalNotes: p.sourceDealName ? `Refinance of ${p.sourceDealName} (${p.sourceDealId ?? ''})` : '',
-          });
-          sessionStorage.removeItem('mca-refi-prefill');
-        }
-        // Drop ?refi=1 from the URL without a full navigation so the
-        // browser back button + refresh both behave normally.
-        const url = new URL(window.location.href);
-        url.searchParams.delete('refi');
-        window.history.replaceState({}, '', url.toString());
-      }
-    } catch {
-      // sessionStorage unavailable / corrupt JSON — silently ignore and
-      // let the user create the refi deal manually.
-    }
+    // (The old refi sessionStorage hand-off was removed — refinances are
+    // now logged entirely in place on /portfolio via /api/deals/[id]/refinance.)
   }, []);
 
   function startEdit(d: Deal) {

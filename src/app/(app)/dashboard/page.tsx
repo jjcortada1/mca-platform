@@ -97,9 +97,11 @@ export default async function DashboardPage() {
     { label: 'Funded volume', value: formatCurrency(Number(funded?.total ?? 0), { compact: true }), d: delta(Number(funded?.total ?? 0), lastMoFundedTotal), icon: DollarSign, accent: 'from-amber-500/10 to-amber-500/[0.03] border-amber-500/15', iconBg: 'bg-amber-500/10 text-amber-600' },
   ];
 
+  // One tile for the merged Shop & Submit page (two tiles used to point at
+  // the same screen, one via a retired redirect route).
   const quickActions = [
-    { href: '/deal-shop', label: 'Shop a deal', description: 'Find qualifying funders', icon: ShoppingBag },
-    { href: '/submit', label: 'Submit a deal', description: 'Send to selected funders', icon: Send },
+    { href: '/deal-shop', label: 'Shop & submit a deal', description: 'Match funders and send in one flow', icon: ShoppingBag },
+    { href: '/funder-analytics', label: 'Funder Intel', description: 'Who wins your deals, and at what terms', icon: Send },
     { href: '/calculator', label: 'Open calculator', description: 'Forward & reverse MCA', icon: Calculator },
     { href: '/funders', label: 'Funder directory', description: `${funderCount?.c ?? 0} active funders`, icon: Users },
   ];

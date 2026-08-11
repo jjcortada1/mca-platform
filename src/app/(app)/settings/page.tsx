@@ -10,7 +10,7 @@ import {
   Palette, Mail, Send, FileText, DollarSign, Layers, ListChecks,
   Users as UsersIcon, GitBranch, Database, ShieldCheck, Menu as MenuIcon,
   Trash2, Sparkles, Crown, Plus, UserCircle, Building2, GripVertical,
-  Eye, EyeOff, Pencil, X,
+  Eye, EyeOff, Pencil, X, HardDrive,
 } from 'lucide-react';
 import Link from 'next/link';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils';
 // as the "My account" tab.
 import AccountPage from '../account/page';
 
-type Tab = 'account' | 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar' | 'celebration' | 'teams' | 'companies' | 'esign';
+type Tab = 'account' | 'branding' | 'email' | 'smtp' | 'commission' | 'fields' | 'users' | 'tiers' | 'options' | 'security' | 'sheets' | 'leadsources' | 'backup' | 'funded' | 'sidebar' | 'celebration' | 'teams' | 'companies' | 'esign' | 'storage';
 
 // Flatter, friendlier settings nav. Each entry has an icon + one-line
 // description so the user can scan and find what they want without reading
@@ -82,11 +82,12 @@ const TAB_GROUPS: {
     tabs: [
       { key: 'sheets', label: 'Live Google Sheet backup', icon: Database, description: 'Auto-mirror every change to a Sheet — append-only' },
       { key: 'backup', label: 'Manual JSON download', icon: Database, description: 'One-click full export to your computer' },
+      { key: 'storage', label: 'Storage usage', icon: HardDrive, description: 'Database storage per company and in total' },
     ],
   },
 ];
 
-const VALID_TABS: Tab[] = ['account', 'branding', 'email', 'smtp', 'commission', 'fields', 'users', 'tiers', 'options', 'security', 'sheets', 'leadsources', 'backup', 'funded', 'sidebar', 'celebration', 'teams', 'companies', 'esign'];
+const VALID_TABS: Tab[] = ['account', 'branding', 'email', 'smtp', 'commission', 'fields', 'users', 'tiers', 'options', 'security', 'sheets', 'leadsources', 'backup', 'funded', 'sidebar', 'celebration', 'teams', 'companies', 'esign', 'storage'];
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('branding');
@@ -207,6 +208,7 @@ export default function SettingsPage() {
           {tab === 'security' && <SecuritySection />}
           {tab === 'backup' && <BackupSection />}
           {tab === 'sheets' && <SheetSyncSection />}
+          {tab === 'storage' && <StorageSection />}
           {tab === 'leadsources' && <LeadSourcesSection />}
         </div>
       </div>
@@ -3535,5 +3537,121 @@ function SidebarOrderSection() {
         </span>
       </div>
     </div>
+  );
+}
+
+/* ============================================================
+   STORAGE USAGE — database storage per company + total.
+   Company admins see their own company; the platform owner sees
+   every company ranked by size plus the true database total.
+   ============================================================ */
+interface StorageCompany {
+  companyId: string;
+  companyName: string;
+  bytes: number;
+  rows: number;
+  topTables: { table: string; bytes: number }[];
+}
+
+function fmtBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0 MB';
+  const gb = n / 1024 ** 3;
+  if (gb >= 1) return `${gb.toFixed(2)} GB`;
+  const mb = n / 1024 ** 2;
+  if (mb >= 1) return `${mb.toFixed(1)} MB`;
+  return `${(n / 1024).toFixed(0)} KB`;
+}
+
+function StorageSection() {
+  const [companies, setCompanies] = useState<StorageCompany[]>([]);
+  const [dbTotal, setDbTotal] = useState<number | null>(null);
+  const [attributed, setAttributed] = useState(0);
+  const [note, setNote] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/settings/storage', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => {
+        setCompanies(Array.isArray(j?.data?.companies) ? j.data.companies : []);
+        setDbTotal(j?.data?.databaseTotalBytes ?? null);
+        setAttributed(j?.data?.attributedBytes ?? 0);
+        setNote(j?.data?.note ?? '');
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const maxBytes = Math.max(...companies.map((c) => c.bytes), 1);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Storage usage</CardTitle>
+        <CardDescription>
+          How much database storage each company&apos;s records take up, and the total.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {loading ? (
+          <div className="text-sm text-muted-foreground">Measuring…</div>
+        ) : companies.length === 0 ? (
+          <div className="text-sm text-muted-foreground">No measurable data yet.</div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg border border-border bg-muted/20 p-3">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold">Company data (all rows)</div>
+                <div className="text-xl font-bold tabular-nums mt-0.5">{fmtBytes(attributed)}</div>
+              </div>
+              {dbTotal !== null && (
+                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold">Database total (incl. indexes)</div>
+                  <div className="text-xl font-bold tabular-nums mt-0.5">{fmtBytes(dbTotal)}</div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              {companies.map((c) => (
+                <div key={c.companyId} className="rounded-lg border border-border">
+                  <button
+                    onClick={() => setExpanded((v) => v === c.companyId ? null : c.companyId)}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/20 transition-colors"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{c.companyName}</div>
+                      <div className="mt-1.5 h-2 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-foreground/70"
+                          style={{ width: `${Math.max(2, Math.round((c.bytes / maxBytes) * 100))}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-semibold tabular-nums">{fmtBytes(c.bytes)}</div>
+                      <div className="text-[11px] text-muted-foreground tabular-nums">{c.rows.toLocaleString()} records</div>
+                    </div>
+                  </button>
+                  {expanded === c.companyId && c.topTables.length > 0 && (
+                    <div className="border-t border-border px-3 py-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
+                      {c.topTables.map((t) => (
+                        <div key={t.table} className="flex justify-between text-xs py-0.5">
+                          <span className="text-muted-foreground font-mono">{t.table.replace(/_/g, ' ')}</span>
+                          <span className="tabular-nums font-medium">{fmtBytes(t.bytes)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {note && <p className="text-[11px] text-muted-foreground">{note}</p>}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

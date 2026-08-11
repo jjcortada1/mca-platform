@@ -94,7 +94,11 @@ export function FundedApprovalsCard({ onApproved }: { onApproved?: () => void })
       });
       const j = await res.json();
       if (!res.ok) { toast.error(j.error || 'Could not save.'); return; }
-      toast.success(action === 'approve' ? 'Approved — deal logged as funded.' : 'Rejected.');
+      if (action === 'approve' && j.commissionSkipped) {
+        toast.success('Approved. A commission already exists for this deal, so no second one was created — check Commissions if it needs adjusting.');
+      } else {
+        toast.success(action === 'approve' ? 'Approved — deal logged as funded.' : 'Rejected.');
+      }
       setItems((arr) => arr.filter((x) => x.id !== a.id));
       setOpenId(null);
       if (action === 'approve') onApproved?.();

@@ -803,7 +803,11 @@ export default function CommissionsPage() {
       {showLSAdd && <AssignLeadSourceModal deals={deals} leadSources={leadSources} onClose={() => setShowLSAdd(false)} onSaved={() => { setShowLSAdd(false); load(); }} />}
       {showDraw && <LogDrawModal reps={reps} onClose={() => setShowDraw(false)} onSaved={() => { setShowDraw(false); load(); }} />}
 
-      <style jsx>{`.th{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-foreground,#6b7280)}`}</style>
+      {/* The theme variables hold raw HSL triples, so they MUST be wrapped
+          in hsl() — `color: var(--muted-foreground)` is invalid CSS and the
+          browser drops the whole declaration (headers rendered invisible on
+          the dark theme). */}
+      <style jsx>{`.th{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:hsl(var(--muted-foreground))}`}</style>
     </div>
   );
 }
@@ -1221,7 +1225,9 @@ function Modal({ title, children, onClose, onSave, saving }: { title: string; ch
           <Button onClick={onSave} loading={saving}>Save</Button>
         </div>
       </div>
-      <style jsx global>{`.sel{height:2.5rem;width:100%;border-radius:0.375rem;border:1px solid var(--input,#e5e7eb);background:var(--card,#fff);padding:0 0.5rem;font-size:0.875rem}`}</style>
+      {/* hsl() wrappers required — see the .th note above; without them the
+          selects rendered borderless/transparent. */}
+      <style jsx global>{`.sel{height:2.5rem;width:100%;border-radius:0.375rem;border:1px solid hsl(var(--input));background:hsl(var(--card));color:hsl(var(--foreground));padding:0 0.5rem;font-size:0.875rem}`}</style>
     </div>
   );
 }

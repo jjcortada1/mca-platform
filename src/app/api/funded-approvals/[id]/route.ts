@@ -83,7 +83,21 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
 
     // 1+2. Mark the deal funded (create it if needed) + assign the rep.
+    // Dedupe guard: if the approval isn't linked to a deal but a NON-DELETED
+    // deal with the same name is already funded (the rep marked it funded on
+    // Active Deals AND sent the funded email), attach to that deal instead
+    // of inserting a duplicate.
     let finalDealId = dealId ?? null;
+    if (!finalDealId && dealName) {
+      const [existing] = await db.select({ id: deals.id }).from(deals)
+        .where(and(
+          eq(deals.companyId, companyId),
+          eq(deals.isDeleted, false),
+          eq(deals.name, dealName),
+          eq(deals.status, 'funded'),
+        )).limit(1);
+      if (existing) finalDealId = existing.id;
+    }
     if (finalDealId) {
       const [d] = await db.select().from(deals)
         .where(and(eq(deals.id, finalDealId), eq(deals.companyId, companyId), eq(deals.isDeleted, false))).limit(1);
@@ -116,7 +130,21 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
 
     // 3. Commission record for the rep (only when there's money attached).
-    if (grossCommission != null && grossCommission > 0) {
+    // Dedupe guard: NEVER double-book. If a commission already exists for
+    // this deal (created manually on /commissions, or by a previous
+    // approval), skip the insert and tell the admin instead of silently
+    // paying twice.
+    let commissionSkipped = false;
+    if (grossCommission != null && grossCommission > 0 && finalDealId) {
+      const [existingCommission] = await db.select({ id: dealCommissions.id })
+        .from(dealCommissions)
+        .where(and(
+          eq(dealCommissions.dealId, finalDealId),
+          eq(dealCommissions.companyId, companyId),
+        )).limit(1);
+      if (existingCommission) commissionSkipped = true;
+    }
+    if (grossCommission != null && grossCommission > 0 && !commissionSkipped) {
       const split = repSplitPct ?? 100;
       const { totalRepCommission } = computeRepCommission({
         grossCommission,
@@ -165,6 +193,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }, user.id).catch(() => {});
 
     triggerSync(companyId);
-    return NextResponse.json({ ok: true, dealId: finalDealId });
+    return NextResponse.json({
+      ok: true,
+      dealId: finalDealId,
+      // Surfaced by the approvals card so the admin knows the commission
+      // wasn't double-booked.
+      commissionSkipped,
+    });
   } catch (e) { return apiError(e); }
 }

@@ -6,6 +6,7 @@ import { Card, CardContent, Button, Input, Field, PageHeader, Badge, MoneyInput 
 import { formatCurrency, cn } from '@/lib/utils';
 import { Calculator, RotateCcw, Sparkles, Lock, Unlock, ChevronDown, ChevronUp } from 'lucide-react';
 import { reverseCalculate, type ReverseCandidate } from '@/lib/calculator/reverse';
+import { getCommissionPct, DEFAULT_COMMISSION_RULES } from '@/lib/calculator/mca';
 
 type Tab = 'fwd' | 'rev';
 type Freq = 'daily' | 'weekly';
@@ -100,16 +101,12 @@ function ForwardCalc({ rules }: { rules: { threshold: number; commissionPct: num
   // Per-payment amount
   const paymentAmount = n ? payback / n : 0;
 
-  // Commission from rules table (highest threshold ≤ factor rate wins)
-  let commissionPct = 0;
-  if (rules.length && fr > 0) {
-    const sorted = [...rules].sort((a, b) => a.threshold - b.threshold);
-    if (fr >= sorted[0].threshold) {
-      for (const r of sorted) {
-        if (fr >= r.threshold) commissionPct = r.commissionPct;
-      }
-    }
-  }
+  // Commission via the SHARED engine — same float-epsilon handling and 12%
+  // cap as the server. If the company's rules haven't loaded (or the fetch
+  // failed), fall back to the defaults instead of silently showing 0%.
+  const commissionPct = fr > 0
+    ? getCommissionPct(fr, rules.length ? rules : DEFAULT_COMMISSION_RULES)
+    : 0;
   const commission = fund * (commissionPct / 100);
 
   function clear() {

@@ -6,8 +6,8 @@ import { useEffect, useState } from 'react';
 import {
   ShoppingBag, Send, Inbox, Briefcase, Users, TrendingUp, Calculator, BookOpen, FileText,
   Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle, ClipboardList,
-  Handshake, Gift, FileSignature, Table2, ChevronDown, Sun, Moon,
-  PanelLeftOpen, PanelLeftClose,
+  Handshake, Gift, FileSignature, Table2, ChevronDown,
+  PanelLeftOpen, PanelLeftClose, Trophy, Banknote, ReceiptText, Layers, BarChart3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NotificationBell } from '@/components/notification-bell';
@@ -46,20 +46,25 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { href: '/esign',        label: 'Send Application', icon: FileSignature, perm: 'deals.submit' },
   { href: '/submissions',  label: 'Submissions',    icon: Inbox,       perm: 'submissions.view' },
   { href: '/active-deals', label: 'Active Deals',   icon: Briefcase,   perm: 'active_deals.view' },
-  { href: '/funded-board', label: 'Funded Board',   icon: TrendingUp,  perm: 'active_deals.view' },
+  // Distinct icons on purpose — these two sat adjacent with the SAME icon
+  // and users couldn't tell the leaderboard from the real portfolio.
+  { href: '/funded-board', label: 'Funded Board',   icon: Trophy,      perm: 'active_deals.view' },
   { href: '/portfolio',    label: 'Funded Deals',   icon: TrendingUp,  perm: 'active_deals.view' },
   // Syndication — a shared board where deals open for syndication are posted
   // with full terms, and reps put in how much they want to participate.
   { href: '/syndication',  label: 'Syndication',    icon: Handshake,   perm: 'deals.view' },
   { href: '/commissions',  label: 'Commissions',    icon: DollarSign,  perm: 'commissions.view' },
-  { href: '/payments',     label: 'Payments',       icon: DollarSign,  perm: 'commissions.manage' },
-  { href: '/accounting',   label: 'Accounting',     icon: DollarSign,  perm: 'commissions.manage' },
+  { href: '/payments',     label: 'Payments',       icon: Banknote,    perm: 'commissions.manage' },
+  { href: '/accounting',   label: 'Accounting',     icon: ReceiptText, perm: 'commissions.manage' },
   { href: '/preview',      label: 'View as…',       icon: Users,       perm: 'commissions.manage' },
   { href: '/funders',      label: 'Funders',        icon: Users,       perm: 'funders.view' },
+  // Funder Intel — per-funder win/offer/approval analytics, derived
+  // automatically from submissions + offers + funded deals.
+  { href: '/funder-analytics', label: 'Funder Intel', icon: BarChart3, perm: 'funders.view' },
   { href: '/calculator',   label: 'Calculator',     icon: Calculator,  perm: 'calculator.use' },
   // Reverse Consolidation Sheet — builds a branded, printable offer for a
   // weekly-disbursement consolidation. Pure presentation tool (no DB writes).
-  { href: '/reverse-consolidation', label: 'Reverse Consolidation', icon: FileText, perm: 'calculator.use' },
+  { href: '/reverse-consolidation', label: 'Reverse Consolidation', icon: Layers, perm: 'calculator.use' },
   // Doc Request — generates a clean copy-paste message for requesting
   // contracts from a funder. Lives under the same "General / Resources"
   // bucket as Calculator + Info. No persistence; pure formatter UI.
@@ -91,7 +96,7 @@ export const DEFAULT_CATEGORIES: { id: string; label: string; items: string[] }[
   },
   {
     id: 'resources', label: 'Resources',
-    items: ['/funders', '/bonuses', '/calculator', '/reverse-consolidation', '/doc-request', '/info', '/tasks'],
+    items: ['/funders', '/funder-analytics', '/bonuses', '/calculator', '/reverse-consolidation', '/doc-request', '/info', '/tasks'],
   },
 ];
 
@@ -288,7 +293,6 @@ function MobileTopBar({
           </div>
         </Link>
         <div className="flex items-center gap-1">
-          <ThemeToggle />
           <NotificationBell />
           <div className="h-8 w-8 rounded-lg bg-foreground text-background flex items-center justify-center text-xs font-semibold">
             {userInitial}
@@ -396,32 +400,6 @@ function useSidebarConfig(user: SessionUser): SidebarConfig {
 }
 
 /* ============================================================
-   THEME TOGGLE — dark is the default command-center look; one
-   click flips to light and the choice persists per browser.
-   ============================================================ */
-export function ThemeToggle({ className }: { className?: string }) {
-  const [dark, setDark] = useState(true);
-  useEffect(() => {
-    setDark(document.documentElement.classList.contains('dark'));
-  }, []);
-  function toggle() {
-    const next = !dark;
-    setDark(next);
-    document.documentElement.classList.toggle('dark', next);
-    try { localStorage.setItem('mca-theme', next ? 'dark' : 'light'); } catch { /* private mode */ }
-  }
-  return (
-    <button
-      onClick={toggle}
-      title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-      className={cn('p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors', className)}
-    >
-      {dark ? <Sun className="h-[17px] w-[17px]" /> : <Moon className="h-[17px] w-[17px]" />}
-    </button>
-  );
-}
-
-/* ============================================================
    DESKTOP ICON RAIL (visible on lg+) — the command-center nav.
    Slim rail of icons with flyout labels; active item gets an
    accent glow + indicator bar. All gating/order/overrides come
@@ -499,10 +477,10 @@ export function Sidebar({ user, branding, config }: { user: SessionUser; brandin
         ))}
       </nav>
 
-      {/* Utility cluster — global search removed by request. */}
+      {/* Utility cluster — global search + theme toggle removed by request
+          (the app is single-theme: the dark command center). */}
       <div className="flex flex-col items-center gap-1 pt-2 border-t border-border w-full">
         <NotificationBell compact align="left" />
-        <ThemeToggle />
         <RailItem href={isAdmin ? '/settings' : '/account'} label="Settings" active={settingsActive}>
           <Settings className="h-[18px] w-[18px]" />
         </RailItem>
@@ -731,7 +709,6 @@ function SidebarBody({
             <div className="text-sm font-medium truncate leading-tight">{user.name}</div>
             <div className="text-[10.5px] text-muted-foreground truncate mt-0.5">{user.email}</div>
           </div>
-          <ThemeToggle />
         </div>
         <button
           onClick={() => signOut({ callbackUrl: '/login' })}

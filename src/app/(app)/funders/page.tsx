@@ -101,7 +101,8 @@ export default function FundersPage() {
       fetch('/api/settings/match-options?kind=industry', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({ data: [] })),
       fetch('/api/settings/match-options?kind=state', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({ data: [] })),
     ]);
-    setFunders(fres.data ?? fres ?? []);
+    // Array.isArray guard — an error payload must never land in array state.
+    setFunders(Array.isArray(fres.data) ? fres.data : Array.isArray(fres) ? fres : []);
     setTiers(tres.data ?? []);
     // Use the admin-configured list when present; fall back to seed when empty.
     const adminIndustries = (mres.data ?? []) as { label: string; value: string; isActive: boolean }[];
