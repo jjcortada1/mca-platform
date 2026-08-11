@@ -122,27 +122,34 @@ export async function extractPdfText(data: ArrayBuffer): Promise<PdfExtractResul
       useSystemFonts: true,
     }).promise;
 
-  let doc: any;
-  try {
-    // Preferred path: a real background worker, so a long statement never
-    // freezes the page. The URL form is what webpack understands.
-    if (!pdfjs.GlobalWorkerOptions.workerSrc && !(globalThis as any).pdfjsWorker) {
-      pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-        'pdfjs-dist/legacy/build/pdf.worker.min.mjs',
-        import.meta.url,
-      ).toString();
-    }
-    doc = await open();
-  } catch {
-    // Fallback: run the worker code on the main thread. pdf.js checks
-    // globalThis.pdfjsWorker before it ever tries to fetch a worker file,
-    // so this sidesteps every bundler/CSP path that can break the URL
-    // above. Slower on big files, but it always works.
+  /*
+   * Worker setup — deliberately NOT the `new URL(..., import.meta.url)`
+   * form the pdf.js docs suggest.
+   *
+   * That form makes webpack copy the worker out as a raw asset
+   * (static/media/pdf.worker.min.*.mjs). Next then runs Terser over that
+   * file as a classic script, and it dies on the worker's own import /
+   * export statements:
+   *
+   *     'import', and 'export' cannot be used outside of module code
+   *
+   * Importing the worker as a normal module instead means webpack
+   * processes it like any other code — it lands in a lazy chunk that is
+   * minified correctly, and no loose .mjs asset is ever emitted. pdf.js
+   * checks globalThis.pdfjsWorker before it tries to spawn a worker, so
+   * this is a supported path, not a hack.
+   *
+   * The cost is that parsing runs on the main thread. For a handful of
+   * statements that is well under a second, and it is worth it for a
+   * build that works on any host without bundler configuration.
+   */
+  if (!(globalThis as any).pdfjsWorker) {
     const workerModule: any = await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
     (globalThis as any).pdfjsWorker = workerModule;
-    pdfjs.GlobalWorkerOptions.workerSrc = '';
-    doc = await open();
   }
+  pdfjs.GlobalWorkerOptions.workerSrc = '';
+
+  const doc = await open();
 
   const lines: string[] = [];
   for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {

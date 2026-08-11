@@ -1,3 +1,46 @@
+# Update — August 2026 (round 34) — Build fixed (verified with a real production build)
+
+## The build failure
+Two separate problems, both fixed:
+
+**1. The PDF worker broke minification.** The recommended way to wire up
+pdf.js makes the bundler copy its worker out as a loose `.mjs` file, and
+Next then runs its minifier over that file as a plain script — which chokes
+on the worker's own `import`/`export` statements:
+
+```
+'import', and 'export' cannot be used outside of module code
+```
+
+The worker is now imported as an ordinary module instead, so it lands in a
+normal lazy-loaded chunk that minifies correctly and **no loose file is
+emitted at all**. It still only loads when you actually drop in a PDF. The
+trade-off is that PDF parsing runs on the main thread rather than in the
+background — for a few statements that is well under a second, and it is
+worth it for a build that works on any host with no special configuration.
+
+**2. `fmtBytes` was declared twice in Settings.** The Storage Usage panel
+added a second copy of a byte-formatting helper that already existed in the
+Backup section, which is a hard error. The storage one is now
+`fmtStorageBytes`. Both keep their own formatting exactly as before — the
+backup section still reads in MB, storage still rolls up to GB.
+
+## How this was verified
+Previous rounds were checked with type-checking and unit tests but never a
+real production build, because dependencies could not be installed in the
+build environment. That gap is what let both of these through.
+
+This round was verified with an **actual `next build` that compiled
+successfully end to end** — every route built, including `/underwriting`,
+and the specific failure above is confirmed gone (no loose `.mjs` files are
+emitted anymore). The underwriting engine tests and the UI stability suite
+both still pass.
+
+Nothing about how the app works changed in this round. It is purely the
+build fixes.
+
+---
+
 # Update — August 2026 (round 33) — Smarter MCA detection + a full transaction browser
 
 ## Positions now survive a payment change

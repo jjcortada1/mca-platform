@@ -3553,7 +3553,7 @@ interface StorageCompany {
   topTables: { table: string; bytes: number }[];
 }
 
-function fmtBytes(n: number): string {
+function fmtStorageBytes(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '0 MB';
   const gb = n / 1024 ** 3;
   if (gb >= 1) return `${gb.toFixed(2)} GB`;
@@ -3603,12 +3603,12 @@ function StorageSection() {
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-lg border border-border bg-muted/20 p-3">
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold">Company data (all rows)</div>
-                <div className="text-xl font-bold tabular-nums mt-0.5">{fmtBytes(attributed)}</div>
+                <div className="text-xl font-bold tabular-nums mt-0.5">{fmtStorageBytes(attributed)}</div>
               </div>
               {dbTotal !== null && (
                 <div className="rounded-lg border border-border bg-muted/20 p-3">
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold">Database total (incl. indexes)</div>
-                  <div className="text-xl font-bold tabular-nums mt-0.5">{fmtBytes(dbTotal)}</div>
+                  <div className="text-xl font-bold tabular-nums mt-0.5">{fmtStorageBytes(dbTotal)}</div>
                 </div>
               )}
             </div>
@@ -3630,7 +3630,7 @@ function StorageSection() {
                       </div>
                     </div>
                     <div className="text-right shrink-0">
-                      <div className="text-sm font-semibold tabular-nums">{fmtBytes(c.bytes)}</div>
+                      <div className="text-sm font-semibold tabular-nums">{fmtStorageBytes(c.bytes)}</div>
                       <div className="text-[11px] text-muted-foreground tabular-nums">{c.rows.toLocaleString()} records</div>
                     </div>
                   </button>
@@ -3639,7 +3639,7 @@ function StorageSection() {
                       {c.topTables.map((t) => (
                         <div key={t.table} className="flex justify-between text-xs py-0.5">
                           <span className="text-muted-foreground font-mono">{t.table.replace(/_/g, ' ')}</span>
-                          <span className="tabular-nums font-medium">{fmtBytes(t.bytes)}</span>
+                          <span className="tabular-nums font-medium">{fmtStorageBytes(t.bytes)}</span>
                         </div>
                       ))}
                     </div>
