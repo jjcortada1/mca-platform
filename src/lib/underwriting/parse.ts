@@ -353,90 +353,224 @@ export function gridToTransactions(
   return { transactions, skipped, warnings };
 }
 
+/* ───────────────── statement text (PDF / paste) ───────────────── */
+
 /**
- * Parse transaction lines pasted straight out of a PDF statement.
+ * Section headers that tell you the sign of every row beneath them.
  *
- * Expected shape (the common denominator across bank PDFs):
- *   01/05/2026   RAPID FINANCE ACH DEBIT      -1,285.71    12,430.55
- * Trailing balance is optional. Amounts in parentheses are negative.
- * Lines without a leading date are appended to the previous transaction's
- * description, which is how wrapped descriptors come out of a PDF copy.
+ * This is the single most important signal in a PDF statement. Banks
+ * almost never print a minus sign — they group the rows into "Deposits
+ * and Additions" and "Electronic Withdrawals" and let the heading carry
+ * the meaning. Miss that and every withdrawal reads as revenue.
+ *
+ * Matched only when the header sits alone on its line, so a row like
+ * "Total Deposits and Additions   $23,454.00" can't reset the section.
+ */
+const CREDIT_SECTION_RE =
+  /^\s*(deposits?\s*(and|&)\s*(additions?|credits?|other\s+credits?)|electronic\s+deposits?|deposits?\s+and\s+other\s+additions?|credits?|deposits?|additions?|money\s+in|amounts?\s+received)\s*:?\s*$/i;
+
+const DEBIT_SECTION_RE =
+  /^\s*(electronic\s+withdrawals?|withdrawals?\s*(and|&)\s*(subtractions?|debits?|other\s+deductions?)|other\s+withdrawals?|checks?\s+(paid|presented)|atm\s*(and|&)\s*debit\s+card\s+withdrawals?|card\s+(purchases?|withdrawals?)|debit\s+card\s+purchases?|fees?(\s*(and|&)\s*(charges?|service\s+charges?))?|service\s+charges?|debits?|withdrawals?|deductions?|money\s+out|amounts?\s+paid)\s*:?\s*$/i;
+
+/** Lines that look like a transaction but are really a subtotal. */
+const TOTAL_LINE_RE = /^\s*(sub)?total\b|^\s*(beginning|ending|opening|closing|previous|new)\s+balance\b|^\s*balance\s+(forward|as\s+of)\b/i;
+
+/** A date at the start of a statement row. */
+const DATE_PAT = String.raw`\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\d{4}-\d{2}-\d{2}|[A-Za-z]{3,9}\.?\s+\d{1,2}(?:,?\s+\d{4})?`;
+/** A money token: optional $, thousands separators, two decimals. */
+const MONEY_PAT = String.raw`\(?-?\$?\s?\d[\d,]*\.\d{2}\)?-?`;
+
+/**
+ * A transaction row.
+ *
+ * Handles the shapes that actually show up:
+ *   • one or two leading dates (posted date + effective date)
+ *   • a description that may run flush into the amount when the columns
+ *     are tight — hence \s* rather than \s+ before the money
+ *   • an optional trailing running balance
+ */
+const TXN_LINE_RE = new RegExp(
+  String.raw`^\s*(${DATE_PAT})(?:\s+(?:${DATE_PAT}))?\s+(.*?)\s*(${MONEY_PAT})(?:\s+(${MONEY_PAT}))?\s*$`,
+);
+
+/**
+ * Pull the statement year out of the header text.
+ *
+ * PDF rows usually print "03/02" with no year, so the year has to come
+ * from the "March 01, 2026 through March 31, 2026" line up top. Takes the
+ * most common 4-digit year in the opening lines.
+ */
+export function inferStatementYear(text: string): number | undefined {
+  const head = String(text || '').split(/\r?\n/).slice(0, 40).join(' ');
+  const counts = new Map<number, number>();
+  const re = /\b(19\d{2}|20\d{2})\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(head))) {
+    const y = Number(m[1]);
+    if (y >= 1990 && y <= 2100) counts.set(y, (counts.get(y) ?? 0) + 1);
+  }
+  if (!counts.size) return undefined;
+  let best: number | undefined;
+  let bestCount = 0;
+  for (const [y, c] of counts) {
+    if (c > bestCount) { best = y; bestCount = c; }
+  }
+  return best;
+}
+
+interface TextDraft {
+  date: string;
+  description: string;
+  magnitude: number;
+  signed: number | null;
+  balance: number | null;
+  /** Where the sign came from, for the warning logic. */
+  basis: 'explicit' | 'section' | null;
+}
+
+/**
+ * Parse transaction lines out of a PDF statement — either extracted by
+ * src/lib/underwriting/pdf.ts or pasted in by hand.
+ *
+ * Sign resolution, in order of trustworthiness:
+ *   1. An explicit minus sign or parentheses on the amount.
+ *   2. The section the row sits under ("Electronic Withdrawals").
+ *   3. The running balance moving down instead of up.
+ *   4. Description keywords — a guess, and it says so.
+ *
+ * Whenever a running balance is present it also acts as a check: if the
+ * balance moved the opposite way from the sign we assigned, the sign is
+ * corrected. That self-heals a wrong section guess.
  */
 export function parseStatementText(
   text: string,
   opts: { source?: string; fallbackYear?: number } = {},
 ): GridParseResult {
   const warnings: string[] = [];
-  const lines = String(text || '').split(/\r?\n/);
-  const MONEY = String.raw`\(?-?\$?\s?[\d,]+\.\d{2}\)?-?`;
-  const lineRe = new RegExp(
-    String.raw`^\s*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\d{4}-\d{2}-\d{2}|[A-Za-z]{3,9}\.?\s+\d{1,2}(?:,?\s*\d{4})?)\s+(.*?)\s+(${MONEY})(?:\s+(${MONEY}))?\s*$`,
-  );
+  const rawLines = String(text || '').split(/\r?\n/);
+  const baseYear = opts.fallbackYear ?? inferStatementYear(text);
 
-  interface Draft { date: string; description: string; magnitude: number; signed: number | null; balance: number | null }
-  const drafts: Draft[] = [];
+  const drafts: TextDraft[] = [];
   let skipped = 0;
-  let lastYear = opts.fallbackYear;
+  let section: 'credit' | 'debit' | null = null;
+  let year = baseYear;
+  let prevMonth: number | null = null;
 
-  for (const rawLine of lines) {
+  for (const rawLine of rawLines) {
     const line = rawLine.replace(/\t/g, '   ').trimEnd();
     if (!line.trim()) continue;
 
-    const m = line.match(lineRe);
+    // Section headings carry the sign for everything beneath them.
+    if (CREDIT_SECTION_RE.test(line)) { section = 'credit'; continue; }
+    if (DEBIT_SECTION_RE.test(line)) { section = 'debit'; continue; }
+    if (TOTAL_LINE_RE.test(line)) continue;
+
+    const m = line.match(TXN_LINE_RE);
     if (!m) {
-      // Wrapped descriptor continuation.
-      if (drafts.length && /^\s{2,}\S/.test(rawLine) && !/^\s*\d/.test(rawLine)) {
+      // A description too long for its column wraps onto the next line.
+      if (drafts.length && !/^\s*\d/.test(rawLine) && /^\s{2,}\S/.test(rawLine)) {
         drafts[drafts.length - 1].description += ` ${line.trim()}`;
-      } else if (line.trim() && /\d/.test(line)) {
+      } else if (/\d/.test(line)) {
         skipped++;
       }
       continue;
     }
 
-    const date = parseDate(m[1], lastYear);
+    const dateText = m[1];
+    const description = (m[2] || '').trim();
+    const firstMoney = m[3];
+    const secondMoney = m[4] ?? null;
+
+    // Statements that straddle New Year print 12/28 then 01/03 — roll the
+    // year forward when the month jumps backwards.
+    const shortDate = dateText.match(/^(\d{1,2})[/-](\d{1,2})(?![/-]\d)/);
+    if (shortDate && year !== undefined) {
+      const month = Number(shortDate[1]);
+      if (prevMonth !== null && prevMonth - month >= 6) year += 1;
+      prevMonth = month;
+    }
+
+    const date = parseDate(dateText, year);
     if (!date) { skipped++; continue; }
-    lastYear = Number(date.slice(0, 4));
+    if (!shortDate) {
+      year = Number(date.slice(0, 4));
+      prevMonth = Number(date.slice(5, 7));
+    }
 
-    const first = parseMoney(m[3]);
-    const second = m[4] ? parseMoney(m[4]) : null;
-    if (first === null) { skipped++; continue; }
+    const firstValue = parseMoney(firstMoney);
+    if (firstValue === null) { skipped++; continue; }
+    const balance = secondMoney !== null ? parseMoney(secondMoney) : null;
 
-    // When two money columns are present the second is the running balance.
-    const amountRaw = first;
-    const balance = second;
+    const magnitude = Math.abs(firstValue);
+    if (magnitude === 0 && !description) { skipped++; continue; }
 
-    drafts.push({
-      date,
-      description: m[2].trim(),
-      magnitude: Math.abs(amountRaw),
-      signed: amountRaw < 0 || /^\(/.test(m[3].trim()) ? -Math.abs(amountRaw) : null,
-      balance,
-    });
+    // 1. An explicit sign on the amount always wins.
+    let signed: number | null = null;
+    let basis: TextDraft['basis'] = null;
+    const negated = firstValue < 0 || /^\s*\(/.test(firstMoney) || /-\s*$/.test(firstMoney);
+    if (negated) { signed = -magnitude; basis = 'explicit'; }
+    else if (/^\s*\+/.test(firstMoney)) { signed = magnitude; basis = 'explicit'; }
+
+    // 2. Otherwise the section heading.
+    if (signed === null && section) {
+      signed = section === 'debit' ? -magnitude : magnitude;
+      basis = 'section';
+    }
+
+    drafts.push({ date, description, magnitude, signed, balance, basis });
   }
 
-  // Same direction-resolution ladder as the grid path.
-  const hasNegatives = drafts.some((d) => d.signed !== null);
-  const haveBalances = drafts.filter((d) => d.balance !== null).length >= drafts.length * 0.8 && drafts.length > 1;
+  // 3. Anything still unresolved: read the direction off the balance.
+  const haveBalances = drafts.length > 1 && drafts.filter((d) => d.balance !== null).length >= drafts.length * 0.8;
+  const unresolved = drafts.filter((d) => d.signed === null);
 
-  if (!hasNegatives && haveBalances) {
+  if (unresolved.length && haveBalances) {
     for (let i = 0; i < drafts.length; i++) {
       const d = drafts[i];
       if (d.signed !== null || d.balance === null) continue;
       const prev = i > 0 ? drafts[i - 1].balance : null;
-      if (prev === null) { d.signed = d.magnitude; continue; }
+      if (prev === null) continue;
       d.signed = d.balance < prev ? -d.magnitude : d.magnitude;
     }
   }
-  if (drafts.some((d) => d.signed === null) && !haveBalances && !hasNegatives) {
-    warnings.push(
-      'No minus signs or running balances were found in the pasted text, so deposits vs. withdrawals were inferred from each description. Double-check the deposit totals below.',
-    );
+
+  // 4. Last resort: guess from the wording, and say that out loud.
+  const stillUnresolved = drafts.filter((d) => d.signed === null);
+  if (stillUnresolved.length) {
+    if (stillUnresolved.length > drafts.length * 0.25) {
+      warnings.push(
+        'This statement has no minus signs, no deposit/withdrawal sections, and no running balance, so deposits vs. withdrawals were guessed from each description. Check the monthly deposit totals before trusting the grade.',
+      );
+    }
+    for (const d of stillUnresolved) {
+      const t = d.description.toUpperCase();
+      const isDebit = /WITHDRAW|DEBIT|PAYMENT|PMT|ACH DB|PURCHASE|FEE|CHECK|POS |TRANSFER OUT|BILL|CHARGE/.test(t);
+      d.signed = isDebit ? -d.magnitude : d.magnitude;
+    }
   }
-  for (const d of drafts) {
-    if (d.signed !== null) continue;
-    const t = d.description.toUpperCase();
-    const isDebit = /WITHDRAW|DEBIT|PAYMENT|PMT|ACH DB|PURCHASE|FEE|CHECK|POS |TRANSFER OUT|BILL/.test(t);
-    d.signed = isDebit ? -d.magnitude : d.magnitude;
+
+  // Cross-check every sign against the running balance and correct any
+  // that disagree — this catches a mislabeled section or a bad guess.
+  if (haveBalances) {
+    let corrected = 0;
+    for (let i = 1; i < drafts.length; i++) {
+      const d = drafts[i];
+      const prev = drafts[i - 1].balance;
+      if (d.balance === null || prev === null || d.signed === null) continue;
+      const delta = d.balance - prev;
+      if (Math.abs(delta) < 0.005) continue;
+      const asIs = Math.abs(delta - d.signed);
+      const flipped = Math.abs(delta + d.signed);
+      if (flipped < asIs && flipped <= 0.01) {
+        d.signed = -d.signed;
+        corrected++;
+      }
+    }
+    if (corrected > 0) {
+      warnings.push(
+        `${corrected} transaction${corrected === 1 ? '' : 's'} had the deposit/withdrawal direction corrected using the running balance.`,
+      );
+    }
   }
 
   const transactions: Transaction[] = drafts.map((d) => ({
@@ -448,6 +582,7 @@ export function parseStatementText(
   }));
   return { transactions, skipped, warnings };
 }
+
 
 /**
  * Merge transactions from several statements, dropping exact duplicates

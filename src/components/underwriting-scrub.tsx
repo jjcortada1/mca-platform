@@ -14,6 +14,7 @@ import {
   detectColumns, detectColumnsHeaderless, gridToTransactions, parseStatementText,
   mergeTransactions,
 } from '@/lib/underwriting/parse';
+import { extractPdfText } from '@/lib/underwriting/pdf';
 import type { Transaction, DetectResult, ColumnMap } from '@/lib/underwriting/parse';
 import {
   analyzeStatements, reportToText, fmtMoney, fmtMoneyShort, fmtStatementDate, CADENCE_LABEL,
@@ -126,6 +127,50 @@ export function UnderwritingScrub() {
     };
   }, []);
 
+  /**
+   * PDF statements — the format banks actually hand out. pdf.js pulls the
+   * text layer out in the browser, the rows are rebuilt from the fragment
+   * positions, and the result goes through the same line parser as pasted
+   * text. Nothing is uploaded.
+   */
+  const parsePdfFile = useCallback(async (file: File): Promise<FileEntry> => {
+    const base: FileEntry = {
+      id: newId(), name: file.name, grid: null, detected: null,
+      transactions: [], skipped: 0, warnings: [], error: null, needsMapping: false,
+    };
+    try {
+      const buf = await file.arrayBuffer();
+      const extracted = await extractPdfText(buf);
+
+      if (!extracted.hasTextLayer) {
+        return {
+          ...base,
+          error:
+            'That PDF is a scan — it holds page images, not text, so there is nothing to read. Ask the merchant for the statement downloaded straight from online banking (not a photo or a scan), or use the CSV export.',
+        };
+      }
+
+      const parsed = parseStatementText(extracted.text, { source: file.name });
+      if (!parsed.transactions.length) {
+        return {
+          ...base,
+          error: `Read ${extracted.pageCount} page${extracted.pageCount === 1 ? '' : 's'} of text but found no transaction rows. This bank's layout may be unusual — try the CSV export, or paste the transaction lines on the Paste tab.`,
+        };
+      }
+      return {
+        ...base,
+        transactions: parsed.transactions,
+        skipped: parsed.skipped,
+        warnings: parsed.warnings,
+      };
+    } catch {
+      return {
+        ...base,
+        error: 'Could not open that PDF. If it is password-protected, remove the password and try again.',
+      };
+    }
+  }, []);
+
   const addFiles = useCallback(async (list: FileList | File[]) => {
     const incoming = Array.from(list);
     if (!incoming.length) return;
@@ -133,8 +178,9 @@ export function UnderwritingScrub() {
     try {
       const results: FileEntry[] = [];
       for (const f of incoming) {
-        const isText = /\.(txt|text)$/i.test(f.name);
-        results.push(isText ? await parseTextFile(f) : await parseGridFile(f));
+        if (/\.pdf$/i.test(f.name)) results.push(await parsePdfFile(f));
+        else if (/\.(txt|text)$/i.test(f.name)) results.push(await parseTextFile(f));
+        else results.push(await parseGridFile(f));
       }
       setFiles((prev) => [...prev, ...results]);
       const good = results.filter((r) => r.transactions.length).length;
@@ -146,7 +192,7 @@ export function UnderwritingScrub() {
       setBusy(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
-  }, [parseGridFile, parseTextFile, toast]);
+  }, [parseGridFile, parseTextFile, parsePdfFile, toast]);
 
   function analyzePaste() {
     const text = pasteText.trim();
@@ -261,14 +307,14 @@ export function UnderwritingScrub() {
                 onClick={() => setMode('upload')}
                 className={`px-3 py-1.5 text-sm rounded-md transition-colors ${mode === 'upload' ? 'bg-card shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
               >
-                Upload file
+                Upload PDF or CSV
               </button>
               <button
                 type="button"
                 onClick={() => setMode('paste')}
                 className={`px-3 py-1.5 text-sm rounded-md transition-colors ${mode === 'paste' ? 'bg-card shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
               >
-                Paste from PDF
+                Paste text
               </button>
             </div>
             <div className="ml-auto flex items-center gap-2">
@@ -310,14 +356,15 @@ export function UnderwritingScrub() {
                     Drag &amp; drop here, or click to browse. Add all three months at once.
                   </div>
                   <div className="text-xs text-muted-foreground/80 mt-1">
-                    Accepts .csv, .xlsx, .xls, .tsv, .txt — the transaction export from the merchant&apos;s online banking.
+                    <span className="font-medium text-foreground">PDF statements straight from the bank</span>, plus
+                    .csv, .xlsx, .xls, .tsv, and .txt exports.
                   </div>
                 </div>
                 <input
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept=".csv,.tsv,.xlsx,.xls,.ods,.txt"
+                  accept=".pdf,.csv,.tsv,.xlsx,.xls,.ods,.txt"
                   className="hidden"
                   onChange={(e) => { if (e.target.files?.length) void addFiles(e.target.files); }}
                 />
@@ -327,9 +374,10 @@ export function UnderwritingScrub() {
                 {files.length === 0 ? (
                   <div className="h-full rounded-xl border border-border bg-muted/20 p-4 text-sm text-muted-foreground flex items-center">
                     <span>
-                      No statements loaded yet. Most banks export transactions as CSV under
-                      {' '}<span className="font-medium text-foreground">Download / Export activity</span>. If you only have a PDF,
-                      switch to <span className="font-medium text-foreground">Paste from PDF</span> and paste the transaction lines.
+                      No statements loaded yet. Drop in the merchant&apos;s PDF statements exactly as the bank issued
+                      them — one per month. A CSV export works too and is slightly more precise, since it always
+                      carries a running balance. Scanned or photographed statements have no text in them and
+                      can&apos;t be read.
                     </span>
                   </div>
                 ) : (
@@ -345,7 +393,7 @@ export function UnderwritingScrub() {
                 <textarea
                   value={pasteText}
                   onChange={(e) => setPasteText(e.target.value)}
-                  placeholder={'Paste the transaction lines from the PDF, one per line. For example:\n\n01/05/2026   RAPID FINANCE ACH DEBIT      -1,285.71    12,430.55\n01/06/2026   CUSTOMER DEPOSIT              4,820.00    17,250.55'}
+                  placeholder={'Fallback for when a PDF will not read. Paste the transaction lines, one per line:\n\n01/05/2026   RAPID FINANCE ACH DEBIT      -1,285.71    12,430.55\n01/06/2026   CUSTOMER DEPOSIT              4,820.00    17,250.55'}
                   className="w-full h-44 rounded-lg border border-border bg-background p-3 text-sm font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-ring"
                 />
                 <div className="flex items-center gap-2">
@@ -353,7 +401,8 @@ export function UnderwritingScrub() {
                     <ClipboardPaste className="h-4 w-4 mr-2" /> Read these transactions
                   </Button>
                   <span className="text-xs text-muted-foreground">
-                    Each line needs a date, a description, and an amount. A trailing running balance is used when present.
+                    Each line needs a date, a description, and an amount; a trailing running balance is used when
+                    present. Section headings like &ldquo;Electronic Withdrawals&rdquo; are honored, so paste them too.
                   </span>
                 </div>
               </div>
@@ -391,7 +440,7 @@ export function UnderwritingScrub() {
                 {[
                   { icon: Activity, t: 'Position detection', d: 'Finds stacked advances by funder name and by fixed-amount daily/weekly cadence.' },
                   { icon: Gauge, t: 'Cash-flow read', d: 'Deposits, true revenue, NSFs, negative days, and average daily balance per month.' },
-                  { icon: ShieldCheck, t: 'Local + private', d: 'All math runs in your browser. Statements are never uploaded or stored.' },
+                  { icon: ShieldCheck, t: 'Local + private', d: 'PDFs are read and analyzed in your browser. Statements are never uploaded or stored.' },
                 ].map((x) => (
                   <div key={x.t} className="rounded-xl border border-border p-4">
                     <x.icon className="h-4 w-4 text-muted-foreground mb-2" />

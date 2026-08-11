@@ -8,7 +8,8 @@
  *
  * Run with: npm run test:underwriting
  */
-import { parseStatementText, gridToTransactions, detectColumns, mergeTransactions } from '@/lib/underwriting/parse';
+import { parseStatementText, gridToTransactions, detectColumns, mergeTransactions, inferStatementYear } from '@/lib/underwriting/parse';
+import { groupTextItemsIntoLines } from '@/lib/underwriting/pdf';
 import { analyzeStatements, reportToText } from '@/lib/underwriting/engine';
 
 function iso(d: Date) { return d.toISOString().slice(0, 10); }
@@ -134,3 +135,208 @@ if (rep2.positionCount !== 0) throw new Error('FAIL: false-positive positions on
 if (rep2.grade !== 'A') throw new Error(`FAIL: clean file should grade A, got ${rep2.grade}`);
 if (rep2.maxNewAdvance <= 0) throw new Error('FAIL: clean file should support new money');
 console.log('✅ SCENARIO 2 PASSED');
+
+/* ═══════════════ Scenario 3: real PDF, end to end ═══════════════ */
+
+/**
+ * Builds an actual PDF (Chase-style: no minus signs, sign carried by
+ * "DEPOSITS AND ADDITIONS" / "ELECTRONIC WITHDRAWALS" headings, dates with
+ * no year), runs it through pdf.js + the line rebuilder + the parser, and
+ * checks the scrub gets the same answer a human reading the page would.
+ */
+function buildStatementPdf(opts: {
+  header: string[];
+  sections: { title: string; rows: [string, string, string][] }[];
+  withBalance?: boolean;
+}): Uint8Array {
+  // Real statements run to several pages, and a page break must not lose
+  // rows or reset the section context — so the fixture paginates too, and
+  // repeats the section heading on each continuation page like banks do.
+  const pages: { x: number; y: number; size: number; text: string; bold: boolean }[][] = [];
+  let frags: { x: number; y: number; size: number; text: string; bold: boolean }[] = [];
+  let y = 740;
+  const BOTTOM = 60;
+
+  const newPage = () => { pages.push(frags); frags = []; y = 740; };
+  const put = (cells: [number, string][], size = 9, bold = false) => {
+    for (const [x, text] of cells) frags.push({ x, y, size, text, bold });
+    y -= 13;
+  };
+  const colHeader = () => put(
+    opts.withBalance
+      ? [[54, 'DATE'], [110, 'DESCRIPTION'], [470, 'AMOUNT'], [530, 'BALANCE']]
+      : [[54, 'DATE'], [110, 'DESCRIPTION'], [500, 'AMOUNT']],
+    8, true,
+  );
+
+  for (const h of opts.header) put([[54, h]], 9);
+  y -= 13;
+
+  for (const sec of opts.sections) {
+    if (y < BOTTOM + 40) newPage();
+    put([[54, sec.title]], 10, true);
+    colHeader();
+    for (const [d, desc, amt] of sec.rows) {
+      if (y < BOTTOM) {
+        newPage();
+        put([[54, `${sec.title} (continued)`]], 10, true);
+        colHeader();
+      }
+      if (opts.withBalance) {
+        const [a, b] = amt.split('|');
+        put([[54, d], [110, desc.slice(0, 80)], [470, a], [530, b]]);
+      } else {
+        put([[54, d], [110, desc.slice(0, 88)], [500, amt]]);
+      }
+    }
+    y -= 13;
+  }
+  pages.push(frags);
+
+  const esc = (t: string) => t.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+  const objs: string[] = [];
+  // 1 catalog, 2 pages tree, then per page: page obj + content obj, then fonts.
+  const pageObjIds: number[] = [];
+  let next = 3;
+  const contents: { id: number; body: string }[] = [];
+  for (const pageFrags of pages) {
+    const pageId = next++;
+    const contentId = next++;
+    pageObjIds.push(pageId);
+    let content = '';
+    for (const f of pageFrags) {
+      content += `BT /${f.bold ? 'F2' : 'F1'} ${f.size} Tf 1 0 0 1 ${f.x} ${f.y} Tm (${esc(f.text)}) Tj ET\n`;
+    }
+    contents.push({ id: contentId, body: content });
+    objs[pageId] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 FONT1 0 R /F2 FONT2 0 R >> >> /Contents ${contentId} 0 R >>`;
+  }
+  const font1 = next++;
+  const font2 = next++;
+  for (const id of pageObjIds) {
+    objs[id] = objs[id].replace('FONT1', String(font1)).replace('FONT2', String(font2));
+  }
+  for (const c of contents) {
+    objs[c.id] = `<< /Length ${Buffer.byteLength(c.body)} >>\nstream\n${c.body}endstream`;
+  }
+  objs[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+  objs[2] = `<< /Type /Pages /Kids [${pageObjIds.map((i) => `${i} 0 R`).join(' ')}] /Count ${pageObjIds.length} >>`;
+  objs[font1] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
+  objs[font2] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>';
+
+  let pdf = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  for (let i = 1; i < next; i++) {
+    offsets[i] = Buffer.byteLength(pdf);
+    pdf += `${i} 0 obj\n${objs[i]}\nendobj\n`;
+  }
+  const xrefPos = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${next}\n0000000000 65535 f \n`;
+  for (let i = 1; i < next; i++) pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${next} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF\n`;
+  return new Uint8Array(Buffer.from(pdf, 'latin1'));
+}
+
+async function pdfToText(bytes: Uint8Array): Promise<string> {
+  const pdfjs: any = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const doc = await pdfjs.getDocument({ data: bytes, isEvalSupported: false, useSystemFonts: true }).promise;
+  const lines: string[] = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    const items = content.items
+      .filter((it: any) => typeof it.str === 'string')
+      .map((it: any) => ({
+        str: it.str, x: it.transform[4], y: it.transform[5],
+        width: it.width ?? 0, height: it.height ?? 10,
+      }));
+    lines.push(...groupTextItemsIntoLines(items));
+  }
+  return lines.join('\n');
+}
+
+async function runPdfScenarios() {
+  /* — Chase style: no signs anywhere, sections carry the direction — */
+  const depositRows: [string, string, string][] = [];
+  const withdrawalRows: [string, string, string][] = [];
+  for (let i = 0; i < 92; i++) {
+    const day = addDays(start, i);
+    if (!isWeekday(day)) continue;
+    const md = `${iso(day).slice(5, 7)}/${iso(day).slice(8, 10)}`;
+    if (i % 2 === 0) depositRows.push([md, `Orig CO Name:Merchant Svcs Settlement Orig ID:9982911 Descr:DEPOSIT`, (3200 + ((i * 137) % 2600)).toFixed(2)]);
+    withdrawalRows.push([md, 'Orig CO Name:Rapid Finance Orig ID:1900288 Descr:ACH DEBIT', '1,285.71']);
+    if (day.getUTCDay() === 3) withdrawalRows.push([md, 'Orig CO Name:Victory Funding LLC Orig ID:4421900 Descr:ACH DEBIT', '942.13']);
+    if (day.getUTCDate() === 5 || day.getUTCDate() === 20) withdrawalRows.push([md, 'Orig CO Name:Gusto Payroll Orig ID:6X88420 Descr:PAYROLL', '8,200.00']);
+  }
+
+  const pdfBytes = buildStatementPdf({
+    header: [
+      'CHASE BUSINESS COMPLETE CHECKING',
+      'ACME LOGISTICS LLC',
+      'Account Number: 000000123456789',
+      'March 02, 2026 through June 01, 2026',
+    ],
+    sections: [
+      { title: 'DEPOSITS AND ADDITIONS', rows: depositRows },
+      { title: 'ELECTRONIC WITHDRAWALS', rows: withdrawalRows },
+      { title: 'FEES', rows: [['03/31', 'NSF Returned Item Fee', '35.00']] },
+    ],
+  });
+
+  const text = await pdfToText(pdfBytes);
+  const year = inferStatementYear(text);
+  if (year !== 2026) throw new Error(`FAIL(pdf): statement year should be 2026, got ${year}`);
+
+  const parsed = parseStatementText(text, { source: 'chase.pdf' });
+  const deposits = parsed.transactions.filter((t) => t.amount > 0);
+  const debits = parsed.transactions.filter((t) => t.amount < 0);
+  console.log(`\npdf → ${parsed.transactions.length} txns (${deposits.length} deposits, ${debits.length} debits), ${parsed.skipped} lines skipped`);
+
+  if (deposits.length !== depositRows.length) throw new Error(`FAIL(pdf): expected ${depositRows.length} deposits, got ${deposits.length}`);
+  if (debits.length !== withdrawalRows.length + 1) throw new Error(`FAIL(pdf): expected ${withdrawalRows.length + 1} debits, got ${debits.length}`);
+
+  const rep = analyzeStatements(parsed.transactions, parsed.warnings);
+  const pdfNames = rep.positions.map((p) => p.funderName);
+  console.log(`pdf → grade ${rep.grade} (${rep.score}) | positions ${JSON.stringify(pdfNames)} | NSF ${rep.totalNsf}`);
+  if (!pdfNames.includes('Rapid Finance')) throw new Error('FAIL(pdf): Rapid Finance not detected');
+  if (!pdfNames.some((n) => /Victory/i.test(n))) throw new Error('FAIL(pdf): Victory Funding not detected');
+  if (pdfNames.some((n) => /gusto/i.test(n))) throw new Error('FAIL(pdf): payroll flagged as an advance');
+  if (rep.totalNsf !== 1) throw new Error(`FAIL(pdf): expected 1 NSF item, got ${rep.totalNsf}`);
+  const rapid = rep.positions.find((p) => p.funderName === 'Rapid Finance')!;
+  if (rapid.cadence !== 'daily') throw new Error(`FAIL(pdf): expected daily cadence, got ${rapid.cadence}`);
+  console.log('✅ SCENARIO 3 (PDF, section-signed) PASSED');
+
+  /* — A layout with a running balance and NO sections: the balance
+       cross-check has to work out every direction on its own. — */
+  const mixedRows: [string, string, string][] = [];
+  let running = 25_000;
+  for (let i = 0; i < 40; i++) {
+    const day = addDays(start, i);
+    if (!isWeekday(day)) continue;
+    const md = `${iso(day).slice(5, 7)}/${iso(day).slice(8, 10)}`;
+    const dep = 3000 + ((i * 97) % 1500);
+    running += dep;
+    mixedRows.push([md, 'CARD SETTLEMENT DEPOSIT 992018', `${dep.toFixed(2)}|${running.toFixed(2)}`]);
+    running -= 1285.71;
+    mixedRows.push([md, 'RAPID FINANCE ACH DEBIT 1900288', `1,285.71|${running.toFixed(2)}`]);
+  }
+  const pdf2 = buildStatementPdf({
+    header: ['WELLS FARGO BUSINESS CHOICE CHECKING', 'Statement period March 2, 2026 - April 30, 2026'],
+    sections: [{ title: 'TRANSACTION HISTORY', rows: mixedRows }],
+    withBalance: true,
+  });
+  const text2 = await pdfToText(pdf2);
+  const parsed2 = parseStatementText(text2, { source: 'wells.pdf' });
+  const dep2 = parsed2.transactions.filter((t) => t.amount > 0).length;
+  const deb2 = parsed2.transactions.filter((t) => t.amount < 0).length;
+  console.log(`pdf (balance-only) → ${parsed2.transactions.length} txns: ${dep2} deposits / ${deb2} debits`);
+  if (Math.abs(dep2 - deb2) > 1) throw new Error(`FAIL(pdf2): directions unbalanced — ${dep2} deposits vs ${deb2} debits`);
+  const rep2b = analyzeStatements(parsed2.transactions, parsed2.warnings);
+  if (!rep2b.positions.some((p) => p.funderName === 'Rapid Finance')) {
+    throw new Error('FAIL(pdf2): Rapid Finance not detected from the balance-only layout');
+  }
+  console.log('✅ SCENARIO 4 (PDF, balance-inferred) PASSED');
+}
+
+runPdfScenarios()
+  .then(() => console.log('\n✅ ALL UNDERWRITING TESTS PASSED'))
+  .catch((err) => { console.error(String(err && err.message ? err.message : err)); process.exit(1); });

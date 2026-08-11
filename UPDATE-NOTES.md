@@ -1,3 +1,63 @@
+# Update — August 2026 (round 32) — Underwriting reads PDF statements
+
+## Drop in the bank's PDF, exactly as it comes
+The Underwriting tab now reads **PDF statements directly** — the file the
+merchant downloads from online banking, no conversion, no CSV export, no
+copy-paste. Drag in all three months at once.
+
+It still uses **no AI credits**, and the PDF is still **never uploaded**:
+the text is pulled out of the file in your browser and analyzed there.
+
+### What it handles
+- **Multi-page statements.** Pages are read in order and stitched together,
+  including rows that continue across a page break.
+- **Statements with no minus signs.** Most banks never print one — they
+  group rows under **"Deposits and Additions"** and **"Electronic
+  Withdrawals"** and let the heading carry the meaning. The reader now
+  follows those headings, so withdrawals are never mistaken for revenue.
+  Dozens of heading variations are recognized (Checks Paid, ATM & Debit
+  Card Withdrawals, Fees and Service Charges, Money In / Money Out, and so
+  on).
+- **Dates with no year.** PDF rows print "03/02", so the year is taken from
+  the statement header ("March 01, 2026 through March 31, 2026"), and a
+  statement that crosses New Year rolls the year forward correctly.
+- **A running balance as a cross-check.** When the statement carries a
+  balance column, every deposit/withdrawal direction is verified against
+  how the balance actually moved, and any that disagree are corrected. If
+  that happens you get a note saying how many.
+- **Tight columns.** When a long description runs flush into the amount
+  with no gap, the amount is still read correctly.
+- **Two dates per row** (posted date and effective date) — common on
+  business checking statements.
+- **Subtotal lines ignored**, so "Total Deposits and Additions" is never
+  counted as a transaction.
+
+### What it can't read
+**Scanned or photographed statements.** A scan is a picture of a page with
+no text inside it — there is nothing to extract. You get a clear message
+saying so rather than a wrong answer. Ask the merchant for the statement
+downloaded straight from online banking. Password-protected PDFs also need
+the password removed first, and the message says that too.
+
+CSV is still supported and is marginally better when you have it, since a
+CSV export always carries a running balance. The paste tab is still there
+as a last resort for an unusual layout.
+
+## Under the hood
+- Added `pdfjs-dist` (Mozilla's PDF engine, the one Firefox itself uses) —
+  **run `npm install` after unzipping** to pull it in. It loads only when
+  you actually drop in a PDF, and it falls back to a main-thread parse if
+  the background worker can't start, so it works regardless of hosting
+  setup.
+- The regression suite (`npm run test:underwriting`) now builds real
+  multi-page PDFs in two different bank layouts — one signed only by
+  section headings, one with a running balance and no sections — extracts
+  them, and checks the scrub reaches the right answer on both: correct
+  deposit/withdrawal split, positions found, payroll not flagged as an
+  advance, NSF counted, and the statement year inferred.
+
+---
+
 # Update — August 2026 (round 31) — Underwriting tab (bank-statement MCA scrub) + a build-breaking bug found and fixed
 
 ## NEW: Underwriting (sidebar → Workflow, right under Shop & Submit)

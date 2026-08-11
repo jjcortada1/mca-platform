@@ -188,6 +188,9 @@ const NOISE_TOKENS = new Set([
   'POS', 'RECURRING', 'PPD', 'CCD', 'TEL', 'ARC', 'IAT', 'MEMO', 'REF', 'TYPE',
   'SEC', 'IND', 'COMPANY', 'TRACE', 'BATCH', 'DATE', 'EFFECTIVE', 'SETTLEMENT',
   'ONLINE', 'ELECTRONIC', 'AUTH', 'PURCHASE', 'THE', 'LLC', 'INC', 'CORP', 'LTD',
+  // PDF statements spell the ACH fields out in full ("Orig CO Name:… Descr:…"),
+  // so the long forms have to be stripped as well or they end up in the name.
+  'DESCR', 'DESCRIPTION', 'ORIGINATOR', 'RECURRING', 'PREAUTHORIZED', 'PPDID',
 ]);
 
 /**
