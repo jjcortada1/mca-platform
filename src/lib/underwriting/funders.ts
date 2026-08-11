@@ -217,12 +217,23 @@ export function normalizeDescription(raw: string): string {
   return ` ${String(raw || '').toUpperCase().replace(NORMALIZE_RE, ' ').trim()} `;
 }
 
+/**
+ * Token-boundary match against a normalized descriptor.
+ *
+ * Both sides are space-padded by normalizeDescription, so a pattern only
+ * matches whole words. Trimming the needle here would let short aliases
+ * match inside longer words (the way "NSF" hides inside "TRANSFER").
+ */
+function matchesToken(norm: string, pattern: string): boolean {
+  return norm.includes(normalizeDescription(pattern));
+}
+
 /** Returns the funder display name if the descriptor matches a known MCA. */
 export function matchKnownFunder(rawDescription: string): string | null {
   const norm = normalizeDescription(rawDescription);
   for (const f of MCA_FUNDERS) {
     for (const alias of f.aliases) {
-      if (norm.includes(normalizeDescription(alias).trim())) return f.name;
+      if (matchesToken(norm, alias)) return f.name;
     }
   }
   return null;
@@ -231,11 +242,11 @@ export function matchKnownFunder(rawDescription: string): string | null {
 /** True when the descriptor contains a soft MCA word (not proof on its own). */
 export function hasWeakMcaHint(rawDescription: string): boolean {
   const norm = normalizeDescription(rawDescription);
-  return WEAK_MCA_HINTS.some((h) => norm.includes(normalizeDescription(h).trim()));
+  return WEAK_MCA_HINTS.some((h) => matchesToken(norm, h));
 }
 
 /** True when the descriptor is a known non-advance recurring payment. */
 export function isNonMcaRecurring(rawDescription: string): boolean {
   const norm = normalizeDescription(rawDescription);
-  return NON_MCA_RECURRING.some((h) => norm.includes(normalizeDescription(h).trim()));
+  return NON_MCA_RECURRING.some((h) => matchesToken(norm, h));
 }

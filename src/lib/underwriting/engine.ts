@@ -213,19 +213,19 @@ export interface UnderwritingReport {
 
 /* ────────────────────────── helpers ────────────────────────── */
 
-function median(nums: number[]): number {
+export function median(nums: number[]): number {
   if (!nums.length) return 0;
   const s = [...nums].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
-function daysBetween(a: string, b: string): number {
+export function daysBetween(a: string, b: string): number {
   const ms = Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`);
   return Math.round(ms / 86400000);
 }
 
-function monthLabel(key: string): string {
+export function monthLabel(key: string): string {
   const [y, m] = key.split('-').map(Number);
   const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return `${names[(m || 1) - 1]} ${y}`;
@@ -266,7 +266,9 @@ function prettyName(description: string): string {
     .trim();
 }
 
-const NSF_RE = /NSF|NON\s?SUFFICIENT|INSUFFICIENT\s?FUND|RETURNED?\s?(ITEM|CHECK|ACH|PAYMENT|DEPOSIT)|UNPAID\s?ITEM|CHARGEBACK/i;
+// \bNSF\b, not NSF: the letters "nsf" sit inside "TRANSFER", so an
+// unanchored pattern counts every transfer line as a returned item.
+const NSF_RE = /\bNSF\b|NON\s?SUFFICIENT|INSUFFICIENT\s?FUND|RETURNED?\s?(ITEM|CHECK|ACH|PAYMENT|DEPOSIT)|UNPAID\s?ITEM|CHARGEBACK/i;
 const OD_FEE_RE = /OVERDRAFT\s?(FEE|CHARGE|ITEM)|\bOD\s?FEE\b|EXTENDED\s?OVERDRAFT|UNCOLLECTED\s?FUNDS\s?FEE/i;
 
 /** Deposits that are not real revenue: transfers, refunds, advance proceeds. */
@@ -316,7 +318,7 @@ export const CADENCE_LABEL: Record<Cadence, string> = {
 
 /* ────────────────────── position detection ────────────────────── */
 
-interface Stream {
+export interface Stream {
   key: string;
   descriptor: string;
   /** Every debit in the stream, oldest first. */
@@ -448,7 +450,7 @@ function buildPaymentSegments(txns: Transaction[]): PaymentSegment[] {
  * changed payment stays one stream while two concurrent advances from the
  * same funder stay separate.
  */
-function findRecurringStreams(txns: Transaction[]): Stream[] {
+export function findRecurringStreams(txns: Transaction[]): Stream[] {
   const debits = txns.filter((t) => t.amount < 0);
   const groups = new Map<string, Transaction[]>();
   for (const t of debits) {
@@ -515,7 +517,7 @@ function findRecurringStreams(txns: Transaction[]): Stream[] {
  *   • it debits daily / 2–3× weekly / weekly at a fixed amount at least
  *     four times, and it is not on the known non-advance list.
  */
-function classifyPositions(
+export function classifyPositions(
   streams: Stream[],
   periodEnd: string,
   avgMonthlyDeposits: number,

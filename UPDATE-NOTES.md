@@ -1,3 +1,113 @@
+# Update — August 2026 (round 35) — Underwriting workstation (stage 1)
+
+The Underwriting tab is now a proper underwriting workstation instead of a
+single scrolling report. Still **100% deterministic code — no AI model, no
+external API** — and statements are still parsed in your browser and never
+uploaded.
+
+## Two bugs found and fixed first
+**Every "TRANSFER" line was being counted as an NSF.** The letters *nsf* sit
+inside *tra-**nsf**-er*, and the matching was substring-based. On a real
+statement with a dozen transfers that alone could turn a clean file into a
+"12 NSF" decline. All three dictionaries now match on whole words only.
+
+**A stopped MCA was assumed paid off.** When an advance started before the
+uploaded statements there is no way to know what was left on it, and the
+old logic called that a payoff — guessing in the merchant's favour, which
+is the wrong way to be wrong. It now reads *payments stopped — needs
+review* and explains why.
+
+## Seven tabs instead of one long page
+**Overview · Cash Flow · Revenue Review · MCA Positions · Risk Flags ·
+Transactions · Statements.** The file header shows the business name (read
+off the statement, editable), the underwriting period, statements analyzed,
+accounts analyzed, and last updated.
+
+## True revenue vs. gross revenue
+Two separate numbers now. **Gross** is every incoming credit, unfiltered.
+**True revenue** removes what isn't operating sales: transfers between the
+merchant's own accounts, owner transfers, loan proceeds, MCA fundings,
+credit-card advances, returned deposits, reversals, tax refunds, investment
+transfers.
+
+The **Revenue Review** tab shows the full bridge — *gross → each exclusion →
+true* — plus every deposit source with the system's classification and its
+confidence. You can include or exclude any source with one click, bulk
+classify everything from the same payer, or restore the automatic call.
+**Every number on the file recalculates immediately.**
+
+Cross-account transfers are matched automatically: an equal, opposite entry
+in another uploaded account within three days is netted out, so moving
+$25,000 between your own accounts never counts as revenue.
+
+## Everything is auditable
+**Click any metric to see how it was calculated.** MCA withhold opens the
+arithmetic — each position's monthly payment, the total, true revenue, and
+the division — then lists the exact transactions. Same for negative days,
+NSFs, revenue, positions, and every risk flag. Every single transaction
+carries a plain-language reason for its classification and a confidence
+level, and a manual override records what the system had said.
+
+## MCA positions, split from history
+**Current positions** are advances still being debited at the end of the
+period; anything that stopped moves to **MCA history** so it can't inflate
+the burden. Each position shows payment, frequency, weekly and monthly
+equivalents, first/last seen, months present, payment count, estimated
+original advance and factor, estimated balance remaining, confidence, and
+its share of true revenue. A position running the whole period is called
+out as **active throughout entire statement period**. You can confirm or
+reject any detection.
+
+**Fundings received** are listed with why each was flagged and are linked to
+the position whose payments start right after.
+
+## Risk detection with reasons
+Positions stopping abruptly, several stopping at once, returned ACHs, stop
+payments and ACH blocks, NSFs clustered on MCA debit dates, collection and
+settlement activity, over-leverage, negative days, and revenue
+concentration. **No flag says just "default detected"** — each one explains
+the rule that fired and links to the transactions that caused it.
+
+Debt collection uses a dictionary of known collection, settlement, workout,
+and MCA-attorney names, plus keyword fallbacks scored lower so an ordinary
+law-firm payment reads as *possible*, not *confirmed*.
+
+## Other fixes in the analysis
+- **Negative days** come from daily *ending* balances, carried across days
+  with no activity — with longest consecutive run, lowest balance, and
+  average negative balance.
+- **NSF / returned items / overdraft fees** are tracked separately and
+  de-duplicated per day, so one bounce that prints as both an item and its
+  fee counts once.
+- **Multiple bank accounts** are detected and can be viewed consolidated or
+  one at a time.
+
+## Search and the transaction explorer
+Search every statement at once by description, merchant, funder, or amount.
+Filter by credits, debits, MCA, funding, NSF, transfers, revenue, excluded
+revenue, collections, or large. Sort by date or size. Multi-select rows and
+bulk-classify them. Export the current view to CSV.
+
+## Ready for shopping (data only)
+`toDealCriteria()` shapes the underwriting result into the exact criteria
+object the **existing** funder matching engine already consumes — monthly
+true revenue and open position count — so the data is ready to drive
+fit-checking against each funder's stored criteria. No funder recommendation
+logic was invented and no existing shopping logic was changed.
+
+---
+
+### What is NOT in this round
+- **Worksheets (the spreadsheet rewrite) — next.** Its storage already
+  supports the target UX, so it is a UI rewrite with no migration.
+- **Nothing is saved yet.** Classifications and confirmations live in the
+  session; reloading re-parses. Persisting an underwriting file needs new
+  tables and routes, which is its own stage.
+- **The Statements tab shows the transactions read from each statement**,
+  not the original PDF pages.
+
+---
+
 # Update — August 2026 (round 34) — Build fixed (verified with a real production build)
 
 ## The build failure

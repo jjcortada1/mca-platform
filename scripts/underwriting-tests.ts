@@ -10,6 +10,7 @@
  */
 import { parseStatementText, gridToTransactions, detectColumns, mergeTransactions, inferStatementYear } from '@/lib/underwriting/parse';
 import { groupTextItemsIntoLines } from '@/lib/underwriting/pdf';
+import { buildUnderwritingFile, toDealCriteria } from '@/lib/underwriting/workstation';
 import { analyzeStatements, reportToText } from '@/lib/underwriting/engine';
 
 function iso(d: Date) { return d.toISOString().slice(0, 10); }
@@ -414,6 +415,152 @@ const fundingRow = rep5.transactions.find((t) => t.amount === 50_000)!;
 if (fundingRow.category !== 'funding') throw new Error(`FAIL(annotate): the funding row is categorised as ${fundingRow.category}`);
 if (!fundingRow.isLarge) throw new Error('FAIL(annotate): a 50k deposit should be flagged large');
 console.log('✅ SCENARIO 5 (payment switch, stacking, funding) PASSED');
+
+/* ═══════ Scenario 6: the underwriting workstation ═══════ */
+
+/**
+ * Covers the things the workstation adds over raw position detection:
+ * gross vs true revenue, cross-account transfer netting, negative days
+ * from daily ending balances, NSF vs overdraft separation, withhold %,
+ * a position that stops dead, collection activity, and manual overrides
+ * re-driving every downstream number.
+ */
+function mkTxns(rows: { date: string; desc: string; amt: number; bal: number }[]) {
+  return rows.map((r) => ({ date: r.date, description: r.desc, amount: r.amt, balance: r.bal }));
+}
+
+const opRows: { date: string; desc: string; amt: number; bal: number }[] = [];
+let ob = 40_000;
+const push = (date: string, desc: string, amt: number) => { ob += amt; opRows.push({ date, desc, amt, bal: ob }); };
+
+for (let i = 0; i < 92; i++) {
+  const day = addDays(start, i);
+  if (!isWeekday(day)) continue;
+  const d = iso(day);
+  push(d, 'STRIPE TRANSFER ST-9921', 3400 + ((i * 151) % 1900));
+  // Position A runs the whole period.
+  push(d, 'RAPID FINANCE ACH DEBIT 1900288', -1285.71);
+  // Position B stops dead on day 40, with returns right after → default.
+  if (i <= 40) push(d, 'VICTORY FUNDING ACH DEBIT 44219', -600.0);
+  // Three returns right after the stop (all weekdays) → default, not payoff.
+  if (i === 42 || i === 43 || i === 44) push(d, 'ACH RETURN ITEM UNPAID', -600.0);
+  // Same day: the returned item AND its fee. Must count as ONE event.
+  if (i === 42) push(d, 'NSF FEE', -35.0);
+  if (i === 45) push(d, 'OVERDRAFT FEE', -35.0);
+  if (i === 20) push(d, 'ACH DEBIT XYZ SETTLEMENT GROUP', -3500.0);
+  if (i === 50) push(d, 'ACH DEBIT XYZ SETTLEMENT GROUP', -3500.0);
+  // A transfer OUT to the savings account.
+  if (i === 30) push(d, 'ONLINE TRANSFER TO SAVINGS 8891', -25_000);
+  // A day in the red.
+  if (i === 60) push(d, 'EQUIPMENT PURCHASE VENDOR CO', -(ob + 4200));
+}
+
+const savRows: { date: string; desc: string; amt: number; bal: number }[] = [];
+let sb = 5_000;
+for (let i = 0; i < 92; i++) {
+  const day = addDays(start, i);
+  if (!isWeekday(day)) continue;
+  if (i === 30) { sb += 25_000; savRows.push({ date: iso(day), desc: 'ONLINE TRANSFER FROM CHECKING 1234', amt: 25_000, bal: sb }); }
+}
+
+const file = buildUnderwritingFile([
+  { id: 'st-op', fileName: 'chase-operating.pdf', transactions: mkTxns(opRows), text: 'CHASE BANK\nACME LOGISTICS LLC\nAccount Number: 000000121234\n', accountId: 'chase-1234', accountLabel: 'Chase ••••1234' },
+  { id: 'st-sav', fileName: 'chase-savings.pdf', transactions: mkTxns(savRows), text: 'CHASE BANK\nACME LOGISTICS LLC\nAccount Number: 000000128891\n', accountId: 'chase-8891', accountLabel: 'Chase ••••8891' },
+], { generatedAt: '2026-06-02T00:00:00Z' });
+
+console.log('\nworkstation →');
+console.log(`  business: ${file.businessName} | accounts ${file.accountCount} | statements ${file.statementCount}`);
+console.log(`  gross ${Math.round(file.grossRevenueTotal)} → true ${Math.round(file.trueRevenueTotal)}`);
+console.log(`  exclusions: ${JSON.stringify(file.revenueBridge.exclusions.map((e) => [e.label, Math.round(e.amount)]))}`);
+console.log(`  negative days ${file.negativeDays.totalNegativeDays} (longest run ${file.negativeDays.longestRun})`);
+console.log(`  nsf ${file.nsfCount} | overdraft ${file.overdraftCount} | returned ${file.returnedCount}`);
+console.log(`  withhold ${(file.withhold.pct * 100).toFixed(1)}% | current ${file.currentPositions.length} | historical ${file.historicalPositions.length}`);
+console.log(`  positions: ${JSON.stringify(file.positions.map((p) => [p.funderName, p.status]))}`);
+console.log(`  collections: ${JSON.stringify(file.collections.map((c) => [c.payee, c.count]))}`);
+console.log(`  risk: ${JSON.stringify(file.riskFlags.map((f) => f.severity + ':' + f.title).slice(0, 6))}`);
+
+// Cross-account transfer must not inflate revenue.
+const transferIn = file.transactions.find((t) => t.amount === 25_000);
+if (!transferIn) throw new Error('FAIL(uw): the inbound transfer row is missing');
+if (transferIn.isTrueRevenue) throw new Error('FAIL(uw): a transfer between two uploaded accounts counted as revenue');
+if (!transferIn.internalTransferPartner) throw new Error('FAIL(uw): the cross-account transfer was not matched to its partner');
+
+// Gross must exceed true by exactly the excluded credits.
+const excluded = file.revenueBridge.exclusions.reduce((s, e) => s + e.amount, 0);
+if (Math.abs(file.revenueBridge.gross - excluded - file.revenueBridge.trueRevenue) > 0.5) {
+  throw new Error('FAIL(uw): the gross → exclusions → true bridge does not reconcile');
+}
+if (file.trueRevenueTotal >= file.grossRevenueTotal) throw new Error('FAIL(uw): true revenue should be below gross here');
+
+// Negative days come from daily ending balances.
+if (file.negativeDays.totalNegativeDays < 1) throw new Error('FAIL(uw): the negative day was not detected');
+
+// NSF and overdraft are tracked separately, not lumped together.
+if (file.overdraftCount !== 1) throw new Error(`FAIL(uw): expected 1 overdraft fee, got ${file.overdraftCount}`);
+if (file.returnedCount !== 3) throw new Error(`FAIL(uw): expected 3 returned items, got ${file.returnedCount}`);
+// The NSF FEE shares a day with a returned item — one bounce, one event.
+if (file.nsfCount !== 0) throw new Error(`FAIL(uw): the fee for an already-counted return was double counted (nsf=${file.nsfCount})`);
+
+// Position A active, position B stopped and NOT counted as current.
+const rapidP = file.positions.find((p) => p.funderName === 'Rapid Finance');
+const victoryP = file.positions.find((p) => /victory/i.test(p.funderName));
+if (!rapidP || rapidP.status !== 'active') throw new Error(`FAIL(uw): Rapid should be active, got ${rapidP?.status}`);
+if (!victoryP || victoryP.status !== 'possible_default') {
+  throw new Error(`FAIL(uw): a position that stopped amid returned ACHs should read as a possible default, got ${victoryP?.status}`);
+}
+if (file.currentPositions.some((p) => /victory/i.test(p.funderName))) {
+  throw new Error('FAIL(uw): a stopped position is being counted in the current MCA burden');
+}
+if (!rapidP.presentThroughout) throw new Error('FAIL(uw): a position spanning every month is not marked present throughout');
+
+// Withhold reconciles.
+const recomputed = file.withhold.totalMonthly / file.withhold.trueRevenueMonthly;
+if (Math.abs(recomputed - file.withhold.pct) > 0.0001) throw new Error('FAIL(uw): the withhold audit does not reproduce the percentage');
+if (file.withhold.pct <= 0) throw new Error('FAIL(uw): withhold should be above zero');
+
+// Collections detected.
+if (!file.collections.length) throw new Error('FAIL(uw): the settlement-group payments were not flagged');
+
+// Risk engine caught the abrupt stop.
+if (!file.riskFlags.some((f) => /default|stop payment/i.test(f.title))) {
+  throw new Error('FAIL(uw): no risk flag raised for the position that stopped');
+}
+for (const f of file.riskFlags) {
+  if (!f.explanation || f.explanation.length < 20) throw new Error(`FAIL(uw): risk flag "${f.title}" has no explanation`);
+}
+
+// Manual override must re-drive true revenue immediately.
+const aStripe = file.transactions.find((t) => t.cls === 'revenue' && t.amount > 0)!;
+const after = buildUnderwritingFile([
+  { id: 'st-op', fileName: 'chase-operating.pdf', transactions: mkTxns(opRows), accountId: 'chase-1234' },
+  { id: 'st-sav', fileName: 'chase-savings.pdf', transactions: mkTxns(savRows), accountId: 'chase-8891' },
+], { overrides: [{ key: aStripe.key, cls: 'non_revenue' }] });
+const delta = file.trueRevenueTotal - after.trueRevenueTotal;
+if (Math.abs(delta - aStripe.amount) > 0.5) {
+  throw new Error(`FAIL(uw): excluding one ${aStripe.amount} deposit changed true revenue by ${delta}`);
+}
+const overridden = after.transactions.find((t) => t.key === aStripe.key)!;
+if (!overridden.overridden || overridden.isTrueRevenue) throw new Error('FAIL(uw): the override did not take effect');
+if (!/Manually set/.test(overridden.reason)) throw new Error('FAIL(uw): an overridden row lost its explanation');
+
+// Every transaction must carry a reason — no black boxes.
+for (const t of file.transactions) {
+  if (!t.reason || t.reason.length < 8) throw new Error(`FAIL(uw): transaction ${t.key} has no classification reason`);
+}
+
+// Account filtering yields account-level underwriting.
+const opOnly = buildUnderwritingFile([
+  { id: 'st-op', fileName: 'chase-operating.pdf', transactions: mkTxns(opRows), accountId: 'chase-1234' },
+  { id: 'st-sav', fileName: 'chase-savings.pdf', transactions: mkTxns(savRows), accountId: 'chase-8891' },
+], { accountFilter: 'chase-1234' });
+if (opOnly.transactions.some((t) => t.accountId !== 'chase-1234')) throw new Error('FAIL(uw): account filter leaked other accounts');
+
+// Handoff to the existing funder matching keeps its shape.
+const criteria = toDealCriteria(file, { industry: 'trucking', state: 'FL' });
+if (criteria.positions !== file.currentPositions.length) throw new Error('FAIL(uw): criteria position count mismatch');
+if (criteria.monthlyRevenue <= 0) throw new Error('FAIL(uw): criteria revenue missing');
+console.log(`  criteria handoff: ${JSON.stringify(criteria)}`);
+console.log('✅ SCENARIO 6 (underwriting workstation) PASSED');
 
 runPdfScenarios()
   .then(() => console.log('\n✅ ALL UNDERWRITING TESTS PASSED'))
