@@ -162,6 +162,8 @@ export interface GmailSendInput {
   inReplyTo?: string;
   references?: string;
   attachments?: { filename: string; content: Buffer; contentType?: string }[];
+  /** Images referenced by the HTML via cid: — e.g. a signature logo. */
+  inline?: { filename: string; content: Buffer; contentType?: string; cid: string }[];
 }
 
 function encodeHeader(value: string): string {
@@ -171,12 +173,27 @@ function encodeHeader(value: string): string {
     : `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`;
 }
 
-/** Build a MIME message. Multipart only when there is more than one part. */
+/**
+ * Build a MIME message.
+ *
+ * Structure is only as nested as it needs to be:
+ *
+ *   multipart/mixed              (only when there are attachments)
+ *   └── multipart/related        (only when there are inline images)
+ *       └── multipart/alternative (only when there is an HTML part)
+ *           ├── text/plain
+ *           └── text/html
+ *
+ * The related layer is what makes a signature logo render inline instead
+ * of arriving as a stray attachment.
+ */
 export function buildMime(input: GmailSendInput): string {
-  const boundaryAlt = `alt_${Math.random().toString(36).slice(2)}`;
-  const boundaryMixed = `mix_${Math.random().toString(36).slice(2)}`;
-  const hasAttachments = Boolean(input.attachments?.length);
-  const hasHtml = Boolean(input.html);
+  const rand = () => Math.random().toString(36).slice(2);
+  const bAlt = `alt_${rand()}`;
+  const bRel = `rel_${rand()}`;
+  const bMix = `mix_${rand()}`;
+  const inline = input.inline ?? [];
+  const attachments = input.attachments ?? [];
 
   const headers: string[] = [
     `From: ${encodeHeader(input.from)}`,
@@ -189,62 +206,84 @@ export function buildMime(input: GmailSendInput): string {
   if (input.references) headers.push(`References: ${input.references}`);
   headers.push('MIME-Version: 1.0');
 
-  const body: string[] = [];
+  const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
 
-  const bodyPart = (): string => {
-    if (!hasHtml) {
-      return [
-        'Content-Type: text/plain; charset="UTF-8"',
-        'Content-Transfer-Encoding: base64',
-        '',
-        Buffer.from(input.text, 'utf8').toString('base64'),
-      ].join('\r\n');
-    }
-    return [
-      `Content-Type: multipart/alternative; boundary="${boundaryAlt}"`,
-      '',
-      `--${boundaryAlt}`,
+  // Innermost: the body itself.
+  let part: string[];
+  if (!input.html) {
+    part = [
       'Content-Type: text/plain; charset="UTF-8"',
       'Content-Transfer-Encoding: base64',
       '',
-      Buffer.from(input.text, 'utf8').toString('base64'),
+      b64(input.text),
+    ];
+  } else {
+    part = [
+      `Content-Type: multipart/alternative; boundary="${bAlt}"`,
       '',
-      `--${boundaryAlt}`,
+      `--${bAlt}`,
+      'Content-Type: text/plain; charset="UTF-8"',
+      'Content-Transfer-Encoding: base64',
+      '',
+      b64(input.text),
+      '',
+      `--${bAlt}`,
       'Content-Type: text/html; charset="UTF-8"',
       'Content-Transfer-Encoding: base64',
       '',
-      Buffer.from(input.html ?? '', 'utf8').toString('base64'),
+      b64(input.html),
       '',
-      `--${boundaryAlt}--`,
-    ].join('\r\n');
-  };
+      `--${bAlt}--`,
+    ];
+  }
 
-  if (!hasAttachments) {
-    body.push(...headers, bodyPart());
-  } else {
-    body.push(
-      ...headers,
-      `Content-Type: multipart/mixed; boundary="${boundaryMixed}"`,
+  if (inline.length) {
+    const wrapped = [
+      `Content-Type: multipart/related; boundary="${bRel}"`,
       '',
-      `--${boundaryMixed}`,
-      bodyPart(),
+      `--${bRel}`,
+      ...part,
       '',
-    );
-    for (const a of input.attachments ?? []) {
-      body.push(
-        `--${boundaryMixed}`,
-        `Content-Type: ${a.contentType || 'application/octet-stream'}; name="${a.filename}"`,
+    ];
+    for (const img of inline) {
+      wrapped.push(
+        `--${bRel}`,
+        `Content-Type: ${img.contentType || 'application/octet-stream'}; name="${img.filename}"`,
         'Content-Transfer-Encoding: base64',
-        `Content-Disposition: attachment; filename="${a.filename}"`,
+        `Content-ID: <${img.cid}>`,
+        `Content-Disposition: inline; filename="${img.filename}"`,
         '',
-        a.content.toString('base64'),
+        img.content.toString('base64'),
         '',
       );
     }
-    body.push(`--${boundaryMixed}--`);
+    wrapped.push(`--${bRel}--`);
+    part = wrapped;
   }
 
-  return body.join('\r\n');
+  if (!attachments.length) return [...headers, ...part].join('\r\n');
+
+  const mixed = [
+    ...headers,
+    `Content-Type: multipart/mixed; boundary="${bMix}"`,
+    '',
+    `--${bMix}`,
+    ...part,
+    '',
+  ];
+  for (const a of attachments) {
+    mixed.push(
+      `--${bMix}`,
+      `Content-Type: ${a.contentType || 'application/octet-stream'}; name="${a.filename}"`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${a.filename}"`,
+      '',
+      a.content.toString('base64'),
+      '',
+    );
+  }
+  mixed.push(`--${bMix}--`);
+  return mixed.join('\r\n');
 }
 
 /** base64url, which is what the Gmail API expects for a raw message. */

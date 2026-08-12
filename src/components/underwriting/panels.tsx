@@ -33,130 +33,187 @@ const pick = (file: UnderwritingFile, keys: string[]) => {
 
 /* ══════════════════════════ OVERVIEW ══════════════════════════ */
 
-export function OverviewPanel({ file, onDrill }: PanelProps) {
+/**
+ * The snapshot.
+ *
+ * Deliberately short. A broker opening a file wants one question answered
+ * first — WHO IS THIS MERCHANT ALREADY PAYING, AND HOW MUCH — so current
+ * MCA positions are the headline, not a metric card among many. Everything
+ * else is four numbers and the risk list; the depth lives behind the tabs.
+ */
+export function OverviewPanel({ file, onDrill, onOverride, onResetOverride, onPositionDecision }: PanelProps) {
   const withholdTone: Tone = file.withhold.pct > 0.3 ? 'bad' : file.withhold.pct > 0.2 ? 'warn' : 'good';
-  const negTone: Tone = file.negativeDays.totalNegativeDays > 5 ? 'bad' : file.negativeDays.totalNegativeDays > 2 ? 'warn' : 'good';
   const nsfTotal = file.nsfCount + file.returnedCount;
-  const nsfTone: Tone = nsfTotal > 5 ? 'bad' : nsfTotal > 2 ? 'warn' : 'good';
-
-  const revenueTxns = file.transactions.filter((t) => t.isTrueRevenue);
   const mcaTxns = file.transactions.filter((t) => t.cls === 'mca_payment');
-
-  const trendIcon = (t: UnderwritingFile['revenueTrend']) =>
-    t === 'growing' ? <TrendingUp className="h-3.5 w-3.5 text-emerald-600" />
-      : t === 'declining' ? <TrendingDown className="h-3.5 w-3.5 text-rose-600" />
-        : <Minus className="h-3.5 w-3.5 text-muted-foreground" />;
+  const positions = file.currentPositions;
 
   return (
     <div className="space-y-4">
-      {/* Primary row — the four numbers a broker reads first. */}
+      {/* ── HEADLINE: what they're already paying ── */}
+      <section className="border border-border bg-card rounded-md overflow-hidden">
+        <header className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-border">
+          <div className="flex items-baseline gap-3">
+            <h2 className="text-[15px] font-semibold tracking-tight">Current MCA positions</h2>
+            <span className={`text-[26px] font-semibold tabular-nums leading-none ${positions.length >= 3 ? TONE_TEXT.bad : positions.length ? TONE_TEXT.warn : TONE_TEXT.good}`}>
+              {positions.length}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-right">
+            <div>
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Paying per month</div>
+              <div className="text-[17px] font-semibold tabular-nums">{money(file.mcaMonthlyPayments)}</div>
+            </div>
+            <div>
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Per week</div>
+              <div className="text-[17px] font-semibold tabular-nums">{money(file.mcaWeeklyPayments)}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onDrill({
+                title: 'MCA withhold %',
+                derivation: [
+                  ...file.withhold.positions.map((p) => ({ label: p.name, value: `${money(p.monthly)}/mo`, muted: true })),
+                  { label: 'Total MCA payments', value: `${money(file.withhold.totalMonthly)}/mo` },
+                  { label: 'True revenue', value: `${money(file.withhold.trueRevenueMonthly)}/mo` },
+                  { label: `${money(file.withhold.totalMonthly)} ÷ ${money(file.withhold.trueRevenueMonthly)}`, value: percent(file.withhold.pct) },
+                ],
+                explanation: 'Payments to advances still being debited, divided by true revenue. Stopped positions are excluded — they are not a live burden.',
+                transactions: mcaTxns.slice(0, 60),
+              })}
+              className="text-left hover:opacity-80"
+            >
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Of revenue</div>
+              <div className={`text-[17px] font-semibold tabular-nums ${TONE_TEXT[withholdTone]}`}>{percent(file.withhold.pct)}</div>
+            </button>
+          </div>
+        </header>
+
+        {positions.length === 0 ? (
+          <div className="px-4 py-8 text-center">
+            <div className="text-[14px] font-semibold text-emerald-600 dark:text-emerald-400">No active advances</div>
+            <p className="text-[12.5px] text-muted-foreground mt-1">
+              Nothing in these statements repeats on the fixed daily or weekly schedule an advance debits on.
+            </p>
+          </div>
+        ) : (
+          <DataTable
+            minWidth={860}
+            head={
+              <>
+                <Th>Funder</Th>
+                <Th align="right">Payment</Th>
+                <Th>Frequency</Th>
+                <Th align="right">Weekly</Th>
+                <Th align="right">Monthly</Th>
+                <Th align="right">% of revenue</Th>
+                <Th>First → last seen</Th>
+                <Th align="right">Confidence</Th>
+              </>
+            }
+          >
+            {positions.map((p) => (
+              <tr
+                key={p.id}
+                className="border-b border-border/60 hover:bg-muted/40 cursor-pointer"
+                onClick={() => onDrill({
+                  title: `${p.funderName} — payments`,
+                  derivation: [
+                    { label: 'Payment', value: `${money(p.paymentAmount, 2)} ${CADENCE_LABEL[p.cadence].toLowerCase()}` },
+                    { label: 'Estimated weekly', value: money(p.weeklyEquivalent) },
+                    { label: 'Estimated monthly', value: money(p.monthlyEquivalent) },
+                    { label: 'First seen', value: longDate(p.firstDate), muted: true },
+                    { label: 'Last seen', value: longDate(p.lastDate), muted: true },
+                    { label: 'Payments observed', value: String(p.paymentCount), muted: true },
+                    { label: 'Estimated original advance', value: p.estimatedFunding ? money(p.estimatedFunding) : 'Not solvable', muted: true },
+                    { label: 'Estimated balance remaining', value: p.estimatedRemaining !== null ? money(p.estimatedRemaining) : 'Started before these statements', muted: true },
+                  ],
+                  explanation: p.confidenceReasons.join('. '),
+                  transactions: pick(file, p.txnKeys),
+                })}
+              >
+                <Td>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-[13px]">{p.funderName}</span>
+                    {p.presentThroughout && <Badge variant="destructive">All {p.monthsInPeriod} months</Badge>}
+                    {p.paymentChanged && <Badge variant="warning">Payment changed</Badge>}
+                    {!p.identified && <Badge variant="outline">Name not recognized</Badge>}
+                  </div>
+                </Td>
+                <Td align="right" tabular className="font-semibold">{money(p.paymentAmount, 2)}</Td>
+                <Td className="text-muted-foreground">{CADENCE_LABEL[p.cadence]}</Td>
+                <Td align="right" tabular>{money(p.weeklyEquivalent)}</Td>
+                <Td align="right" tabular className="font-medium">{money(p.monthlyEquivalent)}</Td>
+                <Td align="right" tabular className={p.withholdPct > 0.15 ? TONE_TEXT.warn : ''}>{percent(p.withholdPct)}</Td>
+                <Td className="text-muted-foreground whitespace-nowrap">{shortDate(p.firstDate)} → {shortDate(p.lastDate)}</Td>
+                <Td align="right"><ConfidenceChip level={p.confidenceLevel} /></Td>
+              </tr>
+            ))}
+          </DataTable>
+        )}
+
+        {(file.historicalPositions.length > 0 || file.fundingEvents.length > 0) && (
+          <div className="flex flex-wrap gap-x-6 gap-y-1 px-4 py-2 border-t border-border text-[11.5px] text-muted-foreground">
+            {file.historicalPositions.length > 0 && (
+              <span>
+                {file.historicalPositions.length} position{file.historicalPositions.length === 1 ? '' : 's'} stopped or paid off —
+                <span className="font-medium text-foreground"> see MCA Positions</span>
+              </span>
+            )}
+            {file.fundingEvents.length > 0 && (
+              <span>
+                {file.fundingEvents.length} funding deposit{file.fundingEvents.length === 1 ? '' : 's'} received during the period
+              </span>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* ── The four numbers that decide the rest ── */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric
-          label="Average true revenue"
+          label="True revenue / month"
           value={money(file.trueRevenueMonthly)}
-          note="Per month, non-operating deposits removed"
+          note={`${money(file.grossRevenueMonthly)} gross before exclusions`}
           emphasis
           onClick={() => onDrill({
-            title: 'Average true revenue',
+            title: 'True revenue',
             derivation: [
-              { label: 'Gross deposits (total)', value: money(file.revenueBridge.gross) },
-              ...file.revenueBridge.exclusions.map((e) => ({
-                label: `Less: ${e.label} (${e.count})`, value: `−${money(e.amount)}`, muted: true,
-              })),
-              { label: 'True revenue (total)', value: money(file.revenueBridge.trueRevenue) },
-              { label: `÷ ${file.months.filter((m) => !m.partial).length || file.months.length} full month(s)`, value: money(file.trueRevenueMonthly), muted: true },
+              { label: 'Gross deposits', value: money(file.revenueBridge.gross) },
+              ...file.revenueBridge.exclusions.map((e) => ({ label: `Less: ${e.label} (${e.count})`, value: `−${money(e.amount)}`, muted: true })),
+              { label: 'True revenue', value: money(file.revenueBridge.trueRevenue) },
             ],
-            explanation: 'True revenue counts only deposits that look like operating sales. Transfers between the merchant’s own accounts, advance proceeds, loan draws, refunds and reversals are excluded. Every exclusion is listed on the Revenue Review tab and can be overridden.',
-            transactions: revenueTxns.slice(0, 60),
+            explanation: 'Only deposits that look like operating sales. Transfers between the merchant’s own accounts, advance proceeds, loan draws, refunds and reversals are excluded — adjust any of it on the Revenue Review tab.',
           })}
         />
-        <Metric
-          label="Gross revenue"
-          value={money(file.grossRevenueMonthly)}
-          note="Per month, every incoming credit"
-          emphasis
-          onClick={() => onDrill({
-            title: 'Gross revenue',
-            derivation: [
-              { label: 'All credits (total)', value: money(file.grossRevenueTotal) },
-              { label: 'Deposits per month', value: file.avgDepositCount.toFixed(1), muted: true },
-            ],
-            explanation: 'Every incoming credit, unfiltered — including transfers and advance proceeds. This is the number a merchant usually quotes; true revenue is the one a funder underwrites.',
-            transactions: file.transactions.filter((t) => t.amount > 0).slice(0, 60),
-          })}
-        />
-        <Metric
-          label="MCA withhold"
-          value={percent(file.withhold.pct)}
-          tone={withholdTone}
-          note={`${money(file.mcaMonthlyPayments)}/mo across ${file.currentPositions.length} position${file.currentPositions.length === 1 ? '' : 's'}`}
-          emphasis
-          onClick={() => onDrill({
-            title: 'MCA withhold %',
-            derivation: [
-              ...file.withhold.positions.map((p) => ({ label: p.name, value: `${money(p.monthly)}/mo`, muted: true })),
-              { label: 'Total MCA payments', value: `${money(file.withhold.totalMonthly)}/mo` },
-              { label: 'True revenue', value: `${money(file.withhold.trueRevenueMonthly)}/mo` },
-              { label: `${money(file.withhold.totalMonthly)} ÷ ${money(file.withhold.trueRevenueMonthly)}`, value: percent(file.withhold.pct) },
-            ],
-            explanation: 'Recurring payments to currently-active advances, divided by true revenue. Positions that have stopped are excluded — they are not a live burden.',
-            transactions: mcaTxns.slice(0, 60),
-          })}
-        />
-        <Metric
-          label="Current MCA positions"
-          value={String(file.currentPositions.length)}
-          tone={file.currentPositions.length >= 4 ? 'bad' : file.currentPositions.length >= 3 ? 'warn' : 'good'}
-          note={file.historicalPositions.length ? `${file.historicalPositions.length} historical / stopped` : 'No historical positions'}
-          emphasis
-          onClick={() => onDrill({
-            title: 'Current MCA positions',
-            derivation: file.currentPositions.map((p) => ({
-              label: `${p.funderName} — ${money(p.paymentAmount, 2)} ${CADENCE_LABEL[p.cadence].toLowerCase()}`,
-              value: `${money(p.monthlyEquivalent)}/mo`,
-            })),
-            explanation: 'A position counts as current when its payments continue through the end of the statement period. Advances whose payments stopped are moved to MCA history so they do not inflate the burden.',
-            transactions: mcaTxns.slice(0, 60),
-          })}
-        />
-      </div>
-
-      {/* Secondary row — balance behaviour and bank events. */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Metric
           label="Avg daily balance"
           value={money(file.avgDailyBalance)}
+          note={file.lowestBalance !== null ? `Low ${money(file.lowestBalance)}` : undefined}
           tone={file.avgDailyBalance !== null && file.avgDailyBalance < 1000 ? 'warn' : 'neutral'}
-          onClick={() => onDrill({
-            title: 'Average daily balance',
-            derivation: file.months.map((m) => ({ label: m.label, value: money(m.avgDailyBalance), muted: true })),
-            explanation: 'Each day’s closing balance, carried forward across days with no activity, averaged over the statement period and weighted by the days each month actually covers.',
-          })}
+          emphasis
         />
-        <Metric label="Lowest balance" value={money(file.lowestBalance)} tone={file.lowestBalance !== null && file.lowestBalance < 0 ? 'bad' : 'neutral'} />
-        <Metric label="Highest balance" value={money(file.highestBalance)} />
         <Metric
           label="Negative days"
           value={String(file.negativeDays.totalNegativeDays)}
-          tone={negTone}
-          note={file.negativeDays.longestRun ? `Longest run ${file.negativeDays.longestRun}d` : undefined}
+          note={file.negativeDays.longestRun ? `Longest run ${file.negativeDays.longestRun} days` : 'None'}
+          tone={file.negativeDays.totalNegativeDays > 5 ? 'bad' : file.negativeDays.totalNegativeDays > 2 ? 'warn' : 'good'}
+          emphasis
           onClick={() => onDrill({
             title: 'Negative days',
             derivation: [
               { label: 'Total negative days', value: String(file.negativeDays.totalNegativeDays) },
               { label: 'Longest consecutive run', value: `${file.negativeDays.longestRun} day(s)` },
               { label: 'Lowest balance', value: money(file.negativeDays.lowestBalance) },
-              { label: 'Average negative balance', value: money(file.negativeDays.averageNegativeBalance), muted: true },
-              ...file.negativeDays.perMonth.map((m) => ({ label: m.label, value: `${m.days} day(s)`, muted: true })),
             ],
-            explanation: `Counted from daily ENDING balances, not from individual negative transactions — a day is negative if the account closed below zero. ${file.negativeDays.dates.length ? `Dates: ${file.negativeDays.dates.slice(0, 20).map((d) => d.date).join(', ')}` : ''}`,
+            explanation: 'Counted from daily ENDING balances — a day is negative if the account closed below zero.',
           })}
         />
         <Metric
           label="NSF / returned"
           value={String(nsfTotal)}
-          tone={nsfTone}
           note={`${file.overdraftCount} overdraft fee${file.overdraftCount === 1 ? '' : 's'}`}
+          tone={nsfTotal > 5 ? 'bad' : nsfTotal > 2 ? 'warn' : 'good'}
+          emphasis
           onClick={() => onDrill({
             title: 'NSF / returned items',
             derivation: [
@@ -164,92 +221,37 @@ export function OverviewPanel({ file, onDrill }: PanelProps) {
               { label: 'Returned items', value: String(file.returnedCount) },
               { label: 'Overdraft fees', value: String(file.overdraftCount) },
             ],
-            explanation: 'Counted once per event per day — when a statement shows both a returned item and its fee on the same day, that is one bounce, not two.',
+            explanation: 'Counted once per event per day — a returned item and its fee on the same day is one bounce, not two.',
             transactions: file.transactions.filter((t) => t.cls === 'bank_event'),
           })}
         />
-        <Metric
-          label="Avg monthly deposits"
-          value={money(file.avgMonthlyDeposits)}
-          note={`${file.avgDepositCount.toFixed(1)} deposits/mo`}
-        />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1.15fr,1fr] items-start">
-        {/* Automated summary — facts only, no credit decision. */}
-        <Section title="Underwriting snapshot" subtitle="Calculated from the statements — facts and signals, not a credit decision">
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-[13px]">
-            <SummaryRow label="Average true revenue" value={`${money(file.trueRevenueMonthly)}/mo`} />
-            <SummaryRow label="Average daily balance" value={money(file.avgDailyBalance)} />
-            <SummaryRow label="Negative days" value={String(file.negativeDays.totalNegativeDays)} />
-            <SummaryRow label="NSF / returned items" value={String(nsfTotal)} />
-            <SummaryRow label="Current MCA positions" value={String(file.currentPositions.length)} />
-            <SummaryRow label="Combined MCA withhold" value={percent(file.withhold.pct)} />
-            <SummaryRow label="Avg monthly ending balance" value={money(file.avgMonthlyEndingBalance)} />
-            <SummaryRow label="Statements analyzed" value={`${file.statementCount} across ${file.accountCount} account${file.accountCount === 1 ? '' : 's'}`} />
-          </dl>
-
-          <div className="mt-4 pt-3 border-t border-border grid grid-cols-2 gap-x-6 gap-y-2 text-[12.5px]">
-            <div className="flex items-center gap-2">
-              {trendIcon(file.revenueTrend)}
-              <span className="text-muted-foreground">Revenue trend</span>
-              <span className="font-medium capitalize ml-auto">{file.revenueTrend}</span>
+      {/* ── Anything that should stop the deal ── */}
+      {file.riskFlags.length > 0 && (
+        <Section title="What to look at" subtitle="Click any line for the transactions behind it" dense>
+          <ul className="divide-y divide-border">
+            {file.riskFlags.slice(0, 5).map((f) => (
+              <li key={f.id}>
+                <button
+                  type="button"
+                  onClick={() => onDrill({ title: f.title, explanation: f.explanation, transactions: pick(file, f.txnKeys) })}
+                  className="w-full text-left px-4 py-2.5 hover:bg-muted/40 transition-colors flex items-center gap-3"
+                >
+                  <SeverityChip severity={f.severity} />
+                  <span className="text-[12.5px] font-medium min-w-0 flex-1 truncate">{f.title}</span>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                </button>
+              </li>
+            ))}
+          </ul>
+          {file.riskFlags.length > 5 && (
+            <div className="px-4 py-2 border-t border-border text-[11.5px] text-muted-foreground">
+              {file.riskFlags.length - 5} more on the Risk Flags tab
             </div>
-            <div className="flex items-center gap-2">
-              {trendIcon(file.balanceTrend)}
-              <span className="text-muted-foreground">Balance trend</span>
-              <span className="font-medium capitalize ml-auto">{file.balanceTrend}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Banknote className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">MCA burden</span>
-              <span className={`font-medium ml-auto ${TONE_TEXT[withholdTone]}`}>
-                {file.withhold.pct > 0.3 ? 'Heavy' : file.withhold.pct > 0.2 ? 'Moderate' : file.withhold.pct > 0 ? 'Light' : 'None'}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Info className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">Fundings received</span>
-              <span className="font-medium ml-auto">{file.fundingEvents.length}</span>
-            </div>
-          </div>
-        </Section>
-
-        <Section
-          title="Risk flags"
-          subtitle={file.riskFlags.length ? `${file.riskFlags.length} signal${file.riskFlags.length === 1 ? '' : 's'} — every one is explained` : undefined}
-          dense
-        >
-          {file.riskFlags.length === 0 ? (
-            <div className="px-4 py-8 text-center text-[13px] text-muted-foreground">
-              No risk signals triggered on these statements.
-            </div>
-          ) : (
-            <ul className="divide-y divide-border">
-              {file.riskFlags.slice(0, 6).map((f) => (
-                <li key={f.id}>
-                  <button
-                    type="button"
-                    onClick={() => onDrill({
-                      title: f.title,
-                      explanation: f.explanation,
-                      transactions: pick(file, f.txnKeys),
-                    })}
-                    className="w-full text-left px-4 py-2.5 hover:bg-muted/40 transition-colors flex items-start gap-2.5"
-                  >
-                    <span className="mt-0.5 shrink-0"><SeverityChip severity={f.severity} /></span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-[12.5px] font-medium">{f.title}</span>
-                      <span className="block text-[11.5px] text-muted-foreground mt-0.5 line-clamp-2 leading-snug">{f.explanation}</span>
-                    </span>
-                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                  </button>
-                </li>
-              ))}
-            </ul>
           )}
         </Section>
-      </div>
+      )}
     </div>
   );
 }

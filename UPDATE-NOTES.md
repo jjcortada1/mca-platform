@@ -1,3 +1,53 @@
+# Update — August 2026 (round 39) — Email actually sends through Gmail + a simpler underwriting snapshot
+
+## Email: now connected to your deals for real
+Last round I built the Gmail connection but never routed your sending
+through it — so from your side nothing changed. That's fixed.
+
+Once you connect Gmail in **My account → Connected email**, it is used for:
+- **Shop & Submit** — funder submissions
+- **Funded Email**
+- The signature test email
+
+Your submissions now go out **through your own mailbox**: they land in your
+real Gmail **Sent** folder, and they thread when the funder replies — which
+is the thing that makes reply capture possible in the next stage.
+
+Details that matter:
+- **The email itself is identical either way.** Subject threading, your
+  signature (logo renders inline, not as an attachment), attachments, CC
+  rules — all assembled by the same code before the transport is chosen. A
+  funder can't tell the difference.
+- **SMTP is still there.** No connected mailbox = sends exactly as before.
+  Connected but needs re-auth = falls back to SMTP rather than failing.
+- **Gmail alone is enough.** You no longer need SMTP configured at all —
+  previously those screens blocked you before even checking for a mailbox.
+
+## Underwriting: simpler, MCA-first
+You were right that it was too much. The snapshot now answers the first
+question a broker actually asks — **who are they already paying, and how
+much** — before anything else.
+
+**The whole top of the page is current MCA positions**: the count in large
+type, total monthly and weekly payments, and withhold % as a percentage of
+revenue. Then a table of every active position — funder, payment,
+frequency, weekly, monthly, its own share of revenue, first→last seen, and
+confidence. A position running the entire statement period is flagged
+**All N months**. Click any row for its payments and estimated structure.
+
+Below that, only **four numbers**: true revenue, average daily balance,
+negative days, NSFs. (It was fourteen cards and a summary grid.)
+
+Then a short **What to look at** list — the top five risk signals, each
+one click from the transactions that caused it.
+
+Everything else is unchanged and still there when you want to dive in —
+Cash Flow, Revenue Review, MCA Positions, Risk Flags, Transactions,
+Statements are all still tabs. The depth moved behind them instead of
+being stacked on the first screen.
+
+---
+
 # Update — August 2026 (round 38) — NY court search
 
 New **Court Search** tab. Type a business name, or an owner's first and

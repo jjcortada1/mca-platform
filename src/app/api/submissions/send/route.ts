@@ -7,6 +7,7 @@ import {
 import { and, eq, inArray } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
 import { sendDealEmailBatch, type EmailAttachment, type SmtpConfig } from '@/lib/email/smtp';
+import { resolveMailbox } from '@/lib/email/mailbox';
 import { apiError } from '@/lib/api/errors';
 import { rateLimit } from '@/lib/api/rate-limit';
 import { triggerSync } from '@/lib/sheets/sync';
@@ -220,7 +221,25 @@ export async function POST(req: NextRequest) {
       const [me] = await db.select().from(users).where(eq(users.id, ctx.user.id)).limit(1);
       smtp = (me?.smtpConfig as SmtpConfig | null) ?? null;
     }
-    if (!smtp) {
+
+    /* A connected Gmail mailbox takes precedence over SMTP.
+       Sending through the rep's own mailbox means the submission lands in
+       their real Sent folder and threads when the funder replies — which is
+       what makes reply capture possible at all. Message assembly is
+       identical either way, so the funder receives the same email.
+       If the mailbox needs re-auth we fall through to SMTP rather than
+       failing the send. */
+    const mailbox = await resolveMailbox(ctx.user.id);
+    const gmail = mailbox
+      ? {
+          accessToken: mailbox.accessToken,
+          from: mailbox.displayName
+            ? `${mailbox.displayName} <${mailbox.emailAddress}>`
+            : mailbox.emailAddress,
+        }
+      : null;
+
+    if (!smtp && !gmail) {
       // Distinct messages by mode so the rep knows exactly where to go.
       // Per-rep mode means the rep configures their OWN SMTP on /account.
       // Shared mode means an admin needs to set the company SMTP in /settings.
@@ -228,8 +247,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error: isPerRep
-            ? 'Your email account isn\'t connected yet. Go to "My account" → "My email SMTP" and set it up before shopping deals.'
-            : 'Email is not configured for the company yet. Ask an admin to set up SMTP in Settings.',
+            ? 'Your email isn\'t connected yet. Go to "My account" → connect Gmail, or set up your SMTP, before shopping deals.'
+            : 'Email is not configured for the company yet. Ask an admin to connect Gmail or set up SMTP in Settings.',
         },
         { status: 400 }
       );
@@ -394,7 +413,7 @@ export async function POST(req: NextRequest) {
           const sendResults = toSend.length
             ? await sendDealEmailBatch(
                 {
-                  smtp: smtp!,
+                  smtp,
                   ccEmails: allCc,
                   dealName: capturedDeal.name,
                   bodyNotes,
@@ -416,7 +435,8 @@ export async function POST(req: NextRequest) {
                   funderName: fNameByRef.get(r.ref) ?? r.toEmail,
                   success: r.success,
                   error: r.error,
-                })
+                }),
+                gmail,
               )
             : [];
           const byRef = new Map(sendResults.map((r) => [r.ref, r]));

@@ -4,6 +4,7 @@ import { users, companies } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { requirePermission } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
+import { resolveMailbox } from '@/lib/email/mailbox';
 import { rateLimit } from '@/lib/api/rate-limit';
 import {
   sendGenericEmail, type EmailAttachment, type SmtpConfig, type StructuredField,
@@ -118,9 +119,17 @@ export async function POST(req: NextRequest) {
       const [me] = await db.select().from(users).where(eq(users.id, ctx.user.id)).limit(1);
       smtp = (me?.smtpConfig as SmtpConfig | null) ?? null;
     }
-    if (!smtp) {
+    /* A connected Gmail mailbox is a valid transport on its own, so it is
+       resolved BEFORE the SMTP guard — otherwise a rep who connected Gmail
+       and never configured SMTP would be told to set up SMTP. */
+    const mailbox = await resolveMailbox(ctx.user.id);
+    const gmail = mailbox
+      ? { accessToken: mailbox.accessToken, from: mailbox.displayName ? `${mailbox.displayName} <${mailbox.emailAddress}>` : mailbox.emailAddress }
+      : null;
+
+    if (!smtp && !gmail) {
       return NextResponse.json(
-        { error: 'No SMTP configured. Configure it in Settings or My Account.' },
+        { error: 'No email connected. Connect Gmail in My Account, or configure SMTP in Settings.' },
         { status: 400 }
       );
     }
@@ -149,6 +158,7 @@ export async function POST(req: NextRequest) {
     // company-wide globalCcEmails is also NOT applied for the same reason —
     // funded emails are personal communications, not deal-shopping fan-out.
     const result = await sendGenericEmail({
+      gmail,
       smtp,
       toEmail,
       ccEmails,

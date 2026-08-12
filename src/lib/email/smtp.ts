@@ -482,22 +482,35 @@ export interface BatchSendResult {
   error?: string;
 }
 
+/** Send through the user's connected Gmail instead of SMTP. */
+export interface GmailTransport {
+  accessToken: string;
+  /** "Name <me@company.com>" — must be the authorized mailbox. */
+  from: string;
+}
+
 export async function sendDealEmailBatch(
-  base: Omit<SendDealEmailInput, 'toEmail'>,
+  base: Omit<SendDealEmailInput, 'toEmail'> & { smtp: SmtpConfig | null },
   recipients: BatchRecipient[],
   /**
    * Fired after each recipient finishes (success or failure) with the running
    * count — powers the live 0→100% progress bar on the send screen.
    */
-  onProgress?: (result: BatchSendResult, done: number, total: number) => void
+  onProgress?: (result: BatchSendResult, done: number, total: number) => void,
+  /**
+   * When supplied, every message goes out through the Gmail API instead of
+   * SMTP. Message assembly below is IDENTICAL either way — same subject
+   * threading, same signature, same attachments — so switching transport
+   * can't change what the funder receives.
+   */
+  gmail?: GmailTransport | null,
 ): Promise<BatchSendResult[]> {
-  // One pooled transport for the whole batch.
-  const password = decrypt(base.smtp.encryptedPass);
-  const transporter = nodemailer.createTransport({
-    host: base.smtp.host,
-    port: base.smtp.port,
-    secure: base.smtp.secure ?? base.smtp.port === 465,
-    auth: { user: base.smtp.user, pass: password },
+  // One pooled transport for the whole batch (SMTP path only).
+  const transporter = gmail || !base.smtp ? null : nodemailer.createTransport({
+    host: base.smtp!.host,
+    port: base.smtp!.port,
+    secure: base.smtp!.secure ?? base.smtp!.port === 465,
+    auth: { user: base.smtp!.user, pass: decrypt(base.smtp!.encryptedPass) },
     pool: true,
     // 3 parallel connections: ~3× faster on multi-funder sends while staying
     // well under Gmail/Workspace connection limits. Messages on each
@@ -622,8 +635,27 @@ export async function sendDealEmailBatch(
     // Fire all valid sends; the pool throttles to maxConnections at a time.
     await Promise.all(jobs.map(async (j) => {
       try {
-        const info = await transporter.sendMail({
-          from: base.smtp.from,
+        if (gmail) {
+          const res = await sendViaGmail({
+            accessToken: gmail.accessToken,
+            from: gmail.from,
+            to: j.addresses,
+            cc: j.ccEmails.length ? j.ccEmails : undefined,
+            subject: j.subjectForSend,
+            text: j.text,
+            html: j.html,
+            attachments: base.attachments.map((a) => ({
+              filename: a.filename, content: a.content, contentType: a.contentType,
+            })),
+            inline: j.inlineAttachments,
+          });
+          report(res.ok
+            ? { ref: j.r.ref, toEmails: j.addresses, toEmail: j.addresses[0], success: true, messageId: res.messageId, response: 'Sent via Gmail' }
+            : { ref: j.r.ref, toEmails: j.addresses, toEmail: j.addresses[0], success: false, error: res.error });
+          return;
+        }
+        const info = await transporter!.sendMail({
+          from: base.smtp!.from,
           // All of this funder's addresses ride on one message. nodemailer
           // accepts an array of strings here and writes them comma-joined
           // into the To: header.
@@ -657,7 +689,7 @@ export async function sendDealEmailBatch(
       }
     }));
   } finally {
-    transporter.close();
+    transporter?.close();
   }
   return out;
 }
@@ -689,7 +721,10 @@ export async function verifySmtp(smtp: SmtpConfig): Promise<{ ok: boolean; error
  * filename sanitization. These are non-negotiable for any send path.
  */
 export interface SendGenericEmailInput {
-  smtp: SmtpConfig;
+  /** Null when sending through a connected Gmail mailbox instead. */
+  smtp: SmtpConfig | null;
+  /** When set, the message goes out through the user's Gmail. */
+  gmail?: GmailTransport | null;
   toEmail: string;
   ccEmails: string[];
   subject: string;
@@ -752,6 +787,28 @@ export async function sendGenericEmail(input: SendGenericEmailInput): Promise<Se
     }
     html = buildHtmlBody(input.bodyNotes, input.structuredFields, sig, logoCid);
   }
+
+  /* A connected mailbox wins over SMTP. The body above is already built,
+     so both paths send byte-identical content. */
+  if (input.gmail) {
+    const res = await sendViaGmail({
+      accessToken: input.gmail.accessToken,
+      from: input.gmail.from,
+      to: [toEmail],
+      cc: ccEmails.length ? ccEmails : undefined,
+      subject,
+      text,
+      html,
+      attachments: input.attachments.map((a) => ({
+        filename: a.filename, content: a.content, contentType: a.contentType,
+      })),
+      inline: inlineAttachments,
+    });
+    return res.ok
+      ? { success: true, messageId: res.messageId, response: 'Sent via Gmail' }
+      : { success: false, error: res.error };
+  }
+  if (!input.smtp) return { success: false, error: 'No email transport configured.' };
 
   const transporter = makeTransport(input.smtp);
   try {

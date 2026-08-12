@@ -4,6 +4,7 @@ import { users, companies } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { requireTenantContext } from '@/lib/auth/context';
 import { apiError } from '@/lib/api/errors';
+import { resolveMailbox } from '@/lib/email/mailbox';
 import { sendGenericEmail, type SmtpConfig } from '@/lib/email/smtp';
 import { rateLimit } from '@/lib/api/rate-limit';
 
@@ -37,9 +38,17 @@ export async function POST() {
     } else {
       smtp = (me.smtpConfig as SmtpConfig | null) ?? null;
     }
-    if (!smtp) {
+    /* A connected Gmail mailbox is a valid transport on its own, so it is
+       resolved BEFORE the SMTP guard — otherwise a rep who connected Gmail
+       and never configured SMTP would be told to set up SMTP. */
+    const mailbox = await resolveMailbox(ctx.user.id);
+    const gmail = mailbox
+      ? { accessToken: mailbox.accessToken, from: mailbox.displayName ? `${mailbox.displayName} <${mailbox.emailAddress}>` : mailbox.emailAddress }
+      : null;
+
+    if (!smtp && !gmail) {
       return NextResponse.json(
-        { error: 'No email account is connected yet — set up SMTP first (My Account → My email SMTP), then send the test.' },
+        { error: 'No email account is connected yet — connect Gmail or set up SMTP in My Account, then send the test.' },
         { status: 400 }
       );
     }
@@ -59,6 +68,7 @@ export async function POST() {
     }
 
     const result = await sendGenericEmail({
+      gmail,
       smtp,
       toEmail: me.email,
       ccEmails: [],
