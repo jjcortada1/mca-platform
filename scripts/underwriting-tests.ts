@@ -11,6 +11,7 @@
 import { parseStatementText, gridToTransactions, detectColumns, mergeTransactions, inferStatementYear } from '@/lib/underwriting/parse';
 import { groupTextItemsIntoLines } from '@/lib/underwriting/pdf';
 import { buildUnderwritingFile, toDealCriteria } from '@/lib/underwriting/workstation';
+import type { ManualMca } from '@/lib/underwriting/workstation';
 import { analyzeStatements, reportToText } from '@/lib/underwriting/engine';
 
 function iso(d: Date) { return d.toISOString().slice(0, 10); }
@@ -534,7 +535,7 @@ const aStripe = file.transactions.find((t) => t.cls === 'revenue' && t.amount > 
 const after = buildUnderwritingFile([
   { id: 'st-op', fileName: 'chase-operating.pdf', transactions: mkTxns(opRows), accountId: 'chase-1234' },
   { id: 'st-sav', fileName: 'chase-savings.pdf', transactions: mkTxns(savRows), accountId: 'chase-8891' },
-], { overrides: [{ key: aStripe.key, cls: 'non_revenue' }] });
+], { overrides: [{ key: aStripe.key, cls: 'internal_transfer' }] });
 const delta = file.trueRevenueTotal - after.trueRevenueTotal;
 if (Math.abs(delta - aStripe.amount) > 0.5) {
   throw new Error(`FAIL(uw): excluding one ${aStripe.amount} deposit changed true revenue by ${delta}`);
@@ -561,6 +562,110 @@ if (criteria.positions !== file.currentPositions.length) throw new Error('FAIL(u
 if (criteria.monthlyRevenue <= 0) throw new Error('FAIL(uw): criteria revenue missing');
 console.log(`  criteria handoff: ${JSON.stringify(criteria)}`);
 console.log('✅ SCENARIO 6 (underwriting workstation) PASSED');
+
+
+/* ═══════ Scenario 7: review states, manual MCA, transfer accounts ═══════ */
+
+// The system proposes; the underwriter decides. Nothing detected is fact.
+const rapidPos = file.positions.find((p) => p.funderName === 'Rapid Finance')!;
+if (rapidPos.review !== 'suspected') throw new Error(`FAIL(review): a detected position should start suspected, got ${rapidPos.review}`);
+
+// Rejecting an MCA must genuinely undo it — not just hide the row.
+const rejected = buildUnderwritingFile([
+  { id: 'st-op', fileName: 'chase-operating.pdf', transactions: mkTxns(opRows), accountId: 'chase-1234' },
+  { id: 'st-sav', fileName: 'chase-savings.pdf', transactions: mkTxns(savRows), accountId: 'chase-8891' },
+], { positionDecisions: { [rapidPos.id]: 'rejected' } });
+
+if (rejected.currentPositions.some((p) => p.funderName === 'Rapid Finance')) throw new Error('FAIL(review): a rejected MCA is still counted as current');
+if (rejected.historicalPositions.some((p) => p.funderName === 'Rapid Finance')) throw new Error('FAIL(review): a rejected MCA leaked into history');
+if (!rejected.rejectedPositions.some((p) => p.funderName === 'Rapid Finance')) throw new Error('FAIL(review): the rejection was not recorded');
+const stillMca = rejected.transactions.filter((t) => t.cls === 'mca_payment' && /rapid/i.test(t.description));
+if (stillMca.length) throw new Error(`FAIL(review): ${stillMca.length} transactions are still classified as MCA payments after rejection`);
+if (rejected.withhold.pct >= file.withhold.pct) throw new Error('FAIL(review): withhold % did not drop after rejecting a position');
+console.log(`\nreview → withhold ${(file.withhold.pct * 100).toFixed(1)}% → ${(rejected.withhold.pct * 100).toFixed(1)}% after rejecting Rapid Finance`);
+
+// Confirming keeps it in the burden.
+const confirmed = buildUnderwritingFile([
+  { id: 'st-op', fileName: 'x', transactions: mkTxns(opRows), accountId: 'chase-1234' },
+], { positionDecisions: { [rapidPos.id]: 'confirmed' } });
+if (!confirmed.currentPositions.some((p) => p.review === 'confirmed')) throw new Error('FAIL(review): confirmation did not stick');
+
+// A hand-created MCA becomes a real position and moves the numbers.
+const manual: ManualMca = {
+  id: 'manual-1',
+  funderName: 'Handwritten Capital',
+  fundingAmount: 40_000,
+  fundingDate: '2026-03-10',
+  paymentAmount: 640.22,
+  cadence: 'monthly',
+  txnKeys: [],
+  merchantKey: 'XYZ GROUP',   // the grouping key the UI reads off a selected row
+};
+const withManual = buildUnderwritingFile([
+  { id: 'st-op', fileName: 'x', transactions: mkTxns(opRows), accountId: 'chase-1234' },
+], { manualMcas: [manual] });
+const manualPos = withManual.currentPositions.find((p) => p.funderName === 'Handwritten Capital');
+if (!manualPos) throw new Error('FAIL(manual): the manually marked MCA did not become a position');
+if (manualPos.origin !== 'manual' || manualPos.review !== 'confirmed') throw new Error('FAIL(manual): wrong origin/review on a manual MCA');
+if (!manualPos.fundingDetected) throw new Error('FAIL(manual): supplied funding amount/date not recorded');
+if (!manualPos.txnKeys.length) throw new Error('FAIL(manual): merchant matching claimed no transactions');
+if (!withManual.transactions.some((t) => t.cls === 'mca_payment' && /settlement/i.test(t.description))) {
+  throw new Error('FAIL(manual): matching transactions were not reclassified as MCA payments');
+}
+// Marking them as an MCA must remove them from the collection section.
+if (withManual.collections.some((c) => /xyz/i.test(c.payee))) {
+  throw new Error('FAIL(manual): those transactions are still counted as debt collection');
+}
+console.log(`manual MCA → ${manualPos.funderName}: ${manualPos.txnKeys.length} txns, funding ${manualPos.fundingAmount}`);
+
+/* Funding detection is reported per position — and must be reported BOTH
+   ways. Scenario 5's file has a real Fora Financial funding deposit; this
+   file's Rapid Finance position has none, and saying so is the point. */
+/* rep5 is an ENGINE report; the funding/review fields live on the
+   workstation file, so build one from the same statements. */
+const uw5 = buildUnderwritingFile([{
+  id: 's5', fileName: 'scenario5.csv',
+  transactions: gridToTransactions(grid5, detectColumns(grid5)!, {}).transactions,
+}]);
+const foraPos5 = uw5.positions.find((p) => p.funderName === 'Fora Financial')!;
+if (!foraPos5.fundingDetected) throw new Error('FAIL(funding): the Fora funding deposit was not linked to its position');
+if (!foraPos5.fundingAmount || Math.abs(foraPos5.fundingAmount - 50_000) > 0.01) {
+  throw new Error(`FAIL(funding): wrong funding amount on the position (${foraPos5.fundingAmount})`);
+}
+if (!foraPos5.fundingDate) throw new Error('FAIL(funding): no funding date on the position');
+if (uw5.mcaFundingDetected < 50_000) throw new Error('FAIL(funding): total MCA funding detected is short');
+if (rapidPos.fundingDetected) throw new Error('FAIL(funding): a position with no deposit must report funding NOT detected');
+console.log(`funding → Fora: detected ${foraPos5.fundingAmount} on ${foraPos5.fundingDate}; Rapid: not detected`);
+
+// Transfer accounts: the two uploaded accounts must pair up.
+console.log(`transfer accounts → ${JSON.stringify(file.transferAccounts.map((a) => [a.label, a.count, Math.round(a.transferredIn), Math.round(a.transferredOut)]))}`);
+if (!file.transferAccounts.length) throw new Error('FAIL(transfers): no transfer accounts detected');
+const uploadedPair = file.transferAccounts.find((a) => a.isUploadedAccount);
+if (!uploadedPair) throw new Error('FAIL(transfers): the cross-account transfer was not grouped as an uploaded account');
+if (uploadedPair.confidence !== 'high') throw new Error('FAIL(transfers): a both-sides-visible transfer should be high confidence');
+if (file.internalTransfersIn <= 0 && file.internalTransfersOut <= 0) throw new Error('FAIL(transfers): in/out totals are empty');
+
+if (!file.matchedTransfers.length) throw new Error('FAIL(transfers): no matched transfer pair reported');
+const pair = file.matchedTransfers[0];
+if (Math.abs(pair.amount - 25_000) > 0.01) throw new Error(`FAIL(transfers): matched pair amount ${pair.amount}`);
+if (pair.fromAccountLabel === pair.toAccountLabel) throw new Error('FAIL(transfers): a pair must span two different accounts');
+console.log(`matched transfer → ${pair.amount} ${pair.fromAccountLabel} → ${pair.toAccountLabel} (${pair.confidence})`);
+
+// Rejecting a transfer account removes it from the totals.
+const noTransfer = buildUnderwritingFile([
+  { id: 'st-op', fileName: 'x', transactions: mkTxns(opRows), accountId: 'chase-1234' },
+  { id: 'st-sav', fileName: 'y', transactions: mkTxns(savRows), accountId: 'chase-8891' },
+], { transferDecisions: { [uploadedPair.id]: 'rejected' } });
+if (noTransfer.transferAccounts.some((a) => a.id === uploadedPair.id)) {
+  throw new Error('FAIL(transfers): a rejected transfer account is still listed');
+}
+
+// Every manual class must be assignable.
+const reclassified = buildUnderwritingFile([
+  { id: 'st-op', fileName: 'x', transactions: mkTxns(opRows), accountId: 'chase-1234' },
+], { overrides: [{ key: file.transactions[0].key, cls: 'loan_funding' }] });
+if (!reclassified.transactions.some((t) => t.cls === 'loan_funding')) throw new Error('FAIL(class): loan_funding override did not apply');
+console.log('✅ SCENARIO 7 (review states, manual MCA, transfer accounts) PASSED');
 
 runPdfScenarios()
   .then(() => console.log('\n✅ ALL UNDERWRITING TESTS PASSED'))

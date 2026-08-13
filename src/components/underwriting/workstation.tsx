@@ -13,12 +13,14 @@ import {
 import type { Transaction, DetectResult, ColumnMap } from '@/lib/underwriting/parse';
 import { extractPdfText } from '@/lib/underwriting/pdf';
 import { buildUnderwritingFile } from '@/lib/underwriting/workstation';
-import type { StatementInput, TxnOverride, TxnClass, UnderwritingFile } from '@/lib/underwriting/workstation';
+import type {
+  StatementInput, TxnOverride, TxnClass, UnderwritingFile, ReviewStatus, ManualMca,
+} from '@/lib/underwriting/workstation';
 import { reportToText } from '@/lib/underwriting/engine';
 import { analyzeStatements } from '@/lib/underwriting/engine';
 import {
   OverviewPanel, CashFlowPanel, RevenueReviewPanel, PositionsPanel, RiskPanel,
-  TransactionsPanel, StatementsPanel,
+  TransactionsPanel, StatementsPanel, TransfersPanel,
 } from './panels';
 import { DrillDownPanel, money, longDate } from './shared';
 import type { DrillDown } from './shared';
@@ -42,13 +44,14 @@ import type { DrillDown } from './shared';
  * render. There is no partial-recalculation path to get out of sync.
  */
 
-type Tab = 'overview' | 'cashflow' | 'revenue' | 'positions' | 'risk' | 'transactions' | 'statements';
+type Tab = 'overview' | 'positions' | 'transfers' | 'cashflow' | 'revenue' | 'risk' | 'transactions' | 'statements';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
+  { key: 'positions', label: 'MCA Positions' },
+  { key: 'transfers', label: 'Transfer Accounts' },
   { key: 'cashflow', label: 'Cash Flow' },
   { key: 'revenue', label: 'Revenue Review' },
-  { key: 'positions', label: 'MCA Positions' },
   { key: 'risk', label: 'Risk Flags' },
   { key: 'transactions', label: 'Transactions' },
   { key: 'statements', label: 'Statements' },
@@ -97,7 +100,14 @@ export function UnderwritingWorkstation() {
 
   const [statements, setStatements] = useState<LoadedStatement[]>([]);
   const [overrides, setOverrides] = useState<TxnOverride[]>([]);
-  const [positionDecisions, setPositionDecisions] = useState<Record<string, boolean>>({});
+  const [positionDecisions, setPositionDecisions] = useState<Record<string, ReviewStatus>>({});
+  const [transferDecisions, setTransferDecisions] = useState<Record<string, ReviewStatus>>({});
+  const [manualMcas, setManualMcas] = useState<ManualMca[]>([]);
+  const [mcaDraft, setMcaDraft] = useState<null | {
+    txnKeys: string[]; merchantKey: string | null; funderName: string;
+    fundingAmount: string; fundingDate: string; paymentAmount: string;
+    cadence: 'daily' | 'weekly' | 'bi-weekly' | 'monthly'; applyToAll: boolean;
+  }>(null);
   const [businessName, setBusinessName] = useState('');
   const [editingName, setEditingName] = useState(false);
   const [accountFilter, setAccountFilter] = useState<string>('all');
@@ -244,9 +254,11 @@ export function UnderwritingWorkstation() {
     businessName: businessName || undefined,
     accountFilter: accountFilter === 'all' ? null : accountFilter,
     positionDecisions,
+    transferDecisions,
+    manualMcas,
     warnings: Array.from(new Set(statements.flatMap((s) => s.warnings))),
     generatedAt: lastUpdated,
-  }), [inputs, overrides, businessName, accountFilter, positionDecisions, statements, lastUpdated]);
+  }), [inputs, overrides, businessName, accountFilter, positionDecisions, transferDecisions, manualMcas, statements, lastUpdated]);
 
   /* Classification changes flow through one setter, so the whole file is
      rebuilt from scratch every time — nothing can drift out of sync. */
@@ -263,19 +275,63 @@ export function UnderwritingWorkstation() {
     setLastUpdated(new Date().toLocaleString());
   }, []);
 
-  const onPositionDecision = useCallback((id: string, confirmed: boolean | null) => {
+  const onPositionDecision = useCallback((id: string, status: ReviewStatus | null) => {
     setPositionDecisions((prev) => {
       const next = { ...prev };
-      if (confirmed === null) delete next[id];
-      else next[id] = confirmed;
+      if (status === null) delete next[id]; else next[id] = status;
       return next;
     });
+    setLastUpdated(new Date().toLocaleString());
   }, []);
+
+  const onTransferDecision = useCallback((id: string, status: ReviewStatus | null) => {
+    setTransferDecisions((prev) => {
+      const next = { ...prev };
+      if (status === null) delete next[id]; else next[id] = status;
+      return next;
+    });
+    setLastUpdated(new Date().toLocaleString());
+  }, []);
+
+  /** Open the dialog pre-filled from the selected transactions. */
+  const onMarkMca = useCallback((txnKeys: string[], merchantKey: string | null, suggestedName: string) => {
+    if (!txnKeys.length) { toast.error('Select the transactions first.'); return; }
+    setMcaDraft({
+      txnKeys, merchantKey, funderName: suggestedName,
+      fundingAmount: '', fundingDate: '', paymentAmount: '',
+      cadence: 'weekly', applyToAll: Boolean(merchantKey),
+    });
+  }, [toast]);
+
+  function saveManualMca() {
+    if (!mcaDraft) return;
+    const name = mcaDraft.funderName.trim();
+    if (!name) { toast.error('Give the MCA company a name.'); return; }
+    const num = (v: string) => {
+      const n = Number(String(v).replace(/[^0-9.]/g, ''));
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
+    setManualMcas((prev) => [...prev, {
+      id: `manual-${newId()}`,
+      funderName: name,
+      fundingAmount: num(mcaDraft.fundingAmount),
+      fundingDate: mcaDraft.fundingDate || null,
+      paymentAmount: num(mcaDraft.paymentAmount),
+      cadence: mcaDraft.cadence,
+      txnKeys: mcaDraft.txnKeys,
+      merchantKey: mcaDraft.applyToAll ? mcaDraft.merchantKey : null,
+    }]);
+    setMcaDraft(null);
+    setLastUpdated(new Date().toLocaleString());
+    toast.success(`${name} added to current MCAs.`);
+  }
 
   function clearAll() {
     setStatements([]);
     setOverrides([]);
     setPositionDecisions({});
+    setTransferDecisions({});
+    setManualMcas([]);
     setBusinessName('');
     setAccountFilter('all');
     setTab('overview');
@@ -304,7 +360,10 @@ export function UnderwritingWorkstation() {
     URL.revokeObjectURL(url);
   }
 
-  const panelProps = { file, onDrill: setDrill, onOverride, onResetOverride, onPositionDecision };
+  const panelProps = {
+    file, onDrill: setDrill, onOverride, onResetOverride,
+    onPositionDecision, onTransferDecision, onMarkMca,
+  };
   const hasFiles = statements.length > 0;
 
   return (
@@ -377,8 +436,9 @@ export function UnderwritingWorkstation() {
               const count =
                 t.key === 'risk' ? file.riskFlags.length
                   : t.key === 'positions' ? file.currentPositions.length
-                    : t.key === 'transactions' ? file.transactions.length
-                      : null;
+                    : t.key === 'transfers' ? file.transferAccounts.length
+                      : t.key === 'transactions' ? file.transactions.length
+                        : null;
               return (
                 <button
                   key={t.key}
@@ -495,10 +555,110 @@ export function UnderwritingWorkstation() {
           {tab === 'cashflow' && <CashFlowPanel {...panelProps} />}
           {tab === 'revenue' && <RevenueReviewPanel {...panelProps} />}
           {tab === 'positions' && <PositionsPanel {...panelProps} />}
+          {tab === 'transfers' && <TransfersPanel {...panelProps} />}
           {tab === 'risk' && <RiskPanel {...panelProps} />}
           {tab === 'transactions' && <TransactionsPanel {...panelProps} />}
           {tab === 'statements' && <StatementsPanel {...panelProps} />}
         </>
+      )}
+
+      {/* ── Mark as MCA ──
+          Everything is optional except the name: the underwriter often
+          knows the funder but not the original funding, and forcing a
+          guessed amount would put a fabricated number into the file. */}
+      {mcaDraft && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setMcaDraft(null)} aria-hidden />
+          <div className="relative w-full max-w-lg bg-card border border-border rounded-lg shadow-xl">
+            <header className="flex items-start justify-between gap-3 px-5 py-3.5 border-b border-border">
+              <div>
+                <h3 className="text-[15px] font-semibold tracking-tight">Mark as MCA</h3>
+                <p className="text-[11.5px] text-muted-foreground mt-0.5">
+                  {mcaDraft.txnKeys.length} transaction{mcaDraft.txnKeys.length === 1 ? '' : 's'} selected
+                </p>
+              </div>
+              <button type="button" onClick={() => setMcaDraft(null)} className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted">
+                <X className="h-4 w-4" />
+              </button>
+            </header>
+
+            <div className="p-5 space-y-3">
+              <label className="block">
+                <span className="block text-[11.5px] text-muted-foreground mb-1">MCA company</span>
+                <Input
+                  autoFocus
+                  value={mcaDraft.funderName}
+                  onChange={(e) => setMcaDraft({ ...mcaDraft, funderName: e.target.value })}
+                  placeholder="e.g. Reliance Capital"
+                />
+              </label>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="block text-[11.5px] text-muted-foreground mb-1">Funding amount (optional)</span>
+                  <Input
+                    value={mcaDraft.fundingAmount}
+                    onChange={(e) => setMcaDraft({ ...mcaDraft, fundingAmount: e.target.value })}
+                    placeholder="75,000"
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-[11.5px] text-muted-foreground mb-1">Funding date (optional)</span>
+                  <Input
+                    type="date"
+                    value={mcaDraft.fundingDate}
+                    onChange={(e) => setMcaDraft({ ...mcaDraft, fundingDate: e.target.value })}
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-[11.5px] text-muted-foreground mb-1">Payment amount</span>
+                  <Input
+                    value={mcaDraft.paymentAmount}
+                    onChange={(e) => setMcaDraft({ ...mcaDraft, paymentAmount: e.target.value })}
+                    placeholder="Leave blank to use the selected transactions"
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-[11.5px] text-muted-foreground mb-1">Payment frequency</span>
+                  <Select
+                    value={mcaDraft.cadence}
+                    onChange={(e) => setMcaDraft({ ...mcaDraft, cadence: e.target.value as typeof mcaDraft.cadence })}
+                  >
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="bi-weekly">Bi-weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </Select>
+                </label>
+              </div>
+
+              {mcaDraft.merchantKey && (
+                <label className="flex items-start gap-2 text-[12.5px]">
+                  <input
+                    type="checkbox"
+                    checked={mcaDraft.applyToAll}
+                    onChange={(e) => setMcaDraft({ ...mcaDraft, applyToAll: e.target.checked })}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    Apply to <span className="font-medium">every transaction from this payee</span>, including ones
+                    added later — not just the {mcaDraft.txnKeys.length} selected.
+                  </span>
+                </label>
+              )}
+
+              <p className="text-[11.5px] text-muted-foreground leading-relaxed">
+                Leave funding blank if you don&apos;t know it — the position will simply read
+                &ldquo;funding deposit not detected&rdquo; rather than showing a made-up figure.
+              </p>
+            </div>
+
+            <footer className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border">
+              <Button variant="outline" onClick={() => setMcaDraft(null)}>Cancel</Button>
+              <Button onClick={saveManualMca}>Add to current MCAs</Button>
+            </footer>
+          </div>
+        </div>
       )}
 
       <DrillDownPanel drill={drill} onClose={() => setDrill(null)} />

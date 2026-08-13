@@ -1,3 +1,78 @@
+# Update — August 2026 (round 40) — MCA funding detection, verification, and Transfer Accounts
+
+Everything below is added into the existing underwriting dashboard — no
+separate tool, same tabs, same logic underneath.
+
+## MCA funding deposits
+The system now looks for the **money coming in**, not just the payments
+going out, and ties a funding deposit to the MCA that follows it.
+
+Every position states one or the other, plainly:
+- **Funding Deposit Detected: $50,000 on 04/13/2026**
+- **Funding Deposit Not Detected**
+
+The second is not a failure — most advances start before the statements you
+upload. Saying so is better than inventing a number.
+
+Each position shows company, funding amount and date, ongoing payment,
+frequency, first and most recent payment, estimated balance where the
+information supports it, and confidence.
+
+## Verify every MCA
+Nothing detected is treated as fact. Each position starts **Suspected**,
+with **Confirm MCA** and **Not an MCA** next to it.
+
+- **Confirm** keeps it in Current MCAs and in every calculation including
+  withhold %.
+- **Not an MCA** genuinely removes it — its transactions go back to normal
+  classification, and the withhold recalculates immediately. (In testing,
+  rejecting one position took withhold from 29.6% to 0.0%.)
+- Both are reversible. There's an undo on every decision.
+
+## Mark something as an MCA yourself
+Detection will never be perfect. In the Transactions tab, select any rows
+and hit **Mark as MCA**, then fill in company, funding amount, funding
+date, payment amount, and frequency. Everything except the name is optional
+— leave funding blank and it reads "not detected" rather than showing a
+guess.
+
+**Select all matching** grabs every other transaction from the same payees
+in one click, and the dialog can apply the classification to that payee
+permanently, so you never work row by row.
+
+## Transfer Accounts — a new section
+Detects money moving between the merchant's **own** accounts, so internal
+transfers stop inflating revenue. Each counterparty account shows:
+
+```
+Chase ••••8891
+Transferred In: $84,500   Transferred Out: $71,200
+Net: $13,300              Transactions: 17
+```
+
+Click any account for every transaction with it. Each one can be
+**Confirmed** or marked **Not internal**. Confirming keeps it out of **true
+revenue** while leaving it in **gross revenue** and the full ledger — the
+money did arrive, it just wasn't a sale.
+
+**Matched internal transfers** get their own list: when you upload two
+accounts and a debit in one matches a credit in the other, both sides are
+visible and it's shown as `$25,000 · Chase ••••1234 → Chase ••••8891 ·
+High confidence`. The incoming side is never counted as revenue.
+
+## Full manual classification
+Any transaction can be set to any of: Revenue, Internal Transfer, MCA
+Funding, MCA Payment, Loan Funding, Loan Payment, Expense, Refund,
+Returned Payment, Debt Collection, Other, or Ignored. Manual always beats
+the automatic call, and **Reset to system** restores it.
+
+## New dashboard cards
+Current MCAs · MCA Funding Detected · MCA Withhold % · Transfer Accounts ·
+Transfers In · Transfers Out — all recalculating the instant you confirm,
+reject, or reclassify anything.
+
+---
+
 # Update — August 2026 (round 39) — Email actually sends through Gmail + a simpler underwriting snapshot
 
 ## Email: now connected to your deals for real

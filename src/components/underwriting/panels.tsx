@@ -4,12 +4,13 @@ import { useMemo, useState } from 'react';
 import { Button, Input, Select, Badge } from '@/components/ui/primitives';
 import {
   Search, RotateCcw, CheckCircle2, XCircle, AlertTriangle, Info, FileText,
-  ChevronRight, TrendingUp, TrendingDown, Minus, Banknote,
+  ChevronRight, TrendingUp, TrendingDown, Minus, Banknote, ArrowLeftRight, Plus,
 } from 'lucide-react';
 import type {
   UnderwritingFile, UwTransaction, TxnClass, MonthRow, UwPosition,
 } from '@/lib/underwriting/workstation';
-import { TXN_CLASS_LABEL, POSITION_STATUS_LABEL } from '@/lib/underwriting/workstation';
+import { TXN_CLASS_LABEL, POSITION_STATUS_LABEL, REVIEW_LABEL, MANUAL_CLASSES } from '@/lib/underwriting/workstation';
+import type { ReviewStatus, TransferAccount } from '@/lib/underwriting/workstation';
 import { CADENCE_LABEL } from '@/lib/underwriting/engine';
 import {
   Metric, Section, ConfidenceChip, SeverityChip, ClassChip, DataTable, Th, Td,
@@ -22,7 +23,12 @@ export interface PanelProps {
   onDrill: (d: DrillDown) => void;
   onOverride: (keys: string[], cls: TxnClass) => void;
   onResetOverride: (keys: string[]) => void;
-  onPositionDecision: (id: string, confirmed: boolean | null) => void;
+  /** Confirm / reject a detected MCA, or clear the decision. */
+  onPositionDecision: (id: string, status: ReviewStatus | null) => void;
+  /** Confirm / reject a suspected transfer account. */
+  onTransferDecision: (id: string, status: ReviewStatus | null) => void;
+  /** Open the "mark as MCA" dialog for these transactions. */
+  onMarkMca: (txnKeys: string[], merchantKey: string | null, suggestedName: string) => void;
 }
 
 const byKey = (file: UnderwritingFile) => new Map(file.transactions.map((t) => [t.key, t]));
@@ -106,8 +112,8 @@ export function OverviewPanel({ file, onDrill, onOverride, onResetOverride, onPo
                 <Th align="right">Weekly</Th>
                 <Th align="right">Monthly</Th>
                 <Th align="right">% of revenue</Th>
-                <Th>First → last seen</Th>
-                <Th align="right">Confidence</Th>
+                <Th>Funding deposit</Th>
+                <Th align="right">Review</Th>
               </>
             }
           >
@@ -144,8 +150,12 @@ export function OverviewPanel({ file, onDrill, onOverride, onResetOverride, onPo
                 <Td align="right" tabular>{money(p.weeklyEquivalent)}</Td>
                 <Td align="right" tabular className="font-medium">{money(p.monthlyEquivalent)}</Td>
                 <Td align="right" tabular className={p.withholdPct > 0.15 ? TONE_TEXT.warn : ''}>{percent(p.withholdPct)}</Td>
-                <Td className="text-muted-foreground whitespace-nowrap">{shortDate(p.firstDate)} → {shortDate(p.lastDate)}</Td>
-                <Td align="right"><ConfidenceChip level={p.confidenceLevel} /></Td>
+                <Td className="whitespace-nowrap text-[11.5px]">
+                  {p.fundingDetected
+                    ? <span className={TONE_TEXT.good}>Detected: {money(p.fundingAmount)} on {longDate(p.fundingDate ?? '')}</span>
+                    : <span className="text-muted-foreground">Funding deposit not detected</span>}
+                </Td>
+                <Td align="right"><ReviewControls p={p} onDecision={onPositionDecision} /></Td>
               </tr>
             ))}
           </DataTable>
@@ -167,6 +177,37 @@ export function OverviewPanel({ file, onDrill, onOverride, onResetOverride, onPo
           </div>
         )}
       </section>
+
+      {/* ── MCA + transfer headline numbers ── */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <Metric
+          label="Current MCAs"
+          value={String(file.currentPositions.length)}
+          note={`${file.positions.filter((p) => p.review === 'confirmed').length} confirmed`}
+          tone={file.currentPositions.length >= 3 ? 'bad' : file.currentPositions.length ? 'warn' : 'good'}
+        />
+        <Metric
+          label="MCA funding detected"
+          value={money(file.mcaFundingDetected)}
+          note={`${file.fundingEvents.length} deposit${file.fundingEvents.length === 1 ? '' : 's'}`}
+          onClick={() => onDrill({
+            title: 'MCA funding detected',
+            derivation: file.fundingEvents.map((f) => ({
+              label: `${f.funderName ?? 'Unnamed'} — ${longDate(f.date)}`, value: money(f.amount),
+            })),
+            explanation: 'Deposits that look like advance proceeds. Excluded from true revenue — borrowed money is not sales.',
+            transactions: pick(file, file.fundingEvents.map((f) => f.txnKey)),
+          })}
+        />
+        <Metric label="MCA withhold" value={percent(file.withhold.pct)} tone={withholdTone} />
+        <Metric
+          label="Transfer accounts"
+          value={String(file.transferAccounts.length)}
+          note={file.matchedTransfers.length ? `${file.matchedTransfers.length} matched pair${file.matchedTransfers.length === 1 ? '' : 's'}` : undefined}
+        />
+        <Metric label="Transfers in" value={money(file.internalTransfersIn)} />
+        <Metric label="Transfers out" value={money(file.internalTransfersOut)} />
+      </div>
 
       {/* ── The four numbers that decide the rest ── */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -252,6 +293,202 @@ export function OverviewPanel({ file, onDrill, onOverride, onResetOverride, onPo
           )}
         </Section>
       )}
+    </div>
+  );
+}
+
+/**
+ * Confirm / reject controls for a suspected MCA.
+ *
+ * Deliberately three-state. The system proposes, the underwriter decides,
+ * and the decision is always reversible — a rejected position can be
+ * restored, and "clear" puts it back to whatever the rules think.
+ */
+function ReviewControls({
+  p, onDecision,
+}: {
+  p: UwPosition;
+  onDecision: (id: string, status: ReviewStatus | null) => void;
+}) {
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+  if (p.review === 'confirmed') {
+    return (
+      <div className="flex items-center justify-end gap-1.5" onClick={stop}>
+        <Badge variant="success">Confirmed MCA</Badge>
+        <Button variant="outline" className="h-6 px-1.5 text-[11px]" onClick={() => onDecision(p.id, null)} title="Back to suspected">
+          <RotateCcw className="h-3 w-3" />
+        </Button>
+      </div>
+    );
+  }
+  if (p.review === 'rejected') {
+    return (
+      <div className="flex items-center justify-end gap-1.5" onClick={stop}>
+        <Badge variant="outline">Not an MCA</Badge>
+        <Button variant="outline" className="h-6 px-1.5 text-[11px]" onClick={() => onDecision(p.id, null)} title="Undo">
+          <RotateCcw className="h-3 w-3" />
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center justify-end gap-1.5" onClick={stop}>
+      <Button variant="outline" className="h-6 px-2 text-[11px]" onClick={() => onDecision(p.id, 'confirmed')}>
+        Confirm MCA
+      </Button>
+      <Button variant="outline" className="h-6 px-2 text-[11px]" onClick={() => onDecision(p.id, 'rejected')}>
+        Not an MCA
+      </Button>
+    </div>
+  );
+}
+
+/* ══════════════════════ TRANSFER ACCOUNTS ══════════════════════ */
+
+/**
+ * Money the merchant moves between their own accounts.
+ *
+ * This exists to stop internal transfers inflating revenue. Each detected
+ * counterparty account is confirmable, and confirming keeps it out of True
+ * Revenue while leaving it in Gross Revenue and the full ledger — the
+ * money did arrive, it just wasn't a sale.
+ */
+export function TransfersPanel({ file, onDrill, onOverride, onTransferDecision }: PanelProps) {
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Metric label="Transfer accounts" value={String(file.transferAccounts.length)} emphasis />
+        <Metric label="Transferred in" value={money(file.internalTransfersIn)} emphasis
+          note="Excluded from true revenue, kept in gross" />
+        <Metric label="Transferred out" value={money(file.internalTransfersOut)} emphasis />
+      </div>
+
+      {file.matchedTransfers.length > 0 && (
+        <Section
+          title="Matched internal transfers"
+          subtitle="Both sides visible — a debit in one uploaded statement against an equal credit in another"
+          dense
+        >
+          <DataTable
+            minWidth={760}
+            head={<><Th>Date</Th><Th align="right">Amount</Th><Th>From → to</Th><Th align="right">Gap</Th><Th align="right">Confidence</Th></>}
+          >
+            {file.matchedTransfers.map((m) => (
+              <tr
+                key={m.id}
+                className="border-b border-border/60 hover:bg-muted/30 cursor-pointer"
+                onClick={() => onDrill({
+                  title: `Matched transfer — ${money(m.amount)}`,
+                  derivation: [
+                    { label: 'Amount', value: money(m.amount) },
+                    { label: 'From', value: m.fromAccountLabel },
+                    { label: 'To', value: m.toAccountLabel },
+                    { label: 'Days apart', value: String(m.dayGap), muted: true },
+                  ],
+                  explanation: 'An equal, opposite entry in another statement you uploaded within three days. The incoming side is not counted as business revenue.',
+                  transactions: pick(file, [m.outKey, m.inKey]),
+                })}
+              >
+                <Td className="whitespace-nowrap">{longDate(m.date)}</Td>
+                <Td align="right" tabular className="font-medium">{money(m.amount)}</Td>
+                <Td className="whitespace-nowrap">
+                  <span className="inline-flex items-center gap-1.5">
+                    {m.fromAccountLabel} <ArrowLeftRight className="h-3 w-3 text-muted-foreground" /> {m.toAccountLabel}
+                  </span>
+                </Td>
+                <Td align="right" tabular className="text-muted-foreground">{m.dayGap}d</Td>
+                <Td align="right"><ConfidenceChip level={m.confidence} /></Td>
+              </tr>
+            ))}
+          </DataTable>
+        </Section>
+      )}
+
+      <Section
+        title="Transfer accounts"
+        subtitle="Grouped by the account on the other side. Click a row for every transaction with it."
+        dense
+      >
+        {file.transferAccounts.length === 0 ? (
+          <div className="px-4 py-10 text-center text-[13px] text-muted-foreground">
+            No internal transfers detected in these statements.
+          </div>
+        ) : (
+          <DataTable
+            minWidth={900}
+            head={
+              <>
+                <Th>Account</Th>
+                <Th align="right">Transferred in</Th>
+                <Th align="right">Transferred out</Th>
+                <Th align="right">Net</Th>
+                <Th align="right">Txns</Th>
+                <Th>Why</Th>
+                <Th align="right">Review</Th>
+              </>
+            }
+          >
+            {file.transferAccounts.map((a) => (
+              <tr
+                key={a.id}
+                className="border-b border-border/60 hover:bg-muted/30 cursor-pointer"
+                onClick={() => onDrill({
+                  title: a.label,
+                  derivation: [
+                    { label: 'Transferred in', value: money(a.transferredIn) },
+                    { label: 'Transferred out', value: money(a.transferredOut) },
+                    { label: 'Net', value: money(a.net) },
+                    { label: 'Transactions', value: String(a.count), muted: true },
+                  ],
+                  explanation: a.reason,
+                  transactions: pick(file, a.txnKeys),
+                })}
+              >
+                <Td>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-[13px]">{a.label}</span>
+                    {a.isUploadedAccount && <Badge variant="success">Both sides uploaded</Badge>}
+                  </div>
+                </Td>
+                <Td align="right" tabular className={TONE_TEXT.good}>{money(a.transferredIn)}</Td>
+                <Td align="right" tabular className={TONE_TEXT.bad}>{money(a.transferredOut)}</Td>
+                <Td align="right" tabular className="font-medium">{money(a.net)}</Td>
+                <Td align="right" tabular className="text-muted-foreground">{a.count}</Td>
+                <Td className="text-[11.5px] text-muted-foreground max-w-[260px]">{a.reason}</Td>
+                <Td align="right">
+                  <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    {a.status === 'confirmed' ? (
+                      <>
+                        <Badge variant="success">Confirmed</Badge>
+                        <Button variant="outline" className="h-6 px-1.5 text-[11px]" onClick={() => onTransferDecision(a.id, null)}>
+                          <RotateCcw className="h-3 w-3" />
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button variant="outline" className="h-6 px-2 text-[11px]" onClick={() => onTransferDecision(a.id, 'confirmed')}>
+                          Confirm
+                        </Button>
+                        <Button variant="outline" className="h-6 px-2 text-[11px]" onClick={() => onTransferDecision(a.id, 'rejected')}>
+                          Not internal
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </Td>
+              </tr>
+            ))}
+          </DataTable>
+        )}
+        <div className="flex items-start gap-2 px-4 py-3 border-t border-border text-[11.5px] text-muted-foreground">
+          <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <span>
+            Confirming keeps these out of <span className="font-medium text-foreground">true revenue</span> while
+            leaving them in gross revenue and the full transaction history. Rejecting returns them to normal
+            classification and every metric recalculates.
+          </span>
+        </div>
+      </Section>
     </div>
   );
 }
@@ -732,7 +969,7 @@ export function RiskPanel({ file, onDrill }: PanelProps) {
 type TxnFilter = 'all' | TxnClass | 'credits' | 'debits' | 'large' | 'excluded';
 type SortKey = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc';
 
-export function TransactionsPanel({ file, onDrill, onOverride, onResetOverride }: PanelProps) {
+export function TransactionsPanel({ file, onDrill, onOverride, onResetOverride, onMarkMca }: PanelProps) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<TxnFilter>('all');
   const [sort, setSort] = useState<SortKey>('date-desc');
@@ -782,8 +1019,8 @@ export function TransactionsPanel({ file, onDrill, onOverride, onResetOverride }
     { key: 'debits', label: 'Debits' },
     { key: 'mca_payment', label: 'MCA' },
     { key: 'mca_funding', label: 'Funding' },
-    { key: 'bank_event', label: 'NSF' },
-    { key: 'non_revenue', label: 'Transfers' },
+    { key: 'returned_payment', label: 'NSF' },
+    { key: 'internal_transfer', label: 'Transfers' },
     { key: 'revenue', label: 'Revenue' },
     { key: 'excluded', label: 'Excluded revenue' },
     { key: 'collection', label: 'Collections' },
@@ -874,14 +1111,41 @@ export function TransactionsPanel({ file, onDrill, onOverride, onResetOverride }
       {selected.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 border border-border bg-muted/40 rounded-md px-3 py-2">
           <span className="text-[12.5px] font-medium">{selected.size} selected</span>
-          <div className="flex flex-wrap gap-1.5 ml-auto">
-            {(['revenue', 'non_revenue', 'mca_payment', 'mca_funding', 'collection', 'ignored'] as TxnClass[]).map((c) => (
-              <Button key={c} variant="outline" className="h-7 px-2 text-[11.5px]" onClick={() => bulk(c)}>
-                Mark {TXN_CLASS_LABEL[c].toLowerCase()}
-              </Button>
-            ))}
+          <Button
+            variant="outline"
+            className="h-7 px-2 text-[11.5px]"
+            title="Add every other transaction from the same payees to the selection"
+            onClick={() => {
+              const keys = new Set(Array.from(selected).map((k) => file.transactions.find((t) => t.key === k)?.merchantKey).filter(Boolean) as string[]);
+              setSelected(new Set(file.transactions.filter((t) => keys.has(t.merchantKey)).map((t) => t.key)));
+            }}
+          >
+            Select all matching
+          </Button>
+          <div className="flex flex-wrap items-center gap-1.5 ml-auto">
+            <Button
+              className="h-7 px-2 text-[11.5px]"
+              onClick={() => {
+                const rows = Array.from(selected).map((k) => file.transactions.find((t) => t.key === k)!).filter(Boolean);
+                onMarkMca(Array.from(selected), rows[0]?.merchantKey ?? null, rows[0]?.merchant ?? '');
+              }}
+            >
+              <Plus className="h-3 w-3 mr-1" /> Mark as MCA
+            </Button>
+            <Button variant="outline" className="h-7 px-2 text-[11.5px]" onClick={() => bulk('internal_transfer')}>
+              Mark internal transfer
+            </Button>
+            <Select
+              value=""
+              onChange={(e) => { if (e.target.value) bulk(e.target.value as TxnClass); }}
+              className="h-7 w-auto text-[11.5px]"
+              aria-label="Classify selection"
+            >
+              <option value="">Classify as…</option>
+              {MANUAL_CLASSES.map((c) => <option key={c} value={c}>{TXN_CLASS_LABEL[c]}</option>)}
+            </Select>
             <Button variant="outline" className="h-7 px-2 text-[11.5px]" onClick={() => { onResetOverride(Array.from(selected)); setSelected(new Set()); }}>
-              <RotateCcw className="h-3 w-3 mr-1" /> Auto
+              <RotateCcw className="h-3 w-3 mr-1" /> Reset to system
             </Button>
           </div>
         </div>

@@ -27,6 +27,7 @@
 import type { Transaction } from './parse';
 import {
   findRecurringStreams, classifyPositions, median, daysBetween, monthLabel,
+  merchantKey, perDay, perMonth,
   CADENCE_LABEL, BUSINESS_DAYS_PER_MONTH, WEEKS_PER_MONTH,
 } from './engine';
 import type { McaPosition, Cadence } from './engine';
@@ -39,25 +40,62 @@ import type { NonRevenueKind, BankEventKind, ConfidenceLevel } from './dictionar
 
 /* ═══════════════════════════ types ═══════════════════════════ */
 
+/**
+ * What a transaction is.
+ *
+ * Only `revenue` counts toward True Revenue; everything else is either
+ * money that isn't sales (transfers, fundings, refunds) or money going
+ * out. The underwriter can force any transaction to any of these.
+ */
 export type TxnClass =
   | 'revenue'
-  | 'non_revenue'
-  | 'mca_payment'
+  | 'internal_transfer'
   | 'mca_funding'
+  | 'mca_payment'
+  | 'loan_funding'
+  | 'loan_payment'
+  | 'expense'
+  | 'refund'
+  | 'returned_payment'
   | 'collection'
-  | 'bank_event'
-  | 'withdrawal'
+  | 'other'
   | 'ignored';
 
 export const TXN_CLASS_LABEL: Record<TxnClass, string> = {
   revenue: 'Revenue',
-  non_revenue: 'Non-revenue',
-  mca_payment: 'MCA payment',
+  internal_transfer: 'Internal transfer',
   mca_funding: 'MCA funding',
-  collection: 'Collection',
-  bank_event: 'NSF / return',
-  withdrawal: 'Withdrawal',
+  mca_payment: 'MCA payment',
+  loan_funding: 'Loan funding',
+  loan_payment: 'Loan payment',
+  expense: 'Expense',
+  refund: 'Refund',
+  returned_payment: 'Returned payment',
+  collection: 'Debt collection',
+  other: 'Other',
   ignored: 'Ignored',
+};
+
+/** The classes an underwriter can pick from the transaction table. */
+export const MANUAL_CLASSES: TxnClass[] = [
+  'revenue', 'internal_transfer', 'mca_funding', 'mca_payment',
+  'loan_funding', 'loan_payment', 'expense', 'refund',
+  'returned_payment', 'collection', 'other', 'ignored',
+];
+
+/**
+ * Review state for anything the system inferred.
+ *
+ * Nothing detected is ever treated as fact: it stays SUSPECTED until an
+ * underwriter confirms or rejects it. Rejecting genuinely undoes the
+ * classification — the transactions go back to being ordinary.
+ */
+export type ReviewStatus = 'suspected' | 'confirmed' | 'rejected';
+
+export const REVIEW_LABEL: Record<ReviewStatus, string> = {
+  suspected: 'Suspected',
+  confirmed: 'Confirmed',
+  rejected: 'Rejected',
 };
 
 /** What the user can force a transaction to be, overriding the rules. */
@@ -74,8 +112,14 @@ export interface UwTransaction {
   key: string;
   date: string;
   description: string;
-  /** Descriptor reduced to a payee name, for grouping and display. */
+  /** Descriptor reduced to a payee name, for display. */
   merchant: string;
+  /**
+   * The internal grouping key for this payee. Exposed so "apply to every
+   * matching transaction" can be driven by picking a row rather than by
+   * typing a key the user has no way to know.
+   */
+  merchantKey: string;
   amount: number;
   balance: number | null;
   accountId: string;
@@ -217,6 +261,52 @@ export interface FundingEventDetail {
   txnKey: string;
 }
 
+/** An MCA the underwriter created by hand from transactions. */
+export interface ManualMca {
+  id: string;
+  funderName: string;
+  fundingAmount: number | null;
+  fundingDate: string | null;
+  paymentAmount: number | null;
+  cadence: Cadence | null;
+  /** Explicit transactions assigned to this MCA. */
+  txnKeys: string[];
+  /** When set, every debit from this payee joins the position automatically. */
+  merchantKey: string | null;
+}
+
+/** A counterparty account the merchant appears to move money with. */
+export interface TransferAccount {
+  id: string;
+  label: string;
+  bank: string | null;
+  mask: string | null;
+  status: ReviewStatus;
+  transferredIn: number;
+  transferredOut: number;
+  net: number;
+  count: number;
+  /** True when this is another statement the user uploaded. */
+  isUploadedAccount: boolean;
+  /** Why the system thinks this is the merchant's own account. */
+  reason: string;
+  confidence: ConfidenceLevel;
+  txnKeys: string[];
+}
+
+/** A debit in one uploaded account matched to a credit in another. */
+export interface MatchedTransfer {
+  id: string;
+  amount: number;
+  date: string;
+  fromAccountLabel: string;
+  toAccountLabel: string;
+  outKey: string;
+  inKey: string;
+  dayGap: number;
+  confidence: ConfidenceLevel;
+}
+
 export type PositionStatus = 'active' | 'paid_off' | 'stopped' | 'possible_default';
 
 export const POSITION_STATUS_LABEL: Record<PositionStatus, string> = {
@@ -239,8 +329,14 @@ export interface UwPosition extends McaPosition {
   confidenceLevel: ConfidenceLevel;
   fundingEventId: string | null;
   txnKeys: string[];
-  /** Set by the underwriter; null = not reviewed. */
-  userConfirmed: boolean | null;
+  /** suspected until an underwriter confirms or rejects it. */
+  review: ReviewStatus;
+  /** 'detected' by the rules, or 'manual' when the underwriter added it. */
+  origin: 'detected' | 'manual';
+  /** The funding deposit, when one was found. */
+  fundingAmount: number | null;
+  fundingDate: string | null;
+  fundingDetected: boolean;
 }
 
 export interface RevenueBridge {
@@ -297,6 +393,14 @@ export interface UnderwritingFile {
   mcaWeeklyPayments: number;
   withhold: WithholdAudit;
   fundingEvents: FundingEventDetail[];
+  /** Total advance money received during the statement period. */
+  mcaFundingDetected: number;
+  /** Positions the underwriter rejected — kept so the decision is visible. */
+  rejectedPositions: UwPosition[];
+  transferAccounts: TransferAccount[];
+  matchedTransfers: MatchedTransfer[];
+  internalTransfersIn: number;
+  internalTransfersOut: number;
   collections: CollectionActivity[];
   riskFlags: RiskFlag[];
   revenueSources: RevenueSource[];
@@ -408,6 +512,48 @@ export function detectStatementIdentity(text: string): {
 /* ═══════════════════ cross-account transfers ═══════════════════ */
 
 /**
+ * Work out WHO the other side of a transfer is.
+ *
+ * Bank descriptors carry just enough to identify the counterparty account:
+ * a trailing 4-digit stub, an account-type word, sometimes a bank name.
+ * Grouping on that is what turns a pile of "ONLINE TRANSFER TO ..." lines
+ * into "Savings ••••8891 — 17 transactions, $84,500 in, $71,200 out".
+ */
+const TRANSFER_BANKS = ['CHASE', 'BANK OF AMERICA', 'BOFA', 'WELLS FARGO', 'CITI', 'CITIBANK',
+  'PNC', 'TD BANK', 'CAPITAL ONE', 'TRUIST', 'US BANK', 'REGIONS', 'FIFTH THIRD', 'AMEX',
+  'NAVY FEDERAL', 'MERCURY', 'NOVO', 'BLUEVINE', 'RELAY', 'CHIME'];
+
+const ACCOUNT_WORDS = ['SAVINGS', 'CHECKING', 'MONEY MARKET', 'BUSINESS', 'OPERATING', 'PAYROLL', 'RESERVE'];
+
+export function transferCounterparty(description: string): {
+  key: string; label: string; bank: string | null; mask: string | null;
+} {
+  const norm = ` ${String(description || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim()} `;
+
+  const bank = TRANSFER_BANKS.find((b) => norm.includes(` ${b} `)) ?? null;
+  const acctWord = ACCOUNT_WORDS.find((w) => norm.includes(` ${w} `)) ?? null;
+
+  // A trailing 4+ digit run is nearly always the masked account stub.
+  const digits = norm.match(/\b(\d{4,})\b/g) ?? [];
+  const mask = digits.length ? digits[digits.length - 1].slice(-4) : null;
+
+  // Zelle / person-to-person: the name is the counterparty.
+  const zelle = norm.match(/\b(?:ZELLE|QUICKPAY|VENMO|CASH APP)\b\s+(?:TO|FROM|PAYMENT TO|PAYMENT FROM)?\s*([A-Z]+(?:\s+[A-Z]+)?)/);
+
+  const parts: string[] = [];
+  if (bank) parts.push(bank.split(' ').map((w) => w[0] + w.slice(1).toLowerCase()).join(' '));
+  if (acctWord) parts.push(acctWord.split(' ').map((w) => w[0] + w.slice(1).toLowerCase()).join(' '));
+  if (!parts.length && zelle?.[1]) parts.push(zelle[1].split(' ').map((w) => w[0] + w.slice(1).toLowerCase()).join(' '));
+  if (!parts.length) parts.push('Transfer account');
+
+  const label = mask ? `${parts.join(' ')} ••••${mask}` : parts.join(' ');
+  const key = `${bank ?? ''}|${acctWord ?? ''}|${mask ?? ''}|${zelle?.[1] ?? ''}`.toUpperCase()
+    || normalizedMerchant(description).toUpperCase();
+
+  return { key, label, bank, mask };
+}
+
+/**
  * Match debits in one uploaded account against credits in another.
  *
  * If a merchant moves $25,000 from their operating account to their
@@ -461,8 +607,12 @@ export interface BuildOptions {
   businessName?: string;
   /** Restrict the whole analysis to one account. */
   accountFilter?: string | null;
-  /** Positions the underwriter confirmed or rejected. */
-  positionDecisions?: Record<string, boolean>;
+  /** Review decisions on detected positions, keyed by position id. */
+  positionDecisions?: Record<string, ReviewStatus>;
+  /** Review decisions on transfer accounts, keyed by transfer-account id. */
+  transferDecisions?: Record<string, ReviewStatus>;
+  /** MCAs the underwriter added by hand. */
+  manualMcas?: ManualMca[];
   warnings?: string[];
   /** Stamped into the file; passed in so the build stays pure. */
   generatedAt?: string;
@@ -582,10 +732,34 @@ export function buildUnderwritingFile(
     ? depositAmounts[Math.min(depositAmounts.length - 1, Math.floor(depositAmounts.length * 0.9))]
     : 0;
 
+  /* Manual MCAs claim their transactions before anything else runs, and a
+     REJECTED position releases its transactions entirely — a rejection has
+     to actually undo the classification, not just hide a row. */
+  const manualMcas = opts.manualMcas ?? [];
+  const manualOfTxn = new Map<string, ManualMca>();
+  for (const m of manualMcas) {
+    for (const k of m.txnKeys) manualOfTxn.set(k, m);
+    if (m.merchantKey) {
+      for (const f of flat) {
+        if (f.t.amount >= 0) continue;
+        if (merchantKey(f.t.description) === m.merchantKey) manualOfTxn.set(f.key, m);
+      }
+    }
+  }
+  const rejectedPositionIds = new Set(
+    Object.entries(opts.positionDecisions ?? {})
+      .filter(([, v]) => v === 'rejected')
+      .map(([k]) => k),
+  );
+
   /* ══════════════ Per-transaction classification ══════════════ */
   const transactions: UwTransaction[] = flat.map((f) => {
     const t = f.t;
-    const positionId = posOfTxn.get(f.key) ?? null;
+    const detectedPositionId = posOfTxn.get(f.key) ?? null;
+    const manual = manualOfTxn.get(f.key) ?? null;
+    const positionId = manual
+      ? manual.id
+      : (detectedPositionId && !rejectedPositionIds.has(detectedPositionId) ? detectedPositionId : null);
     const partner = transferPartners.get(f.key) ?? null;
     const knownFunder = matchKnownFunder(t.description);
 
@@ -599,19 +773,24 @@ export function buildUnderwritingFile(
     const bankEvent = matchBankEvent(t.description);
     const collection = matchCollection(t.description);
 
-    if (positionId) {
+    if (manual) {
+      autoClass = 'mca_payment';
+      funderName = manual.funderName;
+      reason = `Marked as an MCA payment to ${manual.funderName} by the underwriter`;
+      weight = 1;
+    } else if (positionId) {
       autoClass = 'mca_payment';
       const p = posById.get(positionId)!;
       funderName = p.funderName;
       reason = `Recurring ${CADENCE_LABEL[p.cadence].toLowerCase()} debit of ${fmt(p.paymentAmount)} to ${p.funderName}`;
       weight = p.confidence === 'high' ? 0.96 : p.confidence === 'medium' ? 0.78 : 0.55;
     } else if (bankEvent) {
-      autoClass = 'bank_event';
+      autoClass = 'returned_payment';
       bankEventKind = bankEvent.kind;
       reason = `${bankEvent.label} — ${bankEvent.reason}`;
       weight = bankEvent.weight;
     } else if (partner) {
-      autoClass = 'non_revenue';
+      autoClass = 'internal_transfer';
       nonRevenueKind = 'internal_transfer';
       reason = 'Matches an equal, opposite entry in another uploaded account on the same date — money moved between the merchant’s own accounts';
       weight = 0.97;
@@ -627,7 +806,12 @@ export function buildUnderwritingFile(
         reason = `Deposit from ${knownFunder}, a known MCA funder — advance proceeds, not revenue`;
         weight = 0.95;
       } else if (nonRev) {
-        autoClass = 'non_revenue';
+        autoClass = nonRev.kind === 'internal_transfer' || nonRev.kind === 'owner_transfer'
+          ? 'internal_transfer'
+          : nonRev.kind === 'loan_proceeds' ? 'loan_funding'
+            : nonRev.kind === 'returned_deposit' || nonRev.kind === 'reversal' ? 'refund'
+              : nonRev.kind === 'mca_funding' ? 'mca_funding'
+                : 'other';
         nonRevenueKind = nonRev.kind;
         reason = nonRev.reason;
         weight = nonRev.weight;
@@ -654,7 +838,7 @@ export function buildUnderwritingFile(
         reason = collection.reason;
         weight = collection.weight;
       } else {
-        autoClass = 'withdrawal';
+        autoClass = 'expense';
         reason = 'Ordinary outgoing payment';
         weight = 0.9;
       }
@@ -669,6 +853,7 @@ export function buildUnderwritingFile(
       date: t.date,
       description: t.description,
       merchant: normalizedMerchant(t.description),
+      merchantKey: merchantKey(t.description),
       amount: t.amount,
       balance: t.balance,
       accountId: f.accountId,
@@ -702,7 +887,7 @@ export function buildUnderwritingFile(
     if (t.isTrueRevenue) continue;
     const kind = t.cls === 'mca_funding'
       ? 'mca_funding'
-      : (t.nonRevenueKind ?? (t.cls === 'bank_event' ? 'returned_deposit' : 'other_non_operating'));
+      : (t.nonRevenueKind ?? (t.bankEventKind ? 'returned_deposit' : 'other_non_operating'));
     const label = NON_REVENUE_KIND_LABEL[kind as NonRevenueKind] ?? 'Excluded';
     const b = exclusionBuckets.get(kind) ?? { label, amount: 0, count: 0 };
     b.amount += t.amount;
@@ -785,8 +970,7 @@ export function buildUnderwritingFile(
         ? p.estimatedRemaining
         : null;
       const returnsNearby = transactions.filter(
-        (t) => t.cls === 'bank_event'
-          && (t.bankEventKind === 'returned_ach' || t.bankEventKind === 'nsf' || t.bankEventKind === 'stop_payment')
+        (t) => (t.bankEventKind === 'returned_ach' || t.bankEventKind === 'nsf' || t.bankEventKind === 'stop_payment')
           && Math.abs(daysBetween(p.lastDate, t.date)) <= 14,
       );
       if (returnsNearby.length >= 2) {
@@ -817,10 +1001,15 @@ export function buildUnderwritingFile(
       fundingLink.linkedNote = `Payments of ${fmt(p.paymentAmount)} ${CADENCE_LABEL[p.cadence].toLowerCase()} begin ${p.firstDate}`;
     }
 
-    const decision = opts.positionDecisions?.[p.id];
+    const review: ReviewStatus = opts.positionDecisions?.[p.id] ?? 'suspected';
 
     return {
       ...p,
+      review,
+      origin: 'detected' as const,
+      fundingAmount: fundingLink?.amount ?? null,
+      fundingDate: fundingLink?.date ?? null,
+      fundingDetected: Boolean(fundingLink),
       status,
       statusReason,
       monthsPresent,
@@ -831,15 +1020,77 @@ export function buildUnderwritingFile(
       confidenceLevel: p.confidence === 'high' ? 'high' : p.confidence === 'medium' ? 'likely' : 'possible',
       fundingEventId: fundingLink?.id ?? null,
       txnKeys: keys,
-      userConfirmed: decision === undefined ? null : decision,
     };
   });
 
-  const currentPositions = positions.filter((p) => p.status === 'active' && p.userConfirmed !== false);
-  const historicalPositions = positions.filter((p) => p.status !== 'active' || p.userConfirmed === false);
+  /* Manual MCAs become first-class positions. They are confirmed by
+     definition — a human created them — and carry whatever structure the
+     underwriter supplied. */
+  const manualPositions: UwPosition[] = manualMcas.map((m) => {
+    const keys = transactions.filter((t) => manualOfTxn.get(t.key)?.id === m.id).map((t) => t.key);
+    const rows = keys.map((k) => transactions.find((t) => t.key === k)!).filter(Boolean);
+    const dates = rows.map((r) => r.date).sort();
+    const payment = m.paymentAmount ?? (rows.length ? median(rows.map((r) => Math.abs(r.amount))) : 0);
+    const cadence: Cadence = m.cadence ?? 'weekly';
+    const monthly = perMonth(cadence, payment);
+    const months = new Set(rows.map((r) => r.month));
+
+    return {
+      id: m.id,
+      funderName: m.funderName,
+      identified: true,
+      descriptor: rows[0]?.description ?? m.funderName,
+      cadence,
+      paymentAmount: payment,
+      originalPayment: payment,
+      paymentHistory: [],
+      paymentChanged: false,
+      paymentCount: rows.length,
+      firstDate: dates[0] ?? (m.fundingDate ?? periodStart),
+      lastDate: dates[dates.length - 1] ?? periodEnd,
+      dailyEquivalent: perDay(cadence, payment),
+      monthlyEquivalent: monthly,
+      totalDebited: rows.reduce((sum, r) => sum + Math.abs(r.amount), 0),
+      confidence: 'high' as const,
+      confidenceReasons: ['Added manually by the underwriter'],
+      estimatedFunding: m.fundingAmount,
+      estimatedFactor: null,
+      estimatedTermWeeks: null,
+      estimatedPayback: null,
+      startedInPeriod: Boolean(m.fundingDate),
+      estimatedRemaining: null,
+      estimatedRemainingPct: null,
+      likelyPaidOff: false,
+      status: 'active' as PositionStatus,
+      statusReason: 'Marked as an active MCA by the underwriter',
+      monthsPresent: months.size,
+      monthsInPeriod: monthKeys.length,
+      presentThroughout: monthKeys.length > 1 && months.size >= monthKeys.length,
+      weeklyEquivalent: monthly / WEEKS_PER_MONTH,
+      withholdPct: pct(monthly, trueRevenueMonthly),
+      confidenceLevel: 'high' as ConfidenceLevel,
+      fundingEventId: null,
+      txnKeys: keys,
+      review: 'confirmed' as ReviewStatus,
+      origin: 'manual' as const,
+      fundingAmount: m.fundingAmount,
+      fundingDate: m.fundingDate,
+      fundingDetected: Boolean(m.fundingAmount && m.fundingDate),
+    };
+  });
+  positions.push(...manualPositions);
+
+  /* A rejected position is not an MCA at all — it leaves the current list
+     AND the historical list, and its transactions were already released
+     back to normal classification above. */
+  const rejectedPositions = positions.filter((p) => p.review === 'rejected');
+  const live = positions.filter((p) => p.review !== 'rejected');
+  const currentPositions = live.filter((p) => p.status === 'active');
+  const historicalPositions = live.filter((p) => p.status !== 'active');
 
   const mcaMonthlyPayments = currentPositions.reduce((s, p) => s + p.monthlyEquivalent, 0);
   const mcaWeeklyPayments = currentPositions.reduce((s, p) => s + p.weeklyEquivalent, 0);
+  const mcaFundingDetected = fundingEvents.reduce((s, f) => s + f.amount, 0);
 
   const withhold: WithholdAudit = {
     trueRevenueMonthly,
@@ -868,6 +1119,89 @@ export function buildUnderwritingFile(
     collectionGroups.set(t.merchant, g);
   }
   const collections = Array.from(collectionGroups.values()).sort((a, b) => b.total - a.total);
+
+  /* ══════════════ Transfer accounts ══════════════
+     Internal transfers are grouped by counterparty so the underwriter sees
+     "Savings ••••8891 — $84,500 in, $71,200 out, 17 transactions" rather
+     than 17 unrelated rows. A transfer to another account the user
+     UPLOADED is the strongest case: both halves are visible. */
+  const accountLabelById = new Map(Array.from(accounts.values()).map((a) => [a.id, a.label]));
+  const transferGroups = new Map<string, TransferAccount>();
+
+  for (const t of transactions) {
+    if (t.cls !== 'internal_transfer') continue;
+
+    const partnerTxn = t.internalTransferPartner
+      ? transactions.find((x) => x.key === t.internalTransferPartner)
+      : null;
+    const cp = partnerTxn
+      ? {
+          key: `uploaded:${partnerTxn.accountId}`,
+          label: accountLabelById.get(partnerTxn.accountId) ?? partnerTxn.accountId,
+          bank: null as string | null,
+          mask: null as string | null,
+        }
+      : transferCounterparty(t.description);
+
+    const existing = transferGroups.get(cp.key);
+    const g: TransferAccount = existing ?? {
+      id: cp.key,
+      label: cp.label,
+      bank: cp.bank ?? null,
+      mask: cp.mask ?? null,
+      status: opts.transferDecisions?.[cp.key] ?? 'suspected',
+      transferredIn: 0,
+      transferredOut: 0,
+      net: 0,
+      count: 0,
+      isUploadedAccount: Boolean(partnerTxn),
+      reason: partnerTxn
+        ? 'Matched to an equal, opposite entry in another statement you uploaded'
+        : 'Description looks like a transfer to an account the merchant controls',
+      confidence: partnerTxn ? 'high' : 'possible',
+      txnKeys: [],
+    };
+    if (partnerTxn) {
+      g.isUploadedAccount = true;
+      g.confidence = 'high';
+      g.reason = 'Matched to an equal, opposite entry in another statement you uploaded';
+    }
+    if (t.amount > 0) g.transferredIn += t.amount; else g.transferredOut += Math.abs(t.amount);
+    g.net = g.transferredIn - g.transferredOut;
+    g.count += 1;
+    g.txnKeys.push(t.key);
+    transferGroups.set(cp.key, g);
+  }
+
+  const transferAccounts = Array.from(transferGroups.values())
+    .filter((g) => g.status !== 'rejected')
+    .sort((a, b) => (b.transferredIn + b.transferredOut) - (a.transferredIn + a.transferredOut));
+
+  const internalTransfersIn = transferAccounts.reduce((sum, g) => sum + g.transferredIn, 0);
+  const internalTransfersOut = transferAccounts.reduce((sum, g) => sum + g.transferredOut, 0);
+
+  /* The matched pairs themselves, for the "Account A → Account B" list. */
+  const matchedTransfers: MatchedTransfer[] = [];
+  const pairSeen = new Set<string>();
+  for (const t of transactions) {
+    if (!t.internalTransferPartner || t.amount >= 0) continue;
+    const other = transactions.find((x) => x.key === t.internalTransferPartner);
+    if (!other) continue;
+    const pairKey = [t.key, other.key].sort().join('||');
+    if (pairSeen.has(pairKey)) continue;
+    pairSeen.add(pairKey);
+    matchedTransfers.push({
+      id: pairKey,
+      amount: Math.abs(t.amount),
+      date: t.date,
+      fromAccountLabel: accountLabelById.get(t.accountId) ?? t.accountId,
+      toAccountLabel: accountLabelById.get(other.accountId) ?? other.accountId,
+      outKey: t.key,
+      inKey: other.key,
+      dayGap: Math.abs(daysBetween(t.date, other.date)),
+      confidence: 'high',
+    });
+  }
 
   /* ══════════════ Risk flags ══════════════ */
   const riskFlags = buildRiskFlags({
@@ -950,6 +1284,12 @@ export function buildUnderwritingFile(
     mcaWeeklyPayments,
     withhold,
     fundingEvents,
+    mcaFundingDetected,
+    rejectedPositions,
+    transferAccounts,
+    matchedTransfers,
+    internalTransfersIn,
+    internalTransfersOut,
     collections,
     riskFlags,
     revenueSources,
@@ -1005,7 +1345,9 @@ function buildMonths(
        event, so it counts. Kinds stay tracked separately either way. */
     const eventsByDay = new Map<string, UwTransaction[]>();
     for (const t of list) {
-      if (t.cls !== 'bank_event') continue;
+      // Keyed off the detected kind, not the class label — an underwriter
+      // may reclassify the row while it is still evidence of a bounce.
+      if (!t.bankEventKind) continue;
       const arr = eventsByDay.get(t.date);
       if (arr) arr.push(t); else eventsByDay.set(t.date, [t]);
     }
@@ -1208,7 +1550,7 @@ function buildRiskFlags(ctx: {
 
   // ── Returned ACH / stop payment / block descriptors ──
   const returns = transactions.filter(
-    (t) => t.cls === 'bank_event' && (t.bankEventKind === 'returned_ach' || t.bankEventKind === 'nsf'),
+    (t) => t.bankEventKind === 'returned_ach' || t.bankEventKind === 'nsf',
   );
   if (returns.length >= 3) {
     flags.push({
@@ -1236,7 +1578,7 @@ function buildRiskFlags(ctx: {
   // ── NSFs clustered around MCA debit dates ──
   const mcaDates = new Set(transactions.filter((t) => t.cls === 'mca_payment').map((t) => t.date));
   const nsfNearMca = transactions.filter(
-    (t) => t.cls === 'bank_event' && t.bankEventKind !== 'overdraft_fee'
+    (t) => t.bankEventKind !== null && t.bankEventKind !== 'overdraft_fee'
       && Array.from(mcaDates).some((d) => Math.abs(daysBetween(d, t.date)) <= 1),
   );
   if (nsfNearMca.length >= 2) {
@@ -1366,7 +1708,9 @@ function emptyFile(
     positions: [], currentPositions: [], historicalPositions: [],
     mcaMonthlyPayments: 0, mcaWeeklyPayments: 0,
     withhold: { trueRevenueMonthly: 0, positions: [], totalMonthly: 0, pct: 0 },
-    fundingEvents: [], collections: [], riskFlags: [], revenueSources: [],
+    fundingEvents: [], mcaFundingDetected: 0, rejectedPositions: [],
+    transferAccounts: [], matchedTransfers: [], internalTransfersIn: 0, internalTransfersOut: 0,
+    collections: [], riskFlags: [], revenueSources: [],
     revenueTrend: 'unknown', balanceTrend: 'unknown', revenueTrendPct: 0,
     balancesAvailable: false, largeThreshold: 0, warnings,
   };
@@ -1427,5 +1771,9 @@ export function toUnderwritingSummary(file: UnderwritingFile) {
     revenueTrend: file.revenueTrend,
     balanceTrend: file.balanceTrend,
     recentFundings: file.fundingEvents.length,
+    mcaFundingDetected: file.mcaFundingDetected,
+    transferAccounts: file.transferAccounts.length,
+    internalTransfersIn: file.internalTransfersIn,
+    internalTransfersOut: file.internalTransfersOut,
   };
 }

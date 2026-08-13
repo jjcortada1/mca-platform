@@ -285,7 +285,7 @@ function cadenceFromGap(gap: number): Cadence {
   return 'irregular';
 }
 
-function perDay(cadence: Cadence, amount: number): number {
+export function perDay(cadence: Cadence, amount: number): number {
   switch (cadence) {
     case 'daily': return amount;
     case 'semi-weekly': return (amount * 2.5) / 5;
@@ -296,7 +296,7 @@ function perDay(cadence: Cadence, amount: number): number {
   }
 }
 
-function perMonth(cadence: Cadence, amount: number): number {
+export function perMonth(cadence: Cadence, amount: number): number {
   switch (cadence) {
     case 'daily': return amount * BUSINESS_DAYS_PER_MONTH;
     case 'semi-weekly': return amount * 2.5 * WEEKS_PER_MONTH;
