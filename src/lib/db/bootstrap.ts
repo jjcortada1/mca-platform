@@ -417,6 +417,10 @@ const ONE_TIME_BACKFILLS: { flag: string; sql: string }[] = [
    )`,
   `CREATE INDEX IF NOT EXISTS court_searches_company_idx ON court_searches (company_id)`,
   `CREATE INDEX IF NOT EXISTS court_searches_deal_idx ON court_searches (deal_id)`,
+
+  // ---- demo mode (platform owner only) ----
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS demo_mode boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS demo_company_id uuid`,
 ];
 
 /**

@@ -55,6 +55,35 @@ export async function requireUser(): Promise<SessionUser> {
  *   const ctx = await requireTenantContext();
  * and use ctx.companyId in every where-clause.
  */
+/**
+ * Resolve which company this request should read and write.
+ *
+ * Normally the user's own company. When the platform owner has DEMO MODE
+ * switched on, it resolves to their demo company instead — which is how
+ * the entire app fills with fake data without a single query being
+ * rewritten: every route already scopes by whatever this returns.
+ *
+ * Deliberately a DB read rather than a session claim, so toggling demo
+ * mode takes effect on the next request instead of after a re-login.
+ */
+export async function resolveCompanyId(user: SessionUser): Promise<string | null> {
+  if (!user.companyId) return null;
+  try {
+    const { db } = await import('@/lib/db/client');
+    const { users } = await import('@/lib/db/schema');
+    const { eq } = await import('drizzle-orm');
+    const [row] = await db
+      .select({ demoMode: users.demoMode, demoCompanyId: users.demoCompanyId })
+      .from(users).where(eq(users.id, user.id)).limit(1);
+    if (row?.demoMode && row.demoCompanyId) return row.demoCompanyId;
+  } catch {
+    // If the lookup fails, fall through to the real company. Demo mode
+    // failing closed (showing real data to the operator) is safe; failing
+    // open would not be.
+  }
+  return user.companyId;
+}
+
 export async function requireTenantContext(): Promise<{
   user: SessionUser;
   companyId: string;
@@ -63,7 +92,9 @@ export async function requireTenantContext(): Promise<{
   if (!user.companyId) {
     throw new ForbiddenError('Master admins cannot access tenant data');
   }
-  return { user, companyId: user.companyId };
+  const companyId = await resolveCompanyId(user);
+  if (!companyId) throw new ForbiddenError('No company for this user');
+  return { user, companyId };
 }
 
 /**
@@ -142,7 +173,9 @@ export async function pageRequireUser(): Promise<SessionUser> {
 export async function pageRequireTenant(): Promise<{ user: SessionUser; companyId: string }> {
   const user = await pageRequireUser();
   if (!user.companyId) redirect('/master');
-  return { user, companyId: user.companyId };
+  const companyId = await resolveCompanyId(user);
+  if (!companyId) redirect('/master');
+  return { user, companyId };
 }
 
 export async function pageRequireMaster(): Promise<SessionUser> {

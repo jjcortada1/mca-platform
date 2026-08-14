@@ -1,3 +1,71 @@
+# Update — August 2026 (round 41) — Worksheet formulas + Demo mode
+
+## Worksheets: formulas, and then some
+The grid already behaved like a spreadsheet. Now it calculates like one.
+
+**Type `=` and it works.** `=SUM(A1:A10)`, `=B2*1.35`, `=IF(C1>100,"yes","no")`,
+`=ROUND(AVERAGE(D1:D12), 2)` — references, ranges, parentheses, operator
+precedence, nested formulas that point at other formulas. Errors read the
+way you'd expect (`#DIV/0!`, `#REF!`, `#NAME?`), and a formula that
+references itself returns `#CYCLE!` instead of freezing the page.
+
+**Formula bar** across the top showing the cell reference and the raw
+contents, so you edit the formula rather than its result.
+
+**Fill handle.** Drag the small square at the corner of a selection to copy
+down — and **formulas translate as they go**: `=A1*B1` dragged down becomes
+`=A2*B2`, `=A3*B3`. `$` pins a row the way it does anywhere else, so
+`=A$1*B2` keeps pointing at row 1. Ctrl/⌘+D fills down too.
+
+**Right-click menu** on any cell: add/delete rows, insert column left or
+right, delete column, freeze column, copy, cut, fill down.
+
+### The twist — MCA functions
+Deal math that would otherwise need four helper columns fits in one cell:
+
+| Function | Does |
+|---|---|
+| `PAYBACK(funding, factor)` | Total the merchant repays |
+| `FACTOR(funding, payback)` | The factor rate implied by both |
+| `PAYMENT(payback, terms)` | Per-payment amount |
+| `NETFUNDING(funding, fee%)` | What actually hits the account |
+| `COMMISSION(funding, pct)` | Commission dollars |
+| `HOLDBACK(payment, revenue)` | Withhold as a share of revenue |
+| `TERMDAYS(payback, daily)` | Business days to pay off |
+| `TERMWEEKS(payback, weekly)` | Weeks to pay off |
+| `BALANCE(payback, made, amount)` | Remaining balance after N payments |
+
+So a deal row can be `=PAYBACK(A2,B2)`, `=PAYMENT(C2,100)`,
+`=COMMISSION(A2,12)` — and it recalculates as you change the funding.
+
+Percentages are accepted either way: `COMMISSION(100000, 12)` and
+`COMMISSION(100000, 0.12)` both give $12,000.
+
+---
+
+## Demo mode (your account only)
+**Settings → Demo mode → Turn on.** The entire CRM fills with realistic
+**fake** data — merchants, funders, deals across every pipeline stage,
+submissions with funder responses, commissions, funded board, tasks — so
+you can walk someone through the system without a single real client on
+screen.
+
+**How it's safe:** demo data lives in its own separate company. Every query
+in the app is already scoped by company, so demo mode just points that at
+the demo company. Your real data is never read, written, copied, or hidden
+— it simply isn't what's being looked at. Turning it off is the same switch
+back, instantly.
+
+- A **banner across the top of every page** while it's on, so a demo number
+  can never be mistaken for a real one.
+- **Rebuild** regenerates the sample data from scratch.
+- Only the platform owner sees the switch, and the API enforces that
+  separately from the UI.
+- The generated data is deterministic, so the demo looks the same every
+  time you present it.
+
+---
+
 # Update — August 2026 (round 40) — MCA funding detection, verification, and Transfer Accounts
 
 Everything below is added into the existing underwriting dashboard — no

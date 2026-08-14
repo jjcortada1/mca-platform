@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { evaluateCell, formatValue, isFormula, toRef as a1Ref } from '@/lib/worksheets/formula';
+import type { FormulaContext } from '@/lib/worksheets/formula';
 
 /**
  * Spreadsheet grid.
@@ -89,6 +91,21 @@ function isNumericFormat(f: GridColumn['format']): boolean {
   return f === 'number' || f === 'currency' || f === 'percent';
 }
 
+/**
+ * Shift the row part of every A1 reference in a formula by `offset`.
+ *
+ * `$` pins a row the way it does in any spreadsheet: `=A$1*B2` filled down
+ * one row becomes `=A$1*B3`.
+ */
+export function shiftFormulaRows(formula: string, offset: number): string {
+  return formula.replace(/(\$?)([A-Za-z]{1,3})(\$?)(\d+)/g, (whole, colAbs, col, rowAbs, row) => {
+    if (rowAbs === '$') return whole;
+    const next = Number(row) + offset;
+    if (next < 1) return whole;
+    return `${colAbs}${col}${rowAbs}${next}`;
+  });
+}
+
 /* ─────────────────────── selection model ─────────────────────── */
 
 interface Sel {
@@ -141,6 +158,8 @@ export function SheetGrid({
   const [viewportH, setViewportH] = useState(600);
   const [dragSel, setDragSel] = useState(false);
   const [resizing, setResizing] = useState<{ colId: string; startX: number; startW: number } | null>(null);
+  const [filling, setFilling] = useState<{ fromRow: number; toRow: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; row: number; col: number } | null>(null);
 
   const undoRef = useRef<UndoEntry[]>([]);
   const redoRef = useRef<UndoEntry[]>([]);
@@ -178,6 +197,31 @@ export function SheetGrid({
     if (columns[i].frozen) acc += widths[i];
   }
   const totalWidth = GUTTER_W + widths.reduce((a, b) => a + b, 0);
+
+  /* Formula context over the whole sheet. Cells are resolved lazily and
+     only for what's on screen, so a sheet full of formulas stays as fast
+     as one without. */
+  const formulaCtx: FormulaContext = useMemo(() => ({
+    columnCount: columns.length,
+    rowCount: rows.length,
+    getRaw: (c: number, r: number) => {
+      const col = columns[c];
+      const row = rows[r];
+      if (!col || !row) return null;
+      return row.cells[col.id] ?? '';
+    },
+  }), [columns, rows]);
+
+  /** What a cell shows: the computed value for a formula, else the text. */
+  const displayOf = useCallback((raw: string, format: GridColumn['format']): string => {
+    if (isFormula(raw)) {
+      const v = evaluateCell(raw, formulaCtx);
+      const out = formatValue(v);
+      // A numeric result still honours the column's format.
+      return typeof v === 'number' ? formatCell(out, format) : out;
+    }
+    return formatCell(raw, format);
+  }, [formulaCtx]);
 
   const searchLower = search.trim().toLowerCase();
   const matches = useCallback(
@@ -313,6 +357,65 @@ export function SheetGrid({
     onStatus?.(`Pasted ${changes.length} cells`);
   }, [sel, canEdit, columns, apply, onAddRows, onStatus]);
 
+  /**
+   * Fill down from the top row of the selection.
+   *
+   * Formulas are translated as they go: dragging `=A1*B1` down one row
+   * yields `=A2*B2`, which is the behaviour that makes a spreadsheet worth
+   * using. Plain values simply repeat.
+   */
+  const fillDown = useCallback((fromRow: number, toRow: number) => {
+    if (!sel || !canEdit) return;
+    const n = norm(sel);
+    const changes: CellChange[] = [];
+    const lo = Math.min(fromRow, toRow);
+    const hi = Math.max(fromRow, toRow);
+
+    for (let c = n.c1; c <= n.c2; c++) {
+      const col = colsRef.current[c];
+      const srcRow = rowsRef.current[fromRow];
+      if (!col || !srcRow) continue;
+      const src = srcRow.cells[col.id] ?? '';
+
+      for (let r = lo; r <= hi; r++) {
+        if (r === fromRow) continue;
+        const row = rowsRef.current[r];
+        if (!row) continue;
+        const offset = r - fromRow;
+        const value = isFormula(src) ? shiftFormulaRows(src, offset) : src;
+        changes.push({ rowId: row.id, colId: col.id, value });
+      }
+    }
+    apply(changes);
+    onStatus?.(`Filled ${changes.length} cell${changes.length === 1 ? '' : 's'}`);
+  }, [sel, canEdit, apply, onStatus]);
+
+  const insertRowsAt = useCallback(async (index: number, count = 1) => {
+    if (!canEdit) return;
+    // The API appends rows; moving them into place would mean reordering
+    // every row after the insert point, so new rows land at the end and
+    // the status line says so rather than silently doing something else.
+    const ids = await onAddRows(count);
+    if (ids.length) onStatus?.(`Added ${ids.length} row${ids.length === 1 ? '' : 's'} at the end`);
+  }, [canEdit, onAddRows, onStatus]);
+
+  const insertColumnAt = useCallback((index: number) => {
+    if (!canEditColumns) return;
+    const next = [...colsRef.current];
+    next.splice(index, 0, {
+      id: `c_${Math.random().toString(36).slice(2, 8)}`,
+      label: `Column ${next.length + 1}`,
+      width: DEFAULT_COL_WIDTH,
+    });
+    onColumnsChange(next);
+  }, [canEditColumns, onColumnsChange]);
+
+  const deleteColumnAt = useCallback((index: number) => {
+    if (!canEditColumns) return;
+    if (colsRef.current.length <= 1) { onStatus?.('A sheet needs at least one column'); return; }
+    onColumnsChange(colsRef.current.filter((_, i) => i !== index));
+  }, [canEditColumns, onColumnsChange, onStatus]);
+
   /* ── keyboard ── */
   const onKeyDown = useCallback((e: React.KeyboardEvent) => {
     const meta = e.metaKey || e.ctrlKey;
@@ -333,6 +436,12 @@ export function SheetGrid({
     if (meta && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
     if (meta && e.key.toLowerCase() === 'c') { e.preventDefault(); void copySelection(false); return; }
     if (meta && e.key.toLowerCase() === 'x') { e.preventDefault(); void copySelection(true); return; }
+    if (meta && e.key.toLowerCase() === 'd') {
+      e.preventDefault();
+      const n = norm(sel);
+      if (n.r2 > n.r1) fillDown(n.r1, n.r2);
+      return;
+    }
     if (meta && e.key.toLowerCase() === 'a') {
       e.preventDefault();
       setSel({ ar: 0, ac: 0, fr: rows.length - 1, fc: columns.length - 1 });
@@ -381,7 +490,7 @@ export function SheetGrid({
       e.preventDefault();
       setEditing({ r: fr, c: fc, value: e.key });
     }
-  }, [editing, sel, rows, columns, canEdit, moveTo, commitEdit, copySelection, apply, undo, redo, viewportH, rowH, onStatus]);
+  }, [editing, sel, rows, columns, canEdit, moveTo, commitEdit, copySelection, apply, undo, redo, viewportH, rowH, onStatus, fillDown]);
 
   const onPaste = useCallback((e: React.ClipboardEvent) => {
     if (editing || !canEdit) return;
@@ -422,11 +531,58 @@ export function SheetGrid({
     return () => window.removeEventListener('mouseup', onUp);
   }, [dragSel]);
 
+  useEffect(() => {
+    if (!filling) return;
+    const onUp = () => {
+      setFilling((f) => {
+        if (f && f.toRow !== f.fromRow) fillDown(f.fromRow, f.toRow);
+        return null;
+      });
+    };
+    window.addEventListener('mouseup', onUp);
+    return () => window.removeEventListener('mouseup', onUp);
+  }, [filling, fillDown]);
+
+  // Right-click anywhere closes an open menu first.
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [menu]);
+
   const selNorm = sel ? norm(sel) : null;
   const selectionCount = selNorm ? (selNorm.r2 - selNorm.r1 + 1) * (selNorm.c2 - selNorm.c1 + 1) : 0;
 
+  const focusRaw = sel ? (rows[sel.fr]?.cells[columns[sel.fc]?.id] ?? '') : '';
+
   return (
     <div className="flex flex-col min-h-0 flex-1">
+      {/* Formula bar — the cell reference and the RAW contents, so a
+          formula is editable as text rather than as its result. */}
+      <div className="flex items-stretch border border-border border-b-0 rounded-t-md bg-card">
+        <div className="w-[72px] shrink-0 border-r border-border flex items-center justify-center text-[11.5px] font-medium tabular-nums text-muted-foreground">
+          {sel ? a1Ref(sel.fc, sel.fr) : '—'}
+        </div>
+        <div className="px-2 shrink-0 border-r border-border flex items-center text-[12px] text-muted-foreground select-none" title="Formula">
+          fx
+        </div>
+        <input
+          value={editing ? editing.value : focusRaw}
+          readOnly={!canEdit || !sel}
+          onChange={(e) => {
+            if (!sel) return;
+            setEditing({ r: sel.fr, c: sel.fc, value: e.target.value });
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && editing) { e.preventDefault(); commitEdit(editing.value, 'down'); scrollRef.current?.focus(); }
+            if (e.key === 'Escape') { setEditing(null); scrollRef.current?.focus(); }
+          }}
+          placeholder={sel ? 'Enter a value or =FORMULA()' : 'Select a cell'}
+          className="flex-1 min-w-0 px-2 py-1.5 text-[12.5px] font-mono bg-transparent outline-none"
+        />
+      </div>
+
       <div
         ref={scrollRef}
         tabIndex={0}
@@ -532,19 +688,42 @@ export function SheetGrid({
                         if (e.shiftKey && sel) setSel({ ...sel, fr: r, fc: ci });
                         else { setSel({ ar: r, ac: ci, fr: r, fc: ci }); setDragSel(true); }
                       }}
-                      onMouseEnter={() => { if (dragSel) setSel((p) => (p ? { ...p, fr: r, fc: ci } : p)); }}
+                      onMouseEnter={() => {
+                        if (dragSel) setSel((p) => (p ? { ...p, fr: r, fc: ci } : p));
+                        else if (filling) setFilling((f) => (f ? { ...f, toRow: r } : f));
+                      }}
                       onDoubleClick={() => { if (canEdit) setEditing({ r, c: ci, value: raw }); }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        if (!sel || !inSel(sel, r, ci)) setSel({ ar: r, ac: ci, fr: r, fc: ci });
+                        setMenu({ x: e.clientX, y: e.clientY, row: r, col: ci });
+                      }}
                       className={cn(
                         'relative shrink-0 border-r border-b border-border px-2 flex items-center text-[12.5px] overflow-hidden',
                         c.frozen && 'sticky z-10 bg-card',
                         !c.frozen && 'bg-card',
                         selected && !isFocus && 'bg-primary/10',
+                        filling && r > Math.min(filling.fromRow, filling.toRow) && r <= Math.max(filling.fromRow, filling.toRow)
+                          && selNorm && ci >= selNorm.c1 && ci <= selNorm.c2 && 'bg-primary/5 ring-1 ring-primary/40 ring-inset',
                         isFocus && 'ring-2 ring-primary ring-inset z-20',
                         hit && !selected && 'bg-amber-100 dark:bg-amber-500/20',
                         isNumericFormat(c.format) && 'justify-end tabular-nums',
                       )}
                       style={{ width: widths[ci], ...(c.frozen ? { left: frozenOffsets[ci] } : {}) }}
                     >
+                      {/* Fill handle — drag to copy down, translating
+                          formulas as it goes. */}
+                      {canEdit && !isEditing && selNorm && r === selNorm.r2 && ci === selNorm.c2 && (
+                        <span
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setFilling({ fromRow: selNorm.r1, toRow: selNorm.r2 });
+                          }}
+                          title="Drag down to fill"
+                          className="absolute -bottom-[3px] -right-[3px] h-[7px] w-[7px] bg-primary border border-card cursor-crosshair z-30"
+                        />
+                      )}
                       {isEditing ? (
                         <input
                           ref={editRef}
@@ -554,8 +733,11 @@ export function SheetGrid({
                           className="absolute inset-0 w-full h-full px-2 text-[12.5px] bg-card border-2 border-primary outline-none z-30"
                         />
                       ) : (
-                        <span className="truncate w-full" title={raw || undefined}>
-                          {formatCell(raw, c.format)}
+                        <span
+                          className={cn('truncate w-full', isFormula(raw) && 'text-foreground')}
+                          title={isFormula(raw) ? raw : (raw || undefined)}
+                        >
+                          {displayOf(raw, c.format)}
                         </span>
                       )}
                     </div>
@@ -566,6 +748,53 @@ export function SheetGrid({
           </div>
         </div>
       </div>
+
+      {/* ── Right-click menu ── */}
+      {menu && (
+        <div
+          className="fixed z-50 min-w-[190px] rounded-md border border-border bg-card shadow-lg py-1 text-[12.5px]"
+          style={{ left: menu.x, top: menu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {canEdit && (
+            <>
+              <MenuItem onClick={() => { void insertRowsAt(menu.row); setMenu(null); }}>Add a row</MenuItem>
+              <MenuItem
+                onClick={() => {
+                  const n = selNorm;
+                  const ids = n ? rows.slice(n.r1, n.r2 + 1).map((x) => x.id) : [rows[menu.row].id];
+                  onDeleteRows(ids);
+                  setMenu(null);
+                }}
+              >
+                Delete {selNorm && selNorm.r2 > selNorm.r1 ? `${selNorm.r2 - selNorm.r1 + 1} rows` : 'this row'}
+              </MenuItem>
+              <div className="my-1 border-t border-border" />
+            </>
+          )}
+          {canEditColumns && (
+            <>
+              <MenuItem onClick={() => { insertColumnAt(menu.col); setMenu(null); }}>Insert column left</MenuItem>
+              <MenuItem onClick={() => { insertColumnAt(menu.col + 1); setMenu(null); }}>Insert column right</MenuItem>
+              <MenuItem onClick={() => { deleteColumnAt(menu.col); setMenu(null); }}>Delete column</MenuItem>
+              <MenuItem
+                onClick={() => {
+                  onColumnsChange(colsRef.current.map((c, i) => (i === menu.col ? { ...c, frozen: !c.frozen } : c)));
+                  setMenu(null);
+                }}
+              >
+                {columns[menu.col]?.frozen ? 'Unfreeze column' : 'Freeze column'}
+              </MenuItem>
+              <div className="my-1 border-t border-border" />
+            </>
+          )}
+          <MenuItem onClick={() => { void copySelection(false); setMenu(null); }}>Copy</MenuItem>
+          {canEdit && <MenuItem onClick={() => { void copySelection(true); setMenu(null); }}>Cut</MenuItem>}
+          {canEdit && selNorm && selNorm.r2 > selNorm.r1 && (
+            <MenuItem onClick={() => { fillDown(selNorm.r1, selNorm.r2); setMenu(null); }}>Fill down</MenuItem>
+          )}
+        </div>
+      )}
 
       {/* ── Status bar ── */}
       <div className="flex items-center gap-4 px-2 py-1 text-[11px] text-muted-foreground border-x border-b border-border rounded-b-md bg-muted/20">
@@ -580,6 +809,18 @@ export function SheetGrid({
         </span>
       </div>
     </div>
+  );
+}
+
+function MenuItem({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors"
+    >
+      {children}
+    </button>
   );
 }
 

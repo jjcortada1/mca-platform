@@ -152,6 +152,12 @@ export const users = pgTable(
     role: userRoleEnum('role').notNull(),
     // Per-rep SMTP config when company.emailMode = 'per_rep'. Same shape as companies.smtpConfig.
     smtpConfig: jsonb('smtp_config'),
+    // ---- Demo mode (platform owner only) ----
+    // When demoMode is on, the tenant gate resolves to demoCompanyId
+    // instead of the real companyId. Real data is untouched — it is just
+    // not the company being viewed.
+    demoMode: boolean('demo_mode').notNull().default(false),
+    demoCompanyId: uuid('demo_company_id'),
     // Per-rep "always CC" — when this user sends a deal email, this address
     // is automatically added to CC on every outbound message. Used by reps
     // who want their manager copied on everything. Empty = no auto CC.

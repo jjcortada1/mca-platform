@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { pageRequireTenant, currentUser } from '@/lib/auth/context';
 import { AppShell } from '@/components/sidebar';
+import { DemoBanner } from '@/components/demo-banner';
+import { isDemoCompany } from '@/lib/demo/seed';
 import { getTenantBranding } from '@/lib/branding';
 import { FundingCelebration } from '@/components/funding-celebration';
 import { redirect } from 'next/navigation';
@@ -32,12 +34,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   const branding = await getTenantBranding(companyId);
+  /* pageRequireTenant already resolved demo mode, so this is just asking
+     whether the company we landed on IS the demo one — no extra request
+     from the client and no way for the banner to disagree with the data. */
+  const demo = await isDemoCompany(companyId);
   // Per-company brand COLOR injection removed by request — buttons and
   // accents are consistent monochrome from the design tokens. Logo + names
   // still come from the company's branding.
 
   return (
     <>
+      {demo && <DemoBanner />}
       <AppShell user={user} branding={branding}>
         {/* Global funding celebration overlay — listens for 'mca:funded-deal'
             custom events dispatched by any page that marks a deal funded. */}

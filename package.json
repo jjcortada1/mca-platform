@@ -15,7 +15,8 @@
     "db:migrate": "tsx src/lib/db/migrate.ts",
     "db:seed": "tsx src/lib/db/seed.ts",
     "db:studio": "drizzle-kit studio",
-    "test:court": "tsx scripts/court-tests.ts"
+    "test:court": "tsx scripts/court-tests.ts",
+    "test:formula": "tsx scripts/formula-tests.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.9.4",

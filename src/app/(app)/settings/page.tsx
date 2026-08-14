@@ -6,6 +6,7 @@ import {
   Button, Input, Textarea, Field, Label, Badge, PageHeader,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/toast';
+import { DemoToggle } from '@/components/demo-toggle';
 import {
   Palette, Mail, Send, FileText, DollarSign, Layers, ListChecks,
   Users as UsersIcon, GitBranch, Database, ShieldCheck, Menu as MenuIcon,
@@ -121,6 +122,10 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Settings" description="Manage your company, team, deals, and integrations." />
+
+      {/* Demo mode — renders nothing unless you're the platform owner (the
+          component checks, and the API enforces it independently). */}
+      <DemoToggle />
 
       {/* On desktop the settings NAV and the open settings PANEL scroll
           independently — a fixed-height split where each column has its own
