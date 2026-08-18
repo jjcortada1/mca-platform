@@ -84,6 +84,22 @@ console.log('UI stability invariants');
 {
   const ws = readFileSync(join(ROOT, 'src/app/(app)/worksheets/page.tsx'), 'utf8');
   check('worksheets refresh guarded by dirty/saving state', ws.includes('dirtyRowsRef.current.size > 0') && ws.includes('savingRef.current > 0'));
+
+  // 6 — the sheet is sized by measurement, not by a guessed viewport offset.
+  // A hard-coded `calc(100vh - N)` is wrong the moment the toolbar wraps or a
+  // panel opens: the page grows a scrollbar and the sheet becomes a short box
+  // inside a scrolling page, with the tab strip pushed under the fold.
+  check(
+    'worksheets grid height is measured, not a hard-coded viewport guess',
+    ws.includes('useFillHeight(gridBoxRef, tabsRef') && !/height:\s*'calc\(100vh/.test(ws),
+  );
+  // The measurement must stay scroll-invariant. Deriving it from the live
+  // viewport position makes the grid grow as you scroll, which creates more
+  // page to scroll — it never settles.
+  check(
+    'worksheets height measurement is scroll-invariant',
+    ws.includes('scrolled += n.scrollTop') && ws.includes('window.scrollY'),
+  );
 }
 
 if (failures) {

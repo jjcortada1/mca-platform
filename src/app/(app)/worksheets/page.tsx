@@ -69,6 +69,104 @@ interface ImportDraft {
   mode: 'append' | 'overwrite';
 }
 
+/** Never shrink the sheet below this, even on a very short window. */
+const MIN_GRID_H = 260;
+/** Gap between the grid and the sheet-tab strip (Tailwind space-y-4 = 16px). */
+const TABS_GAP = 16;
+
+/**
+ * Size the sheet so it fills the rest of the window, with the tab strip
+ * sitting just under it.
+ *
+ * This replaces a hard-coded `calc(100vh - 320px)`. That number was wrong
+ * the moment anything above the grid changed height — the toolbar wraps to
+ * two or three lines on a laptop, the import and columns panels push it
+ * down, and the mobile top bar and demo banner exist only sometimes. When
+ * the guess ran long the page grew a scrollbar and the sheet became a short
+ * box floating in a scrolling page, with the tab strip under the fold; when
+ * it ran short there was dead space below the tabs.
+ *
+ * WHICH ELEMENT SCROLLS: the app shell is `min-h-screen`, not `h-screen`,
+ * so <main> is never capped at the viewport — it grows to fit its content
+ * and its `overflow-auto` never engages. The DOCUMENT is the scroller.
+ * (Capping the shell would fix that globally but would also move every
+ * page's scrollbar and break the sidebar's `sticky top-0` and the demo
+ * banner, so this stays local to the sheet.)
+ *
+ * Measuring is scroll-INVARIANT on purpose. Deriving the height from the
+ * live `getBoundingClientRect().top` would make the grid grow as the page
+ * scrolls, which creates more page to scroll — it never settles. Adding the
+ * scroll offsets back converts that to a document coordinate, which does
+ * not move. Summing ancestor scrollTops as well means this stays correct if
+ * the shell is ever changed to cap <main> after all.
+ */
+function useFillHeight(
+  targetRef: React.RefObject<HTMLElement | null>,
+  reserveRef: React.RefObject<HTMLElement | null>,
+  active: boolean,
+): number | null {
+  const [height, setHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    let frame = 0;
+
+    const measure = () => {
+      const el = targetRef.current;
+      if (!el) return;
+
+      // Document-space top of the grid box.
+      let scrolled = window.scrollY;
+      for (let n: HTMLElement | null = el.parentElement; n; n = n.parentElement) {
+        scrolled += n.scrollTop || 0;
+      }
+      const top = el.getBoundingClientRect().top + scrolled;
+
+      // The tab strip lives below the grid and must stay on screen.
+      const reserve = reserveRef.current
+        ? reserveRef.current.getBoundingClientRect().height + TABS_GAP
+        : 0;
+
+      // The app's content column has responsive bottom padding (py-6 → py-9).
+      // Read it instead of hard-coding, so nothing sits under the fold.
+      let pad = 0;
+      const column = el.closest('main > div');
+      if (column instanceof HTMLElement) {
+        pad = parseFloat(getComputedStyle(column).paddingBottom) || 0;
+      }
+
+      const next = Math.max(MIN_GRID_H, Math.round(window.innerHeight - top - reserve - pad));
+      // Sizing the grid changes the page height, which re-fires the observer.
+      // Ignoring sub-pixel deltas is what lets that settle instead of looping.
+      setHeight((prev) => (prev !== null && Math.abs(prev - next) < 2 ? prev : next));
+    };
+
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+
+    measure();
+    window.addEventListener('resize', schedule);
+
+    // A wrapping toolbar or a newly opened panel moves the grid without ever
+    // firing a window resize, so watch the elements themselves too.
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null;
+    if (ro) {
+      if (targetRef.current?.parentElement) ro.observe(targetRef.current.parentElement);
+      if (reserveRef.current) ro.observe(reserveRef.current);
+    }
+
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('resize', schedule);
+      ro?.disconnect();
+    };
+  }, [targetRef, reserveRef, active]);
+
+  return height;
+}
+
 export default function WorksheetsPage() {
   const toast = useToast();
   const confirm = useConfirm();
@@ -78,6 +176,12 @@ export default function WorksheetsPage() {
 
   const [detail, setDetail] = useState<SheetDetail | null>(null);
   const [loadingSheet, setLoadingSheet] = useState(false);
+
+  /* The sheet fills the rest of the window, with the tab strip pinned just
+     below it — measured rather than guessed. See useFillHeight above. */
+  const gridBoxRef = useRef<HTMLDivElement | null>(null);
+  const tabsRef = useRef<HTMLDivElement | null>(null);
+  const gridHeight = useFillHeight(gridBoxRef, tabsRef, Boolean(detail) && !loadingSheet);
 
   // Panels
   const [showShare, setShowShare] = useState(false);
@@ -1129,8 +1233,14 @@ export default function WorksheetsPage() {
               </div>
 
               {/* Spreadsheet grid — fills the remaining viewport so the sheet
-                  itself is the interface rather than a card floating in a page. */}
-              <div className="flex flex-col min-h-0" style={{ height: 'calc(100vh - 320px)', minHeight: 380 }}>
+                  itself is the interface rather than a card floating in a page.
+                  Height comes from useFillHeight; the calc() below is only the
+                  first paint, before the measurement lands. */}
+              <div
+                ref={gridBoxRef}
+                className="flex flex-col min-h-0"
+                style={{ height: gridHeight ?? 'calc(100vh - 320px)', minHeight: MIN_GRID_H }}
+              >
                 <SheetGrid
                   columns={detail.columns as GridColumn[]}
                   rows={detail.rows}
@@ -1150,7 +1260,7 @@ export default function WorksheetsPage() {
 
           {/* Sheet tabs — drag your own tabs to reorder them (Sheet 2 before
               Sheet 1, etc.); the order saves automatically. */}
-          <div className="flex items-end gap-1 border-b border-border overflow-x-auto pb-px">
+          <div ref={tabsRef} className="flex items-end gap-1 border-b border-border overflow-x-auto pb-px">
             {ownSheets.map((s, i) => (
               <div
                 key={s.id}
