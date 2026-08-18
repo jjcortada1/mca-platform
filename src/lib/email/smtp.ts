@@ -11,6 +11,10 @@
 
 import nodemailer, { Transporter } from 'nodemailer';
 import { decrypt } from '@/lib/crypto';
+// Gmail API transport. Both send paths below branch onto it when the sender
+// has a connected mailbox; without this import those branches threw a
+// ReferenceError the moment anyone actually sent through Gmail.
+import { sendViaGmail } from '@/lib/email/google';
 
 export interface SmtpConfig {
   host: string;
@@ -490,7 +494,13 @@ export interface GmailTransport {
 }
 
 export async function sendDealEmailBatch(
-  base: Omit<SendDealEmailInput, 'toEmail'> & { smtp: SmtpConfig | null },
+  /*
+   * `smtp` must be Omit-ed before it is re-declared: intersecting
+   * `{ smtp: SmtpConfig }` with `{ smtp: SmtpConfig | null }` collapses back
+   * to the non-null type, so callers on the Gmail path (who legitimately
+   * have no SMTP config) were being rejected.
+   */
+  base: Omit<SendDealEmailInput, 'toEmail' | 'smtp'> & { smtp: SmtpConfig | null },
   recipients: BatchRecipient[],
   /**
    * Fired after each recipient finishes (success or failure) with the running

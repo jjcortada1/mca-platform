@@ -17,8 +17,15 @@
  * The generator is SEEDED (deterministic) so the same demo company always
  * looks the same — a demo that reshuffles itself between screen-shares is
  * disconcerting to present.
+ *
+ * EVERY value written here is checked against src/lib/db/schema.ts. That
+ * is not fussiness: a single bad enum member or missing NOT NULL column
+ * makes the whole insert throw, and the only symptom the operator sees is
+ * a toggle that does nothing.
  */
 
+import bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 import { db } from '@/lib/db/client';
 import {
   companies, users, funders, funderContacts, deals, submissions,
@@ -27,6 +34,16 @@ import {
 import { eq } from 'drizzle-orm';
 
 export const DEMO_COMPANY_NAME = 'Northwind Capital (Demo)';
+
+/** Slug is UNIQUE company-wide, so it has to be derived from the owner. */
+function demoSlug(userId: string): string {
+  return `demo-${userId.replace(/-/g, '').slice(0, 12)}`;
+}
+
+/** Demo logins are unreachable — the password is random and thrown away. */
+function unusablePasswordHash(): string {
+  return bcrypt.hashSync(randomBytes(24).toString('hex'), 10);
+}
 
 /* ───────────────────── deterministic randomness ───────────────────── */
 
@@ -53,13 +70,28 @@ const BUSINESS = [
 const STATES = ['FL', 'NY', 'TX', 'CA', 'NJ', 'GA', 'IL', 'PA', 'OH', 'NC'];
 const INDUSTRIES = ['transportation', 'restaurant', 'construction', 'retail', 'healthcare', 'auto', 'staffing', 'other'];
 
+const DEMO_REPS = [
+  'Alex Rendon', 'Jordan Feld', 'Camille Ortiz', 'Wes Trahan',
+];
+
 const DEMO_FUNDERS = [
   'Kestrel Advance', 'Meridian Funding Group', 'Blue Harbor Capital', 'Ironwood Advance',
   'Sable Ridge Funding', 'Vantage Point Capital', 'Copperline Advance', 'Northstar Business Capital',
   'Cascade Funding Partners', 'Ember Capital Group', 'Redwood Advance', 'Tidewater Capital',
 ];
 
-function pick<T>(r: () => number, arr: T[]): T {
+/**
+ * Pipeline statuses — every one of these is a real member of `deal_status`
+ * in schema.ts. Note there is NO 'approved': the modern equivalent is
+ * 'offer' (an offer is in hand) / 'waiting_on_offer'.
+ */
+const DEAL_STATUSES = ['submitted', 'waiting_on_offer', 'offer', 'active', 'funded', 'declined'] as const;
+type DemoDealStatus = (typeof DEAL_STATUSES)[number];
+
+/** The only members of `submission_funder_status`. */
+const SUB_FUNDER_STATUSES = ['no_response', 'declined'] as const;
+
+function pick<T>(r: () => number, arr: readonly T[]): T {
   return arr[Math.floor(r() * arr.length)];
 }
 function between(r: () => number, lo: number, hi: number): number {
@@ -91,15 +123,49 @@ export async function ensureDemoCompany(userId: string, existingId: string | nul
     }
   }
 
+  const slug = demoSlug(userId);
+
+  // A previous attempt can leave an orphaned demo company behind (the row
+  // lands, a later insert fails, nothing is recorded on the user). The slug
+  // is unique, so that orphan would block every retry forever. Clear it —
+  // guarded on the demo name so this can never touch a real company.
+  const [orphan] = await db.select().from(companies).where(eq(companies.slug, slug)).limit(1);
+  if (orphan) {
+    if (orphan.name !== DEMO_COMPANY_NAME || orphan.isPlatformOwner) {
+      throw new Error('A non-demo company already owns the demo slug; refusing to touch it.');
+    }
+    await db.delete(companies).where(eq(companies.id, orphan.id));
+  }
+
   const r = rng(20260813);
 
   const [company] = await db.insert(companies).values({
     name: DEMO_COMPANY_NAME,
+    slug,
     // Never the platform owner — the demo must not unlock master screens.
     isPlatformOwner: false,
+    emailMode: 'per_rep',
   }).returning();
 
   const counts: Record<string, number> = {};
+
+  /* ── Demo staff ──
+     The funded board, commissions and assignment pickers all join to
+     users, so a company with no users looks broken rather than empty.
+     These accounts cannot be signed into: the password is random bytes
+     that are hashed and immediately discarded. */
+  const staffRows = await db.insert(users).values(
+    DEMO_REPS.map((name, i) => ({
+      companyId: company.id,
+      email: `${name.toLowerCase().replace(/[^a-z]+/g, '.')}@northwind-demo.invalid`,
+      passwordHash: unusablePasswordHash(),
+      name,
+      role: (i === 0 ? 'company_admin' : 'rep') as 'company_admin' | 'rep',
+      twoFactorEnabled: false,
+      isActive: true,
+    })),
+  ).returning();
+  counts.users = staffRows.length;
 
   /* ── Funders ── */
   const funderRows = await db.insert(funders).values(
@@ -118,25 +184,27 @@ export async function ensureDemoCompany(userId: string, existingId: string | nul
   counts.funders = funderRows.length;
 
   await db.insert(funderContacts).values(
-    funderRows.slice(0, 8).map((f) => ({
+    funderRows.slice(0, 8).map((f, i) => ({
       funderId: f.id,
       name: `${pick(r, FIRST)} ${pick(r, LAST)}`,
       email: `rep@${f.name.toLowerCase().replace(/[^a-z]+/g, '')}.example.com`,
       phone: `555-01${between(r, 10, 99)}`,
+      isPrimary: true,
+      sortOrder: i,
     })),
   );
 
   /* ── Deals across every stage of the pipeline ── */
-  const statuses = ['shopping', 'submitted', 'approved', 'funded', 'declined'] as const;
-  const dealRows: { id: string; status: string; name: string; funded: number }[] = [];
+  const dealRows: { id: string; status: DemoDealStatus; name: string; funded: number; repId: string }[] = [];
 
   for (let i = 0; i < 22; i++) {
     const first = pick(r, FIRST);
     const last = pick(r, LAST);
     const biz = BUSINESS[i % BUSINESS.length];
-    const status = i < 6 ? 'funded' : pick(r, statuses);
+    const status: DemoDealStatus = i < 6 ? 'funded' : pick(r, DEAL_STATUSES);
     const funded = between(r, 15, 180) * 1000;
     const factor = 1.15 + Math.round(r() * 35) / 100;
+    const rep = staffRows[i % staffRows.length];
 
     const [d] = await db.insert(deals).values({
       companyId: company.id,
@@ -146,7 +214,8 @@ export async function ensureDemoCompany(userId: string, existingId: string | nul
       merchantEmail: `${first.toLowerCase()}@${biz.toLowerCase().replace(/[^a-z]+/g, '')}.example.com`,
       merchantPhone: `555-0${between(r, 100, 999)}`,
       offerNotes: `${pick(r, INDUSTRIES)} · ${between(r, 30, 400)}K monthly revenue · ${between(r, 0, 3)} positions`,
-      status: status as never,
+      assignedRepId: rep.id,
+      status,
       ...(status === 'funded'
         ? {
             fundedAmount: String(funded),
@@ -156,30 +225,36 @@ export async function ensureDemoCompany(userId: string, existingId: string | nul
             termMode: r() > 0.5 ? 'daily' : 'weekly',
             termCount: String(between(r, 60, 140)),
             fundingDate: daysAgo(between(r, 5, 200)),
+            amountCollected: String(Math.round(funded * factor * (r() * 0.6))),
+            fundedSubStatus: 'active',
           }
         : {}),
     }).returning();
-    dealRows.push({ id: d.id, status, name: d.name, funded });
+    dealRows.push({ id: d.id, status, name: d.name, funded, repId: rep.id });
   }
   counts.deals = dealRows.length;
 
-  /* ── Submissions on the non-funded pipeline ── */
+  /* ── Submissions on the shopping pipeline ──
+     `submissions.deal_id` is UNIQUE, so at most one per deal. */
   let submissionCount = 0;
-  for (const d of dealRows.filter((x) => x.status === 'submitted' || x.status === 'approved').slice(0, 8)) {
+  for (const d of dealRows.filter((x) => x.status === 'submitted' || x.status === 'offer' || x.status === 'waiting_on_offer').slice(0, 8)) {
     const [sub] = await db.insert(submissions).values({
       dealId: d.id,
       companyId: company.id,
     }).returning();
     const chosen = funderRows.slice(0, between(r, 3, 7));
     await db.insert(submissionFunders).values(
-      chosen.map((f, idx) => ({
-        submissionId: sub.id,
-        funderId: f.id,
-        status: (idx === 0 && d.status === 'approved' ? 'approved' : pick(r, ['no_response', 'declined', 'pending'])) as never,
-        notes: idx === 0 && d.status === 'approved'
-          ? `Approved ${between(r, 20, 120)}K @ ${(1.2 + r() * 0.3).toFixed(2)}`
-          : null,
-      })),
+      chosen.map((f, idx) => {
+        const approved = idx === 0 && d.status === 'offer';
+        return {
+          submissionId: sub.id,
+          funderId: f.id,
+          status: (approved ? 'approved' : pick(r, SUB_FUNDER_STATUSES)) as 'approved' | 'no_response' | 'declined',
+          notes: approved
+            ? `Approved ${between(r, 20, 120)}K @ ${(1.2 + r() * 0.3).toFixed(2)}`
+            : null,
+        };
+      }),
     );
     submissionCount++;
   }
@@ -194,6 +269,7 @@ export async function ensureDemoCompany(userId: string, existingId: string | nul
     await db.insert(dealCommissions).values({
       companyId: company.id,
       dealId: d.id,
+      repId: d.repId,
       fundedAmount: String(d.funded),
       rate: '1.3500',
       termMode: 'daily',
@@ -202,20 +278,24 @@ export async function ensureDemoCompany(userId: string, existingId: string | nul
       repSplitPct: String(repPct),
       repCommissionAmount: String(repAmt),
       paidAmount: String(r() > 0.5 ? repAmt : 0),
-      status: (r() > 0.4 ? 'cleared' : 'pending') as never,
+      status: r() > 0.4 ? 'cleared' : 'pending',
       fundingDate: daysAgo(between(r, 5, 180)),
     });
     await db.insert(fundedEntries).values({
       companyId: company.id,
+      repId: d.repId,
       dealInitials: d.name.split(' ').slice(0, 2).map((w) => w[0]).join(''),
       amountFunded: String(d.funded),
+      fundedWith: pick(r, DEMO_FUNDERS),
       fundedDate: daysAgo(between(r, 5, 180)),
       notes: 'Demo funded deal.',
     });
   }
   counts.commissions = fundedDeals.length;
 
-  /* ── Tasks + an info entry so those screens aren't empty ── */
+  /* ── Tasks + an info entry so those screens aren't empty ──
+     `tasks` has no isDone column — the lifecycle lives in `status`
+     ('open' | 'handling' | 'completed'). */
   await db.insert(tasks).values(
     ['Chase bank statements for Ironline Freight',
      'Follow up with Kestrel Advance on the Harborview file',
@@ -224,7 +304,10 @@ export async function ensureDemoCompany(userId: string, existingId: string | nul
      'Review stips for Bluewater HVAC'].map((title, i) => ({
       companyId: company.id,
       title,
-      isDone: i > 3,
+      assignedToUserId: staffRows[i % staffRows.length].id,
+      status: i > 3 ? 'completed' : 'open',
+      completedAt: i > 3 ? daysAgo(between(r, 1, 20)) : null,
+      dueDate: daysAgo(-between(r, 1, 14)),
     })),
   );
   counts.tasks = 5;

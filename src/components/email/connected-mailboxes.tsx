@@ -63,7 +63,7 @@ export function ConnectedMailboxes() {
   async function disconnect(m: Mailbox) {
     const ok = await confirm({
       title: `Disconnect ${m.emailAddress}?`,
-      body: 'Cortada will stop sending from this mailbox and will forget its access. Sending falls back to your SMTP settings. Nothing already sent is affected.',
+      description: 'Cortada will stop sending from this mailbox and will forget its access. Sending falls back to your SMTP settings. Nothing already sent is affected.',
       confirmLabel: 'Disconnect',
       destructive: true,
     });

@@ -73,7 +73,10 @@ console.log('UI stability invariants');
 // 4 — sidebar config fetched once for the whole shell.
 {
   const sidebar = readFileSync(join(ROOT, 'src/components/sidebar.tsx'), 'utf8');
-  const calls = (sidebar.match(/useSidebarConfig\(user\)/g) ?? []).length;
+  // Matches ANY argument list on purpose. The invariant is "one call site",
+  // not "one call site with this exact signature" — pinning the args made a
+  // benign new parameter look like a violated invariant.
+  const calls = (sidebar.match(/useSidebarConfig\(/g) ?? []).length - 1; // minus the declaration
   check('sidebar config + tasks poll runs exactly once (no duplicate requests)', calls === 1, `found ${calls} call sites`);
 }
 

@@ -198,7 +198,7 @@ export default function SettingsPage() {
             </Card>
           )}
           {tab === 'branding' && <BrandingSection />}
-          {tab === 'sidebar' && <SidebarOrderSection />}
+          {tab === 'sidebar' && <SidebarOrderSection isPlatformOwner={isPlatformOwner} />}
           {tab === 'celebration' && <CelebrationSection />}
           {tab === 'email' && <EmailModeSection />}
           {tab === 'smtp' && <SmtpSection />}
@@ -3019,7 +3019,13 @@ function CelebrationSection() {
   );
 }
 
-function SidebarOrderSection() {
+function SidebarOrderSection({ isPlatformOwner }: { isPlatformOwner: boolean }) {
+  /* Owner-only tools (e.g. the Offer Generator, which carries the platform
+     owner's own branding) are not offered to client tenants here. Hiding
+     them is cosmetic — the sidebar filter and the pages themselves already
+     block access — but a row a company admin can reorder and never see is
+     just confusing. */
+  const navItems = ALL_NAV_ITEMS.filter((i) => !i.ownerOnly || isPlatformOwner);
   const toast = useToast();
   const confirm = useConfirm();
   // Editable categories — initial state filled from the saved config or
@@ -3110,7 +3116,7 @@ function SidebarOrderSection() {
   // Set of hrefs already placed in some category. Used to figure out which
   // items are still available to add to a category.
   const placedHrefs = new Set(cats.flatMap((c) => c.items));
-  const unplaced = ALL_NAV_ITEMS.filter((i) => !placedHrefs.has(i.href));
+  const unplaced = navItems.filter((i) => !placedHrefs.has(i.href));
 
   // ---- Category-level edits ---------------------------------------------
   function addCategory() {
@@ -3229,7 +3235,7 @@ function SidebarOrderSection() {
   if (!loaded) return <div className="text-sm text-muted-foreground">Loading…</div>;
 
   // Lookup for icons / labels on each item by href.
-  const itemByHref = new Map(ALL_NAV_ITEMS.map((i) => [i.href, i]));
+  const itemByHref = new Map(navItems.map((i) => [i.href, i]));
 
   return (
     <div className="space-y-5 max-w-3xl">

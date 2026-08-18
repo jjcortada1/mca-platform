@@ -40,10 +40,11 @@ export async function GET() {
     const sql = getRawSql();
 
     // Discover every table with a company_id column.
-    const tables = (await sql`
+    const tableRows = (await sql`
       SELECT table_name FROM information_schema.columns
       WHERE table_schema = 'public' AND column_name = 'company_id'
-    `).map((r: { table_name: string }) => r.table_name).filter((t: string) => IDENT.test(t));
+    `) as unknown as { table_name: string }[];
+    const tables = tableRows.map((r) => r.table_name).filter((t) => IDENT.test(t));
 
     // bytes[companyId][table] and rows[companyId]
     const byCompany = new Map<string, { bytes: number; rows: number; tables: Record<string, number> }>();
@@ -79,8 +80,8 @@ export async function GET() {
     }
 
     // Company names + real database total.
-    const companies = await sql`SELECT id::text AS id, name FROM companies`;
-    const nameOf = new Map(companies.map((c: { id: string; name: string }) => [c.id, c.name]));
+    const companies = await sql`SELECT id::text AS id, name FROM companies` as unknown as { id: string; name: string }[];
+    const nameOf = new Map(companies.map((c) => [c.id, c.name]));
     const [{ total }] = await sql`SELECT pg_database_size(current_database())::bigint AS total`;
 
     let list = Array.from(byCompany.entries()).map(([cid, v]) => ({

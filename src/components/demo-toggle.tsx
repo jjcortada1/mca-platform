@@ -43,7 +43,11 @@ export function DemoToggle() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: next, reset }),
       });
-      if (!res.ok) { toast.error('Could not switch demo mode.'); return; }
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        toast.error(j?.detail ? `${j.error ?? 'Could not switch demo mode.'} ${j.detail}` : (j?.error ?? 'Could not switch demo mode.'));
+        return;
+      }
       toast.success(next ? 'Demo mode on — reloading with sample data.' : 'Demo mode off — back to your real company.');
       // A full reload is deliberate: every server component re-resolves the
       // company, so the whole app flips in one step instead of piecemeal.
@@ -83,7 +87,7 @@ export function DemoToggle() {
                 onClick={async () => {
                   const ok = await confirm({
                     title: 'Rebuild the demo data?',
-                    body: 'Deletes the current demo company and generates a fresh one. Your real data is not involved.',
+                    description: 'Deletes the current demo company and generates a fresh one. Your real data is not involved.',
                     confirmLabel: 'Rebuild',
                   });
                   if (ok) void set(true, true);

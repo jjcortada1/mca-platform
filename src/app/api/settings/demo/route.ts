@@ -55,8 +55,22 @@ export async function POST(req: Request) {
     }
 
     if (body.enabled) {
-      const seeded = await ensureDemoCompany(me.id, demoCompanyId);
-      demoCompanyId = seeded.companyId;
+      try {
+        const seeded = await ensureDemoCompany(me.id, demoCompanyId);
+        demoCompanyId = seeded.companyId;
+      } catch (seedErr) {
+        // Seeding writes to a dozen tables; when one insert is rejected the
+        // only symptom used to be a toggle that did nothing. The caller here
+        // has already cleared requireMasterAdmin (the platform owner, and
+        // nobody else), and the message describes the DEMO company only —
+        // never real data — so it is safe and genuinely useful to return it.
+        console.error('[demo seed]', seedErr);
+        const detail = seedErr instanceof Error ? seedErr.message : String(seedErr);
+        return NextResponse.json(
+          { error: 'Demo data could not be created.', detail: detail.slice(0, 300) },
+          { status: 500 },
+        );
+      }
     }
 
     await db.update(users)

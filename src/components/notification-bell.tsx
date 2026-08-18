@@ -14,13 +14,19 @@ interface NotificationRow {
 }
 
 /** Convert a base64url VAPID key to the Uint8Array PushManager expects. */
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
+/**
+ * VAPID key → the ArrayBuffer the Push API wants. Returns the buffer rather
+ * than the view: lib.dom types applicationServerKey as an ArrayBuffer-backed
+ * view, and a plain Uint8Array is only ArrayBufferLike.
+ */
+function urlBase64ToArrayBuffer(base64String: string): ArrayBuffer {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
   const rawData = atob(base64);
-  const output = new Uint8Array(rawData.length);
+  const buffer = new ArrayBuffer(rawData.length);
+  const output = new Uint8Array(buffer);
   for (let i = 0; i < rawData.length; i++) output[i] = rawData.charCodeAt(i);
-  return output;
+  return buffer;
 }
 
 function timeAgo(iso: string): string {
@@ -152,7 +158,7 @@ export function NotificationBell({ compact = false, align = 'right' }: { compact
       const existing = await reg.pushManager.getSubscription();
       const sub = existing ?? await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey),
+        applicationServerKey: urlBase64ToArrayBuffer(publicKey),
       });
       const raw = sub.toJSON();
       if (!raw.endpoint || !raw.keys?.p256dh || !raw.keys?.auth) return;

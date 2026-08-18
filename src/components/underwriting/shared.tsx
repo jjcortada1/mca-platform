@@ -149,9 +149,8 @@ export function ClassChip({ cls }: { cls: UwTransaction['cls'] }) {
       : cls === 'mca_payment' ? 'destructive'
         : cls === 'mca_funding' ? 'warning'
           : cls === 'collection' ? 'destructive'
-            : cls === 'bank_event' ? 'warning'
-              : cls === 'ignored' ? 'outline'
-                : 'default';
+            : cls === 'ignored' ? 'outline'
+              : 'default';
   return <Badge variant={variant as any}>{TXN_CLASS_LABEL[cls]}</Badge>;
 }
 
@@ -264,7 +263,8 @@ export function DrillDownPanel({ drill, onClose }: { drill: DrillDown | null; on
 export function Th({
   children, align = 'left', className = '', onClick,
 }: {
-  children: React.ReactNode;
+  // Optional: spacer columns (the select-all checkbox) render an empty <th>.
+  children?: React.ReactNode;
   align?: 'left' | 'right' | 'center';
   className?: string;
   onClick?: () => void;

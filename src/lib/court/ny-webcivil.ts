@@ -202,7 +202,8 @@ export function parseResults(html: string, matchedName: string): CourtCase[] {
     const rows = table.match(/<tr[\s\S]*?<\/tr>/gi) ?? [];
     if (rows.length < 2) continue;
 
-    const headerCells = (rows[0].match(/<t[hd][\s\S]*?<\/t[hd]>/gi) ?? []).map((c) => stripTags(c).toLowerCase());
+    const headerRow = rows[0] ?? '';
+    const headerCells = (headerRow.match(/<t[hd][\s\S]*?<\/t[hd]>/gi) ?? []).map((c) => stripTags(c).toLowerCase());
     const idx = (test: RegExp) => headerCells.findIndex((h) => test.test(h));
 
     const iIndex = idx(/index|case\s*(no|number|#)|docket/);

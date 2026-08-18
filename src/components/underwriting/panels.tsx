@@ -263,7 +263,7 @@ export function OverviewPanel({ file, onDrill, onOverride, onResetOverride, onPo
               { label: 'Overdraft fees', value: String(file.overdraftCount) },
             ],
             explanation: 'Counted once per event per day — a returned item and its fee on the same day is one bounce, not two.',
-            transactions: file.transactions.filter((t) => t.cls === 'bank_event'),
+            transactions: file.transactions.filter((t) => t.bankEventKind !== null),
           })}
         />
       </div>
@@ -709,7 +709,7 @@ export function RevenueReviewPanel({ file, onDrill, onOverride, onResetOverride 
                   <Button
                     variant="outline"
                     className="h-7 px-2 text-[11.5px]"
-                    onClick={() => onOverride(s.keys, s.isTrueRevenue ? 'non_revenue' : 'revenue')}
+                    onClick={() => onOverride(s.keys, s.isTrueRevenue ? 'other' : 'revenue')}
                   >
                     {s.isTrueRevenue ? 'Exclude all' : 'Include all'}
                   </Button>
@@ -798,7 +798,7 @@ function PositionRow({
   p: UwPosition;
   file: UnderwritingFile;
   onDrill: (d: DrillDown) => void;
-  onDecision: (id: string, confirmed: boolean | null) => void;
+  onDecision: (id: string, status: ReviewStatus | null) => void;
   historical?: boolean;
 }) {
   const statusTone: Tone =
@@ -815,8 +815,8 @@ function PositionRow({
             <ConfidenceChip level={p.confidenceLevel} />
             {!p.identified && <Badge variant="outline">Unrecognized name</Badge>}
             {p.paymentChanged && <Badge variant="warning">Payment changed</Badge>}
-            {p.userConfirmed === true && <Badge variant="success">Confirmed</Badge>}
-            {p.userConfirmed === false && <Badge variant="outline">Rejected</Badge>}
+            {p.review === 'confirmed' && <Badge variant="success">Confirmed MCA</Badge>}
+            {p.review === 'rejected' && <Badge variant="outline">Not an MCA</Badge>}
           </div>
           {p.presentThroughout && !historical && (
             <div className="mt-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-rose-600 dark:text-rose-400">
@@ -851,17 +851,7 @@ function PositionRow({
           >
             {p.paymentCount} payments
           </Button>
-          {p.userConfirmed !== true && (
-            <Button variant="outline" className="h-7 px-2 text-[11.5px]" onClick={() => onDecision(p.id, true)}>Confirm</Button>
-          )}
-          {p.userConfirmed !== false && (
-            <Button variant="outline" className="h-7 px-2 text-[11.5px]" onClick={() => onDecision(p.id, false)}>Reject</Button>
-          )}
-          {p.userConfirmed !== null && (
-            <Button variant="outline" className="h-7 px-2 text-[11.5px]" onClick={() => onDecision(p.id, null)} title="Clear decision">
-              <RotateCcw className="h-3 w-3" />
-            </Button>
-          )}
+          <ReviewControls p={p} onDecision={onDecision} />
         </div>
       </div>
 

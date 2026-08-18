@@ -8,7 +8,7 @@ import {
   Settings, LogOut, Building2, DollarSign, Menu, X, UserCircle, ClipboardList,
   Handshake, Gift, FileSignature, Table2, ChevronDown,
   PanelLeftOpen, PanelLeftClose, Trophy, Banknote, ReceiptText, Layers, BarChart3,
-  ShieldCheck, Gavel,
+  ShieldCheck, Gavel, BadgeCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NotificationBell } from '@/components/notification-bell';
@@ -22,6 +22,11 @@ interface NavItem {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   perm: string;
+  /**
+   * Platform-owner-only feature. Hidden for every client tenant, and the
+   * page itself re-checks server-side — this flag only controls the nav.
+   */
+  ownerOnly?: boolean;
 }
 
 /**
@@ -77,6 +82,10 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   // contracts from a funder. Lives under the same "General / Resources"
   // bucket as Calculator + Info. No persistence; pure formatter UI.
   { href: '/doc-request',  label: 'Doc Request',    icon: FileText,    perm: 'calculator.use' },
+  // Offer Generator — builds the branded "you're approved" email sent to a
+  // merchant. Cortada's own artwork and closing copy are baked into the
+  // output, so it is platform-owner only (see ownerOnly + the page gate).
+  { href: '/offer-generator', label: 'Offer Generator', icon: BadgeCheck, perm: 'calculator.use', ownerOnly: true },
   // Bonuses — which funders are running bonuses, the window, and conditions.
   { href: '/bonuses',      label: 'Bonuses',        icon: Gift,        perm: 'deals.view' },
   // Worksheets — personal Google-Sheets-style tracking, separate from all
@@ -104,7 +113,7 @@ export const DEFAULT_CATEGORIES: { id: string; label: string; items: string[] }[
   },
   {
     id: 'resources', label: 'Resources',
-    items: ['/funders', '/funder-analytics', '/bonuses', '/calculator', '/reverse-consolidation', '/doc-request', '/info', '/tasks'],
+    items: ['/funders', '/funder-analytics', '/bonuses', '/calculator', '/reverse-consolidation', '/doc-request', '/offer-generator', '/info', '/tasks'],
   },
 ];
 
@@ -196,17 +205,25 @@ function resolveCategories(
 export function AppShell({
   user,
   branding,
+  platformOwner = false,
   children,
 }: {
   user: SessionUser;
   branding: Branding;
+  /**
+   * Whether the signed-in user's REAL company is the platform owner.
+   * Resolved on the server (the layout) rather than fetched, so it does
+   * not flip when demo mode points the tenant gate at the demo company —
+   * an owner-only tool should not disappear mid-presentation.
+   */
+  platformOwner?: boolean;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   // ONE config fetch + ONE tasks poll for the whole shell — shared by the
   // desktop rail/wide sidebar and the mobile drawer.
-  const sidebarConfig = useSidebarConfig(user);
+  const sidebarConfig = useSidebarConfig(user, platformOwner);
 
   // Auto-close drawer when route changes
   useEffect(() => { setOpen(false); }, [pathname]);
@@ -325,7 +342,7 @@ export interface SidebarConfig {
   isAdmin: boolean;
 }
 
-function useSidebarConfig(user: SessionUser): SidebarConfig {
+function useSidebarConfig(user: SessionUser, platformOwner: boolean): SidebarConfig {
   const isAdmin = user.role === 'company_admin' || user.role === 'master_admin';
 
   // Open tasks assigned to me — drives the red badge on the Tasks item.
@@ -398,7 +415,11 @@ function useSidebarConfig(user: SessionUser): SidebarConfig {
     // EXCEPTIONS: /worksheets is personal + cross-company (never hidden by
     // company gates); /syndication is a company-wide board by design — the
     // APIs allow every non-lead-source user, so the tab must too.
+    // Owner-only items are additionally gated on the platform-owner flag —
+    // checked FIRST so a client tenant can never reach them by any of the
+    // permission/enable paths below.
     (item) =>
+      (!item.ownerOnly || platformOwner) &&
       (isAdmin || user.permissions.includes(item.perm) || item.href === '/syndication') &&
       (item.href === '/worksheets' || enabledNavItems === null || enabledNavItems.includes(item.href)) &&
       (item.href === '/worksheets' || !hiddenNavItems || !hiddenNavItems.includes(item.href)),

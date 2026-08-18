@@ -114,8 +114,14 @@ export async function requireMasterAdmin(): Promise<SessionUser> {
   throw new ForbiddenError('Platform owner only');
 }
 
-/** Is this company the platform owner? Small helper shared by API + page gates. */
-async function isPlatformOwnerCompany(companyId: string): Promise<boolean> {
+/**
+ * Is this company the platform owner? Small helper shared by API + page gates.
+ *
+ * Exported so owner-only FEATURE pages (not just the master surface) can
+ * apply the same test. Pass the user's real `companyId` — never a
+ * demo-resolved one — when the gate should be independent of demo mode.
+ */
+export async function isPlatformOwnerCompany(companyId: string): Promise<boolean> {
   try {
     const { db } = await import('@/lib/db/client');
     const { companies } = await import('@/lib/db/schema');

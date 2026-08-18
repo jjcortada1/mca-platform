@@ -16,7 +16,10 @@
     "db:seed": "tsx src/lib/db/seed.ts",
     "db:studio": "drizzle-kit studio",
     "test:court": "tsx scripts/court-tests.ts",
-    "test:formula": "tsx scripts/formula-tests.ts"
+    "test:formula": "tsx scripts/formula-tests.ts",
+    "test:offers": "tsx scripts/offer-tests.ts",
+    "typecheck": "tsc --noEmit",
+    "test:all": "npm run typecheck && npm run test:stability && npm run test:underwriting && npm run test:court && npm run test:formula && npm run test:offers"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.9.4",

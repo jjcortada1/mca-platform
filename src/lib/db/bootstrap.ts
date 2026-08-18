@@ -339,36 +339,6 @@ const STATEMENTS: string[] = [
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS funded_approvals_company_idx ON funded_approvals (company_id, status)`,
-];
-
-/**
- * DATA-SAFETY GUARD.
- *
- * Every bootstrap statement MUST be additive (ADD COLUMN / CREATE TABLE /
- * CREATE INDEX / SET DEFAULT / a guarded flag UPDATE) and never destroy data.
- * This guard scans the statement list at boot and refuses to run anything
- * that looks destructive — DROP TABLE, DROP COLUMN, TRUNCATE, DELETE, etc.
- * If one ever slips in (e.g. a future edit), it's skipped and loudly logged
- * instead of silently wiping data. Preserving existing users/deals/funders/
- * commissions/submissions/settings takes priority over any schema change.
- */
-const DESTRUCTIVE = /\b(drop\s+table|drop\s+column|drop\s+database|drop\s+schema|truncate|delete\s+from)\b/i;
-function isDestructive(stmt: string): boolean {
-  return DESTRUCTIVE.test(stmt);
-}
-
-/**
- * One-time backfills — each runs exactly once, tracked in app_flags.
- * Unlike STATEMENTS these change DATA, so re-running them would stomp on
- * choices users made since (e.g. someone who turned 2FA back off).
- */
-const ONE_TIME_BACKFILLS: { flag: string; sql: string }[] = [
-  {
-    // Enable email-code 2FA for every existing account (2026-07 policy).
-    // Users can still turn it off per-account afterwards; this only runs once.
-    flag: 'two_factor_enable_all_v1',
-    sql: `UPDATE users SET two_factor_enabled = true`,
-  },
 
   // ---- connected email accounts (Gmail OAuth) ----
   // Additive: SMTP config on companies/users is untouched and stays the
@@ -424,6 +394,36 @@ const ONE_TIME_BACKFILLS: { flag: string; sql: string }[] = [
 ];
 
 /**
+ * DATA-SAFETY GUARD.
+ *
+ * Every bootstrap statement MUST be additive (ADD COLUMN / CREATE TABLE /
+ * CREATE INDEX / SET DEFAULT / a guarded flag UPDATE) and never destroy data.
+ * This guard scans the statement list at boot and refuses to run anything
+ * that looks destructive — DROP TABLE, DROP COLUMN, TRUNCATE, DELETE, etc.
+ * If one ever slips in (e.g. a future edit), it's skipped and loudly logged
+ * instead of silently wiping data. Preserving existing users/deals/funders/
+ * commissions/submissions/settings takes priority over any schema change.
+ */
+const DESTRUCTIVE = /\b(drop\s+table|drop\s+column|drop\s+database|drop\s+schema|truncate|delete\s+from)\b/i;
+function isDestructive(stmt: string): boolean {
+  return DESTRUCTIVE.test(stmt);
+}
+
+/**
+ * One-time backfills — each runs exactly once, tracked in app_flags.
+ * Unlike STATEMENTS these change DATA, so re-running them would stomp on
+ * choices users made since (e.g. someone who turned 2FA back off).
+ */
+const ONE_TIME_BACKFILLS: { flag: string; sql: string }[] = [
+  {
+    // Enable email-code 2FA for every existing account (2026-07 policy).
+    // Users can still turn it off per-account afterwards; this only runs once.
+    flag: 'two_factor_enable_all_v1',
+    sql: `UPDATE users SET two_factor_enabled = true`,
+  },
+];
+
+/**
  * Run all bootstrap statements once per process. Failures on individual
  * statements are logged and skipped — a partially-migrated schema is
  * strictly better than a server that refuses to boot, and the statement
@@ -451,6 +451,22 @@ export function ensureSchema(): Promise<void> {
       }
     }
     for (const b of ONE_TIME_BACKFILLS) {
+      /*
+       * Shape guard. A bare SQL string appended to this array instead of
+       * STATEMENTS looks completely normal in review, type-checks only if
+       * you happen to run tsc (the Next build has ignoreBuildErrors on),
+       * and then fails at `key = undefined` inside the try below — where
+       * it is logged as a backfill failure and skipped forever. Three
+       * migrations were lost that way. Say so loudly instead.
+       */
+      if (typeof b !== 'object' || b === null || typeof b.flag !== 'string' || typeof b.sql !== 'string') {
+        console.error(
+          '[db-bootstrap] MALFORMED backfill entry — expected { flag, sql }. ' +
+          'A plain DDL string belongs in STATEMENTS, not ONE_TIME_BACKFILLS:',
+          String(b).slice(0, 120).replace(/\s+/g, ' '),
+        );
+        continue;
+      }
       try {
         const rows = await sql`SELECT 1 FROM app_flags WHERE key = ${b.flag} LIMIT 1`;
         if (rows.length === 0) {
