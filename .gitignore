@@ -9,3 +9,6 @@ node_modules
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Replit upload scratch — snapshots and pasted files, never part of the source
+attached_assets/

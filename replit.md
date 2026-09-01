@@ -16,7 +16,7 @@ Deal-shopping and submission tool for MCA (Merchant Cash Advance) companies — 
 **Auto-generated on first boot:** `ENCRYPTION_KEY`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL` (written to `.env.local`)  
 **Optional:** `SYSTEM_SMTP_*` for password-reset emails
 
-**Login:** `jj@cortadacapitalgroup.com` / `Flinjcorta1`
+**Login:** seeded from `MASTER_ADMIN_EMAIL` / `MASTER_ADMIN_PASSWORD` (never committed — see `.env.example`)
 
 ## Stack
 

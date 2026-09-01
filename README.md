@@ -6,11 +6,12 @@ Single-tenant deal-shopping and submission tool for Cortada Capital Group.
 
 ## Login
 
-| Email | Password |
-|---|---|
-| `jj@cortadacapitalgroup.com` | `Flinjcorta1` |
+Credentials are set at seed time from the `MASTER_ADMIN_EMAIL` and
+`MASTER_ADMIN_PASSWORD` environment variables (see `.env.example`), and are
+never committed to this repository. Ask the platform owner for access, or set
+those variables yourself before running `npm run db:seed`.
 
-This single login has full control. Lands at `/dashboard` after first boot.
+That account has full control. It lands at `/dashboard` after first boot.
 
 ---
 
