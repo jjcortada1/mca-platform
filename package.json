@@ -19,7 +19,8 @@
     "test:formula": "tsx scripts/formula-tests.ts",
     "test:offers": "tsx scripts/offer-tests.ts",
     "typecheck": "tsc --noEmit",
-    "test:all": "npm run typecheck && npm run test:stability && npm run test:underwriting && npm run test:court && npm run test:formula && npm run test:offers"
+    "test:all": "npm run typecheck && npm run test:stability && npm run test:underwriting && npm run test:court && npm run test:formula && npm run test:offers",
+    "sanitize": "tsx scripts/sanitize-clone.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.9.4",
